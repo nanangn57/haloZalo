@@ -2,7 +2,7 @@
 
 Chốt cho tuần 1, phục vụ [#2](https://github.com/nanangn57/haloZalo/issues/2). Hợp đồng gọi được nằm ở [openapi.yaml](openapi.yaml). Sự kiện nằm ở [events.md](events.md).
 
-Người giữ hợp đồng: P1 (Ngọc Anh). Service không đọc bảng của service khác. Muốn dữ liệu của nhau thì gọi HTTP hoặc nhận event.
+Người giữ hợp đồng: P1 (Ngọc Anh). Service không đọc bảng của service khác. Muốn dữ liệu của nhau thì gọi HTTP hoặc nhận event. Thư mục mỗi người sửa nằm ở [README](../../README.md).
 
 ## Bounded context
 
@@ -17,6 +17,7 @@ API gateway là cửa public duy nhất. Client không gọi thẳng vào từng
 
 ## Đã chốt
 
+- **Kiến trúc:** service-based. Bốn service thô, mỗi service một store, nối bằng HTTP hoặc event, một gateway. Monolith bị loại vì bốn người sẽ đụng cùng schema. Microservice cắt nhỏ bị loại vì một lệnh deploy mỗi tuần không kham thêm media, realtime và nhóm tách riêng. Lý do nằm ở hạng 1 và hạng 2 trong [requirement.md](../requirement.md): lên cloud được, và không dùng chung bảng.
 - **Realtime:** WebSocket. Ghi DB xong mới phát tin. Mục tiêu text: p95 từ lúc gửi đến lúc hiện dưới 500ms.
 - **Chống trùng:** at-least-once cộng `clientMsgId`. Cùng người gửi, cùng `clientMsgId` thì trả lại đúng tin đã ghi, không tạo `seq` mới.
 - **Thứ tự:** server gán `seq` từng hội thoại, bắt đầu từ 1, không để client tự đánh.
