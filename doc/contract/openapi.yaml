@@ -1,0 +1,356 @@
+openapi: 3.0.3
+info:
+  title: haloZalo API
+  version: 0.1.0
+  description: |
+    Hợp đồng bản v1 cho Identity, Messaging và client-core.
+    Quyết định nằm ở doc/contract/decisions.md.
+    Bản này có đăng ký, đăng nhập, kiểm tra token, và gửi một tin TEXT hoặc EMOTION.
+servers:
+  - url: https://api.example.com
+    description: URL cloud của tuần hiện tại. P4 thay khi có URL thật.
+tags:
+  - name: Auth
+  - name: Messages
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Đăng ký tài khoản
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Đã tạo tài khoản và cấp token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "409":
+          description: Username hoặc email đã tồn tại.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: CONFLICT
+                  message: Username or email already exists
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Đăng nhập và cấp token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Đăng nhập thành công.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          description: Sai username, email, hoặc password.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: UNAUTHENTICATED
+                  message: Invalid login or password
+  /me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Kiểm tra token và trả user hiện tại
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token hợp lệ.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /conversations/{conversationId}/messages:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Gửi một tin TEXT hoặc EMOTION
+      description: |
+        Ghi tin trước khi phát event `messaging.message.created`.
+        Cùng sender và cùng clientMsgId trả lại tin cũ, không tăng seq.
+        Bản v1 chưa có API tạo hội thoại. conversationId là UUID do client sinh.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "201":
+          description: Tin mới đã ghi.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "200":
+          description: clientMsgId đã tồn tại. Trả tin đã ghi, seq không đổi.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /ws:
+    get:
+      tags: [Messages]
+      operationId: connectRealtime
+      summary: Mở WebSocket nhận tin mới
+      description: |
+        Nâng cấp lên WebSocket. Token truyền query `access_token` vì trình duyệt không gắn header Authorization cho WebSocket.
+        Thiếu hoặc sai token thì đóng kết nối, không nâng cấp.
+        Mỗi frame là envelope trong doc/contract/events.md. Bản v1 chỉ đẩy `messaging.message.created`.
+      parameters:
+        - name: access_token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Đã nâng cấp sang WebSocket.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthenticated:
+      description: Thiếu token, token hết hạn, hoặc chữ ký không hợp lệ.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: Missing or invalid access token
+    ValidationError:
+      description: Body không đúng hợp đồng.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Text body exceeds 4096 bytes
+  schemas:
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[a-zA-Z0-9_]+$"
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: Username hoặc email.
+          minLength: 3
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          description: Số giây đến khi access token hết hạn.
+          example: 3600
+        user:
+          $ref: "#/components/schemas/User"
+    User:
+      type: object
+      additionalProperties: false
+      required: [userId, username, email]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+    SendMessageRequest:
+      oneOf:
+        - $ref: "#/components/schemas/SendTextRequest"
+        - $ref: "#/components/schemas/SendEmotionRequest"
+      discriminator:
+        propertyName: type
+        mapping:
+          TEXT: "#/components/schemas/SendTextRequest"
+          EMOTION: "#/components/schemas/SendEmotionRequest"
+    SendTextRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId]
+      properties:
+        type:
+          type: string
+          enum: [TEXT]
+        body:
+          type: string
+          minLength: 1
+          description: Server từ chối khi UTF-8 dài hơn 4096 byte.
+        clientMsgId:
+          type: string
+          format: uuid
+    SendEmotionRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId]
+      properties:
+        type:
+          type: string
+          enum: [EMOTION]
+        body:
+          type: string
+          description: Mã icon trong bộ đã chốt.
+          enum: [like, love, haha, wow, sad, angry]
+        clientMsgId:
+          type: string
+          format: uuid
+    Message:
+      oneOf:
+        - $ref: "#/components/schemas/TextMessage"
+        - $ref: "#/components/schemas/EmotionMessage"
+      discriminator:
+        propertyName: type
+        mapping:
+          TEXT: "#/components/schemas/TextMessage"
+          EMOTION: "#/components/schemas/EmotionMessage"
+    TextMessage:
+      allOf:
+        - $ref: "#/components/schemas/MessageBase"
+        - type: object
+          required: [type, body]
+          properties:
+            type:
+              type: string
+              enum: [TEXT]
+            body:
+              type: string
+    EmotionMessage:
+      allOf:
+        - $ref: "#/components/schemas/MessageBase"
+        - type: object
+          required: [type, body]
+          properties:
+            type:
+              type: string
+              enum: [EMOTION]
+            body:
+              type: string
+              enum: [like, love, haha, wow, sad, angry]
+    MessageBase:
+      type: object
+      required: [messageId, conversationId, seq, senderId, clientMsgId, createdAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        conversationId:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          minimum: 1
+        senderId:
+          type: string
+          format: uuid
+        clientMsgId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHENTICATED, CONFLICT]
+            message:
+              type: string
