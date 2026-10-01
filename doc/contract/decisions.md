@@ -23,7 +23,11 @@ API gateway là cửa public duy nhất. Client không gọi thẳng vào từng
 - **Thứ tự:** server gán `seq` từng hội thoại, bắt đầu từ 1, không để client tự đánh.
 - **Đã đọc:** server giữ mốc đã đọc theo user và hội thoại. Đọc ở một thiết bị thì thiết bị kia hết unread.
 - **Emotion hạng 1:** một tin riêng, `type = EMOTION`, `body` là mã icon. Bộ mã: `like`, `love`, `haha`, `wow`, `sad`, `angry`.
-- **Auth:** Identity là nơi duy nhất ký token. Access token JWT HS256, hết hạn sau 3600 giây. Gateway tự kiểm chữ ký, không đọc bảng user.
+- **Auth:** Access token là session id opaque, không phải JWT, không chứa `userId`. Hết hạn sau 3 ngày (259200 giây) kể từ lúc cấp, không gia hạn khi còn dùng. Identity giữ bảng session trong MySQL của mình. Gateway không đọc bảng đó. Bản này chưa có API đăng xuất.
+
+Mỗi lần đăng ký hoặc đăng nhập, Identity thêm một dòng (`sessionId`, `userId`, `expiresAt`) và trả `sessionId` trong `accessToken`. Dòng cũ giữ đến khi hết hạn, để web và mobile cùng đăng nhập.
+
+Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, thì gateway gọi `GET /internal/sessions/current` sang Identity và chuyển nguyên header Bearer. Identity trả `{ "userId": "<uuid>" }` khi còn dòng và còn hạn. Thiếu session, không có dòng, hoặc hết hạn thì gateway trả 401 và dừng. Hợp lệ thì gateway chuyển request đi, gắn `userId` cho service phía sau. API nội bộ này không có trong OpenAPI public.
 - **Release:** AWS. Mỗi tuần một URL public. Deploy bằng một lệnh từ repo. P4 giữ lệnh đó.
 
 ## Bản này cố ý chưa có

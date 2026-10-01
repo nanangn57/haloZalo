@@ -1,0 +1,12 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/identity
+    username: identity
+    password: identity
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql

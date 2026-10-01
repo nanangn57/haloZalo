@@ -25,12 +25,12 @@ Phạm vi đầy đủ nằm ở [doc/requirement.md](doc/requirement.md).
 | Thành phần | Vai trò | Lưu trữ |
 |---|---|---|
 | gateway | Cửa public duy nhất | — |
-| identity | Tài khoản, token, nhóm, thành viên | MySQL |
+| identity | Tài khoản, session, nhóm, thành viên | MySQL |
 | analytics | Ghi event, đọc bảng tổng hợp | MySQL |
 | messaging | Hội thoại, tin, `seq`, file, fan-out | Mongo, Redis |
 | client | Web và mobile dùng chung `clients/core` | Cache trên thiết bị |
 
-Identity là nơi duy nhất ký token. Gateway tự kiểm chữ ký JWT. Tin được ghi xong rồi mới phát ra WebSocket.
+Identity cấp session id và giữ bảng session. Gateway hỏi Identity bằng HTTP, không tự lưu session. Tin được ghi xong rồi mới phát ra WebSocket.
 
 Quyết định đã chốt: [doc/contract/decisions.md](doc/contract/decisions.md).
 Hợp đồng HTTP: [doc/contract/openapi.yaml](doc/contract/openapi.yaml).
