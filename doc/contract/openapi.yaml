@@ -131,8 +131,8 @@ paths:
       operationId: connectRealtime
       summary: Mở WebSocket nhận tin mới
       description: |
-        Nâng cấp lên WebSocket. Token truyền query `access_token` vì trình duyệt không gắn header Authorization cho WebSocket.
-        Thiếu hoặc sai token thì đóng kết nối, không nâng cấp.
+        Nâng cấp lên WebSocket. Session id truyền query `access_token` vì trình duyệt không gắn header Authorization cho WebSocket.
+        Thiếu session, session không tồn tại, hoặc session hết hạn thì đóng kết nối, không nâng cấp.
         Mỗi frame là envelope trong doc/contract/events.md. Bản v1 chỉ đẩy `messaging.message.created`.
       parameters:
         - name: access_token
@@ -150,7 +150,8 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT
+      bearerFormat: opaque
+      description: Session id do Identity cấp trong accessToken. Không phải JWT.
   parameters:
     ConversationId:
       name: conversationId
@@ -161,7 +162,7 @@ components:
         format: uuid
   responses:
     Unauthenticated:
-      description: Thiếu token, token hết hạn, hoặc chữ ký không hợp lệ.
+      description: Thiếu session, session không tồn tại, hoặc session hết hạn.
       content:
         application/json:
           schema:
@@ -222,13 +223,14 @@ components:
       properties:
         accessToken:
           type: string
+          description: Session id opaque do Identity cấp. Client gửi lại nguyên chuỗi. Không phải JWT.
         tokenType:
           type: string
           enum: [Bearer]
         expiresIn:
           type: integer
-          description: Số giây đến khi access token hết hạn.
-          example: 3600
+          description: Số giây đến khi access token hết hạn. Bản này là 3 ngày.
+          example: 259200
         user:
           $ref: "#/components/schemas/User"
     User:

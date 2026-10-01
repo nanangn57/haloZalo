@@ -18,11 +18,11 @@ flowchart TB
   web --> core
   mobile --> core
 
-  gw["Gateway · P1<br/>cửa public duy nhất, tự kiểm JWT"]
+  gw["Gateway · P1<br/>cửa public duy nhất, hỏi Identity về session"]
   core -->|"HTTP"| gw
   core -->|"WebSocket /ws"| gw
 
-  id["Identity · P1<br/>MySQL: tài khoản, nhóm, thành viên"]
+  id["Identity · P1<br/>MySQL: tài khoản, session, nhóm, thành viên"]
   msg["Messaging · P2<br/>Mongo: tin và seq · Redis: kết nối realtime"]
   an["Analytics · P1<br/>MySQL: bảng tổng hợp"]
 
@@ -49,8 +49,8 @@ Nét liền là đường đã chốt. Nét đứt là chỗ P1 và P2 còn ph�
 
 | Thành phần | Giữ gì | Nói chuyện với ai |
 |---|---|---|
-| gateway | Không giữ bảng user | Kiểm JWT, chuyển HTTP và WebSocket |
-| identity | Tài khoản, token, nhóm, thành viên. MySQL | Ký token. Phát event khi login, tạo nhóm |
+| gateway | Không giữ session | Hỏi Identity session còn hạn không, rồi chuyển HTTP và WebSocket |
+| identity | Tài khoản, session, nhóm, thành viên. MySQL | Cấp session id. Phát event khi login, tạo nhóm |
 | messaging | Hội thoại, tin, `seq`, file, kết nối realtime. Mongo và Redis | Ghi tin xong mới phát `messaging.message.created` |
 | analytics | Bảng tổng hợp. MySQL | Chỉ đọc event. Không quét bảng message |
 | client-core | Token, outbox, cache, socket, catch-up | Web và mobile dùng chung một thư viện |
@@ -58,7 +58,7 @@ Nét liền là đường đã chốt. Nét đứt là chỗ P1 và P2 còn ph�
 Một tin text đi như sau:
 
 1. Client sinh `clientMsgId`, gửi `POST /conversations/{conversationId}/messages` tới gateway, kèm access token.
-2. Gateway kiểm chữ ký. Sai hoặc thiếu token thì dừng tại gateway.
+2. Gateway gửi session id sang Identity. Không có dòng hoặc hết hạn thì dừng tại gateway. Còn hạn thì chuyển tiếp kèm `userId`.
 3. Messaging ghi Mongo, gán `seq`. Cùng người gửi và cùng `clientMsgId` thì trả tin cũ, không tăng `seq`.
 4. Ghi xong mới phát phong bì `messaging.message.created`. WebSocket đẩy nguyên phong bì đó tới client đang mở. Analytics nhận cùng event để cộng bảng tổng hợp.
 
