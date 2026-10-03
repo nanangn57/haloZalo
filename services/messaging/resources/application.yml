@@ -1,7 +1,26 @@
 server:
   port: 8082
+  # Finish in-flight HTTP writes before stopping; open sockets are closed with 1001 so clients reconnect elsewhere.
+  shutdown: graceful
 
 spring:
   data:
     mongodb:
       uri: mongodb://localhost:27017/messaging
+    redis:
+      host: localhost
+      port: 6379
+      # A slow Redis must not hold up a send for long.
+      timeout: 2s
+      connect-timeout: 2s
+
+messaging:
+  realtime:
+    # redis: fan-out across every instance through Redis pub/sub. local: this instance only, for development.
+    bus: redis
+    allowed-origins: "*"
+    ping-interval: 25s
+    pong-timeout: 60s
+    send-time-limit: 10s
+    send-buffer-limit: 512KB
+    max-text-message-size: 8KB

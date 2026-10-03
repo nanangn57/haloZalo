@@ -49,4 +49,14 @@ Event `messaging.reaction.added` và `messaging.reaction.removed`, payload `{ me
 
 ## Event mới và WebSocket
 
-`events.md` nói WebSocket `/ws` bản v1 chỉ đẩy `messaging.message.created`. Để thiết bị khác thấy xoá và reaction ngay, `/ws` cần đẩy thêm ba event trên. Ba event chỉ phát khi có thay đổi thật, nên client áp dụng thẳng, không cần tự lọc trùng theo nội dung.
+`/ws` đã có trong service và đã đẩy cả bốn event: `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`. `events.md` hiện nói `/ws` chỉ đẩy `messaging.message.created`, cần sửa câu đó. Ba event mới chỉ phát khi có thay đổi thật, nên client áp dụng thẳng.
+
+Cần P1 và gateway:
+
+- Gateway nhận `access_token` ở query `/ws`, hỏi Identity, rồi chuyển handshake sang messaging kèm `X-User-Id`. Gateway phải xoá `X-User-Id` do client tự gửi, ở cả HTTP lẫn `/ws`, nếu không thì ai cũng giả được user.
+- Gateway phải chuyển tiếp WebSocket: header `Upgrade`, idle timeout dài hơn 60 giây, và không đóng kết nối có ping 25 giây một lần.
+
+Cần ghi vào hợp đồng cho client-core (P3):
+
+- Mã đóng 1001 khi deploy, 1011 khi socket chết hoặc client đọc không kịp. Gặp mã nào cũng kết nối lại với backoff có jitter rồi gọi catch-up.
+- Frame có thể tới hai lần, hoặc tới cả thiết bị vừa gửi. Client bỏ trùng theo `messageId`, xếp theo `seq`.

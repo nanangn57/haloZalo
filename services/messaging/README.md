@@ -1,10 +1,10 @@
 # messaging
 
-Hội thoại, tin, `seq`, file, fan-out. Mongo cho tin, Redis cho kết nối realtime. Media nằm ở service này.
+Hội thoại, tin, `seq`, file, fan-out. Mongo cho tin, Redis cho fan-out realtime giữa các instance. Media nằm ở service này.
 
 Người giữ: P2 Huy. Service này không đọc bảng của service khác.
 
-Cổng `8082`. Mongo URI nằm trong `resources/application.yml`.
+Cổng `8082`. Mongo, Redis và cấu hình WebSocket nằm trong `resources/application.yml`.
 
 ```
 services/messaging/
@@ -17,13 +17,14 @@ services/messaging/
     reaction/         reaction của một user trên một tin
     api/              JSON request và response, đúng shape trong OpenAPI
     storage/          interface lưu, và implementation Mongo
-    event/            phát messaging.message.created
+    event/            đóng phong bì event, ghi log, đẩy sang realtime
+    realtime/         WebSocket /ws, socket theo user, heartbeat, fan-out qua Redis
     service/          mở hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction
     http/             nhận HTTP, đổi lỗi thành status
   test/               cùng các package trên
 ```
 
-Chạy: `mvn spring-boot:run` khi có Mongo ở `localhost:27017`. Test không cần Mongo: `mvn test`.
+Chạy: `mvn spring-boot:run` khi có Mongo ở `localhost:27017` và Redis ở `localhost:6379`. Không có Redis thì chạy một instance với `--messaging.realtime.bus=local`. Test không cần Mongo hay Redis: `mvn test`.
 
 ## Mô hình
 
@@ -78,7 +79,7 @@ Lỗi: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUN
 
 ## Event
 
-Mọi event dùng phong bì trong `doc/contract/events.md`. Bản này chỉ ghi log, chưa có bus và WebSocket. Event chỉ phát sau khi ghi xong, và chỉ khi có gì đổi: xoá lại, thêm reaction trùng, hoặc bỏ reaction chưa có thì không phát.
+Mọi event dùng phong bì trong `doc/contract/events.md`. Event được ghi log (chỗ của event bus sau này) và đẩy qua `/ws`. Event chỉ phát sau khi ghi xong, và chỉ khi có gì đổi: xoá lại, thêm reaction trùng, hoặc bỏ reaction chưa có thì không phát.
 
 | type | Khi nào | Payload |
 |---|---|---|
@@ -86,3 +87,32 @@ Mọi event dùng phong bì trong `doc/contract/events.md`. Bản này chỉ ghi
 | `messaging.message.deleted` | Tin bị xoá lần đầu | `{ messageId, conversationId, deletedAt }`, không có nội dung |
 | `messaging.reaction.added` | Thêm reaction mới | `{ messageId, conversationId, userId, code }` |
 | `messaging.reaction.removed` | Bỏ reaction đang có | `{ messageId, conversationId, userId, code }` |
+
+## WebSocket
+
+`GET /ws` nâng cấp lên WebSocket. Gateway kiểm `access_token` với Identity rồi gắn `X-User-Id`, giống HTTP. Thiếu header thì 401, không nâng cấp. Mỗi frame là nguyên phong bì, không bọc thêm. Không dùng STOMP hay SockJS.
+
+Đi một chiều: server đẩy, client gửi tin qua HTTP vì `clientMsgId` làm retry an toàn. Client gửi gì lên cũng chỉ được tính là còn sống. Frame client gửi lên tối đa 8KB.
+
+Đường đi của một event:
+
+1. Ghi Mongo xong, `EnvelopeEventPublisher` đóng phong bì và đọc thành viên hội thoại.
+2. Phát `{ recipients, envelope }` lên Redis channel `messaging.realtime`.
+3. Mọi instance nhận và gửi cho socket của người nhận đang mở ở instance đó.
+
+Người gửi cũng là thành viên, nên thiết bị khác của người gửi nhận được tin. Thiết bị vừa gửi cũng nhận lại, client bỏ trùng theo `messageId` hoặc `clientMsgId`.
+
+| Tình huống | Cách xử lý |
+|---|---|
+| Một user mở nhiều thiết bị, nhiều tab | Mỗi user giữ nhiều socket, mọi socket đều nhận |
+| Mạng di động rớt không gửi close frame | Server ping mỗi 25 giây. Không thấy pong hay frame nào trong 60 giây thì đóng, mã 1011 |
+| Client đọc chậm | Mỗi socket gửi tuần tự, tối đa 10 giây và 512KB chờ. Quá thì đóng, mã 1011 |
+| Deploy hoặc tắt instance | `server.shutdown: graceful`, đóng mọi socket bằng 1001 trước khi tắt web server |
+| Redis hoặc fan-out lỗi | Không làm hỏng request: tin đã ghi, trả 201 bình thường. Lettuce từ chối lệnh ngay khi mất kết nối, timeout 2 giây |
+| Client lỡ frame | Redis pub/sub không lưu. Client thấy lỗ `seq` hoặc vừa kết nối lại thì gọi catch-up |
+
+Nhận mã đóng 1001 hoặc 1011, hoặc mất kết nối, thì client nên kết nối lại với backoff có jitter, rồi gọi catch-up. Ping và pong là frame điều khiển: trình duyệt và `java.net.http` tự trả pong, client không cần code thêm.
+
+Thứ tự: event của cùng một instance đi theo thứ tự ghi. Giữa hai instance thì không chắc, nên client xếp tin theo `seq`, không theo lúc frame đến.
+
+Đã chạy thử hai instance dùng chung Redis: tin gửi ở instance A tới socket ở instance B. Tắt Redis thì gửi tin vẫn 201 trong vài mili giây. Bật lại Redis thì tự đẩy tiếp.
