@@ -27,7 +27,6 @@ class MessageServiceTest {
     private static final String DIRECT = "cccccccc-0000-4000-8000-000000000001";
     private static final String GROUP = "cccccccc-0000-4000-8000-000000000002";
 
-    private MemoryConversations conversations;
     private MemoryMessages messages;
     private RecordingEvents events;
     private MessageService service;
@@ -36,8 +35,7 @@ class MessageServiceTest {
     void setUp() {
         messages = new MemoryMessages();
         events = new RecordingEvents();
-        conversations = new MemoryConversations();
-        service = new MessageService(conversations, messages, new MemoryReactions(), events);
+        service = new MessageService(new MemoryConversations(), messages, new MemoryReactions(), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         service.openConversation(GROUP, ConversationType.GROUP, List.of(ALICE, BOB, CAROL));
     }
@@ -217,15 +215,24 @@ class MessageServiceTest {
     }
 
     @Test
-    void catchUpEndsCleanlyAcrossASeqHoleLeftByALostRetryRace() {
-        text(DIRECT, ALICE, "one");
-        conversations.nextSeq(DIRECT);
-        text(DIRECT, ALICE, "three");
+    void idsInUppercaseMeanTheSameAsLowercaseAndComeBackLowercase() {
+        String clientMsgId = UUID.randomUUID().toString();
+        Message sent = service.send(DIRECT.toUpperCase(), ALICE.toUpperCase(), clientMsgId.toUpperCase(),
+            new MessageContent.Text("hi"), null, null).getMessage();
+        MessageService.Sent retry = service.send(DIRECT, ALICE, clientMsgId, new MessageContent.Text("hi"), null, null);
 
-        MessageService.CatchUp caughtUp = service.catchUp(DIRECT, BOB, 0L, null);
+        assertEquals(DIRECT, sent.getConversationId());
+        assertEquals(ALICE, sent.getSenderId());
+        assertEquals(clientMsgId, sent.getClientMsgId());
+        assertFalse(retry.isCreated());
+        assertEquals(sent.getMessageId(), retry.getMessage().getMessageId());
+        service.react(DIRECT.toUpperCase(), sent.getMessageId().toUpperCase(), BOB.toUpperCase(), "like");
+        assertEquals(BOB, service.reactions(DIRECT, sent.getMessageId(), ALICE).get(0).getUserId());
+    }
 
-        assertEquals(List.of(1L, 3L), caughtUp.messages().stream().map(Message::getSeq).toList());
-        assertFalse(caughtUp.hasMore());
+    @Test
+    void aUserThatIsNotAUuidIsTreatedAsMissing() {
+        assertReason(MessageService.Rejected.Reason.UNAUTHENTICATED, () -> text(DIRECT, "alice", "hi"));
     }
 
     @Test

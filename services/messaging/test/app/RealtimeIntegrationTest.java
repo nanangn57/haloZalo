@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration;
-import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -209,8 +209,8 @@ class RealtimeIntegrationTest {
 
     @SpringBootConfiguration
     @EnableAutoConfiguration(exclude = {
-        MongoAutoConfiguration.class,
-        MongoDataAutoConfiguration.class,
+        DataSourceAutoConfiguration.class,
+        FlywayAutoConfiguration.class,
         RedisAutoConfiguration.class,
         RedisRepositoriesAutoConfiguration.class
     })

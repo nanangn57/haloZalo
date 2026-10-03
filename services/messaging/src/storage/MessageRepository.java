@@ -6,11 +6,15 @@ import java.util.List;
 
 public interface MessageRepository {
     /**
-     * Returns false when the same sender already stored the same clientMsgId.
+     * Gives the message the conversation's next seq and stores it, as one atomic step. Returns the stored
+     * message, or null when the same sender already stored the same clientMsgId; then no seq is used.
      */
-    boolean insert(Message message);
+    Message append(Message draft);
 
-    void update(Message message);
+    /**
+     * Stores status, updatedAt and deletedAt of a soft-deleted message. Nothing else of a message changes.
+     */
+    void markDeleted(Message deleted);
 
     Message findById(String messageId);
 

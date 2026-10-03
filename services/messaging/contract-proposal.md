@@ -4,6 +4,8 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 
 ## Cần chốt sớm vì đang chạy
 
+0. **Store của messaging đổi từ Mongo sang PostgreSQL.** `decisions.md`, README gốc và `timeline.md` đang ghi "Mongo cho tin". Timeline nói store của mỗi hộp do cả nhóm chốt qua `doc/contract/`, nên P1 cần sửa các file đó. Lý do: đề messaging ban đầu thiết kế theo bảng quan hệ và JSONB; khoá ngoại giữa tin, trả lời, chuyển tiếp và reaction; và gán `seq` cùng transaction với `INSERT` nên `seq` không còn lỗ. Hợp đồng HTTP và event không đổi. P4 cần Postgres thay Mongo khi deploy, ví dụ RDS; biến môi trường nằm ở `.env.example`.
+
 1. **Header user từ gateway.** Messaging đọc `X-User-Id`. decisions.md nói gateway gắn `userId` nhưng chưa nói tên header.
 2. **Lỗi 403 `FORBIDDEN`.** F-B9 cần chặn người ngoài hội thoại. `ErrorResponse.code` hiện chỉ có `VALIDATION_ERROR`, `UNAUTHENTICATED`, `CONFLICT`. `sendMessage` cần thêm response 403.
 3. **Thành viên hội thoại.** Messaging giữ bản sao `memberIds` trong collection `conversations`, tức là chọn đường "nhận event thành viên rồi giữ bản sao" của timeline. Tạm thời hội thoại được mở bằng `POST /internal/conversations`. Khi Identity có nhóm, cần event kiểu `identity.group.member_added` / `member_removed` để đồng bộ bản sao này.

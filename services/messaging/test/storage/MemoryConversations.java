@@ -17,13 +17,4 @@ public final class MemoryConversations implements ConversationRepository {
     public Conversation findById(String conversationId) {
         return rows.get(conversationId);
     }
-
-    @Override
-    public long nextSeq(String conversationId) {
-        Conversation old = rows.get(conversationId);
-        Conversation next = new Conversation(old.getConversationId(), old.getType(), old.getMemberIds(),
-            old.getLastSeq() + 1, old.getCreatedAt());
-        rows.put(conversationId, next);
-        return next.getLastSeq();
-    }
 }

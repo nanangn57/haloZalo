@@ -19,14 +19,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
 @Service
 public final class MessageService {
-    private static final Pattern UUID_PATTERN =
-        Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     private static final String NOT_MEMBER = "Not a member of this conversation";
     public static final int CATCH_UP_DEFAULT_LIMIT = 100;
     public static final int CATCH_UP_MAX_LIMIT = 200;
@@ -48,16 +45,17 @@ public final class MessageService {
     }
 
     public Conversation openConversation(String conversationId, ConversationType type, List<String> memberIds) {
-        String id = conversationId == null ? UUID.randomUUID().toString() : conversationId;
-        requireUuid(id, "conversationId");
+        String id = conversationId == null ? UUID.randomUUID().toString() : uuid(conversationId, "conversationId");
         if (type == null || memberIds == null) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Conversation type and members are required");
         }
-        Set<String> members = new HashSet<>(memberIds);
+        Set<String> members = new HashSet<>();
+        for (String member : memberIds) {
+            members.add(uuid(member, "memberId"));
+        }
         if (members.size() != memberIds.size()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Members must be distinct");
         }
-        members.forEach(member -> requireUuid(member, "memberId"));
         if (type == ConversationType.DIRECT && members.size() != 2) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A direct conversation has exactly 2 members");
         }
@@ -81,46 +79,50 @@ public final class MessageService {
         MessageContent content,
         MessageMetadata metadata,
         String replyTo) {
-        requireUuid(clientMsgId, "clientMsgId");
+        String clientId = uuid(clientMsgId, "clientMsgId");
         String problem = ContentValidator.problem(content);
         if (problem != null) {
             throw new Rejected(Rejected.Reason.VALIDATION, problem);
         }
-        Conversation conversation = memberConversation(conversationId, senderId);
-        Message existing = messages.findBySenderAndClientMsgId(senderId, clientMsgId);
+        String sender = user(senderId);
+        Conversation conversation = memberConversation(conversationId, sender);
+        Message existing = messages.findBySenderAndClientMsgId(sender, clientId);
         if (existing != null) {
             return new Sent(existing, false);
         }
+        String replyId = null;
         if (replyTo != null) {
-            Message original = messages.findById(replyTo);
+            replyId = Ids.canonical(replyTo);
+            Message original = replyId == null ? null : messages.findById(replyId);
             if (original == null || !original.getConversationId().equals(conversation.getConversationId())) {
                 throw new Rejected(Rejected.Reason.VALIDATION, "Reply target is not in this conversation");
             }
         }
-        return store(conversation, senderId, clientMsgId, content, metadata, replyTo, null);
+        return store(conversation, sender, clientId, content, metadata, replyId, null);
     }
 
     /**
      * Forwards a message the sender can see into another conversation. forwardedFrom always points at the first original.
      */
     public Sent forward(String conversationId, String senderId, String clientMsgId, String sourceMessageId) {
-        requireUuid(clientMsgId, "clientMsgId");
-        Conversation target = memberConversation(conversationId, senderId);
-        Message existing = messages.findBySenderAndClientMsgId(senderId, clientMsgId);
+        String clientId = uuid(clientMsgId, "clientMsgId");
+        String sender = user(senderId);
+        Conversation target = memberConversation(conversationId, sender);
+        Message existing = messages.findBySenderAndClientMsgId(sender, clientId);
         if (existing != null) {
             return new Sent(existing, false);
         }
-        Message source = visibleMessage(sourceMessageId, senderId);
+        Message source = visibleMessage(sourceMessageId, sender);
         if (source.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot be forwarded");
         }
         String original = source.getForwardedFrom() == null ? source.getMessageId() : source.getForwardedFrom();
-        return store(target, senderId, clientMsgId, source.getContent(), null, null, original);
+        return store(target, sender, clientId, source.getContent(), null, null, original);
     }
 
     /**
      * Messages after the client's last seen seq, deleted ones included so the client can fill every slot.
-     * hasMore is false once nothing newer exists, even when seq has a hole left by a lost retry race.
+     * hasMore is false once nothing newer exists.
      */
     public CatchUp catchUp(String conversationId, String userId, Long afterSeq, Integer limit) {
         long after = afterSeq == null ? 0 : afterSeq;
@@ -131,9 +133,9 @@ public final class MessageService {
         if (size < 1 || size > CATCH_UP_MAX_LIMIT) {
             throw new Rejected(Rejected.Reason.VALIDATION, "limit must be between 1 and " + CATCH_UP_MAX_LIMIT);
         }
-        memberConversation(conversationId, userId);
+        Conversation conversation = memberConversation(conversationId, user(userId));
         // One extra row tells whether another page exists without a count query.
-        List<Message> rows = messages.findAfterSeq(conversationId, after, size + 1);
+        List<Message> rows = messages.findAfterSeq(conversation.getConversationId(), after, size + 1);
         boolean hasMore = rows.size() > size;
         return new CatchUp(hasMore ? rows.subList(0, size) : rows, hasMore);
     }
@@ -142,15 +144,16 @@ public final class MessageService {
      * Soft delete: the row stays because replies and forwards may point at it. Only the sender can delete.
      */
     public Message delete(String conversationId, String messageId, String userId) {
-        Message message = messageIn(conversationId, messageId, userId);
-        if (!message.getSenderId().equals(userId)) {
+        String user = user(userId);
+        Message message = messageIn(conversationId, messageId, user);
+        if (!message.getSenderId().equals(user)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, "Only the sender can delete a message");
         }
         if (message.isDeleted()) {
             return message;
         }
         Message deleted = message.softDeleted(now());
-        messages.update(deleted);
+        messages.markDeleted(deleted);
         events.publishMessageDeleted(deleted);
         return deleted;
     }
@@ -162,13 +165,15 @@ public final class MessageService {
         if (!MessageContent.EMOTION_CODES.contains(code)) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Unknown reaction code");
         }
-        Message message = messageIn(conversationId, messageId, userId);
+        String user = user(userId);
+        Message message = messageIn(conversationId, messageId, user);
         if (message.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot get reactions");
         }
-        MessageReaction reaction = new MessageReaction(UUID.randomUUID().toString(), messageId, userId, code, now());
+        MessageReaction reaction = new MessageReaction(
+            UUID.randomUUID().toString(), message.getMessageId(), user, code, now());
         if (reactions.insert(reaction)) {
-            events.publishReactionAdded(conversationId, reaction);
+            events.publishReactionAdded(message.getConversationId(), reaction);
         }
     }
 
@@ -176,15 +181,16 @@ public final class MessageService {
      * Removing a reaction that is not there is a no-op and publishes nothing.
      */
     public void unreact(String conversationId, String messageId, String userId, String code) {
-        messageIn(conversationId, messageId, userId);
-        if (reactions.delete(messageId, userId, code)) {
-            events.publishReactionRemoved(conversationId, messageId, userId, code);
+        String user = user(userId);
+        Message message = messageIn(conversationId, messageId, user);
+        if (reactions.delete(message.getMessageId(), user, code)) {
+            events.publishReactionRemoved(message.getConversationId(), message.getMessageId(), user, code);
         }
     }
 
     public List<MessageReaction> reactions(String conversationId, String messageId, String userId) {
-        messageIn(conversationId, messageId, userId);
-        return reactions.findByMessageId(messageId);
+        Message message = messageIn(conversationId, messageId, user(userId));
+        return reactions.findByMessageId(message.getMessageId());
     }
 
     private Sent store(
@@ -196,10 +202,10 @@ public final class MessageService {
         String replyTo,
         String forwardedFrom) {
         Instant now = now();
-        Message message = new Message(
+        Message draft = new Message(
             UUID.randomUUID().toString(),
             conversation.getConversationId(),
-            conversations.nextSeq(conversation.getConversationId()),
+            0,
             senderId,
             clientMsgId,
             content,
@@ -211,20 +217,20 @@ public final class MessageService {
             now,
             null
         );
-        if (!messages.insert(message)) {
-            // A concurrent retry with the same clientMsgId won. Its seq is the real one; ours is left as a gap.
+        Message message = messages.append(draft);
+        if (message == null) {
+            // A concurrent retry with the same clientMsgId won. No seq was used for this attempt.
             return new Sent(messages.findBySenderAndClientMsgId(senderId, clientMsgId), false);
         }
         events.publishMessageCreated(message);
         return new Sent(message, true);
     }
 
+    /**
+     * userId must already be canonical, see {@link #user(String)}.
+     */
     private Conversation memberConversation(String conversationId, String userId) {
-        requireUuid(conversationId, "conversationId");
-        if (userId == null || userId.isBlank()) {
-            throw new Rejected(Rejected.Reason.UNAUTHENTICATED, "Missing user");
-        }
-        Conversation conversation = conversations.findById(conversationId);
+        Conversation conversation = conversations.findById(uuid(conversationId, "conversationId"));
         // Unknown and foreign conversations look the same, so ids cannot be probed.
         if (conversation == null || !conversation.hasMember(userId)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, NOT_MEMBER);
@@ -233,7 +239,8 @@ public final class MessageService {
     }
 
     private Message visibleMessage(String messageId, String userId) {
-        Message message = messageId == null ? null : messages.findById(messageId);
+        String id = Ids.canonical(messageId);
+        Message message = id == null ? null : messages.findById(id);
         if (message == null) {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
         }
@@ -246,20 +253,33 @@ public final class MessageService {
      */
     private Message messageIn(String conversationId, String messageId, String userId) {
         Message message = visibleMessage(messageId, userId);
-        if (!message.getConversationId().equals(conversationId)) {
+        if (!message.getConversationId().equals(Ids.canonical(conversationId))) {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
         }
         return message;
     }
 
-    private static void requireUuid(String value, String field) {
-        if (value == null || !UUID_PATTERN.matcher(value).matches()) {
+    private static String uuid(String value, String field) {
+        String id = Ids.canonical(value);
+        if (id == null) {
             throw new Rejected(Rejected.Reason.VALIDATION, field + " must be a UUID");
         }
+        return id;
+    }
+
+    /**
+     * The user comes from the gateway. Anything that is not a UUID did not come from Identity.
+     */
+    private static String user(String userId) {
+        String id = Ids.canonical(userId);
+        if (id == null) {
+            throw new Rejected(Rejected.Reason.UNAUTHENTICATED, "Missing user");
+        }
+        return id;
     }
 
     private static Instant now() {
-        // Mongo keeps milliseconds, so the stored and the returned time must match.
+        // Kept to milliseconds so the time returned now equals the time read back later.
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 

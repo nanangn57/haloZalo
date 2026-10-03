@@ -1,7 +1,8 @@
-# Messaging with its own Mongo and Redis, for local development.
+# Messaging with its own PostgreSQL and Redis, for local development.
 #   docker compose up --build        start everything on http://localhost:8082 and ws://localhost:8082/ws
-#   docker compose down              stop; Mongo data stays in the mongo-data volume
+#   docker compose down              stop; Postgres data stays in the postgres-data volume
 #   docker compose down -v           stop and delete the data
+# Uses the same ports as ./local-deps.sh, so run one or the other, not both.
 # Requests need the X-User-Id header, which the gateway adds in the real system.
 
 name: halozalo-messaging
@@ -14,8 +15,10 @@ services:
       - "8082:8082"
     environment:
       # Inside the compose network the databases are reached by service name, not localhost.
-      # Set these in your shell to point at cloud Mongo or Redis instead.
-      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/messaging}
+      # Set these in your shell to point at a cloud Postgres or Redis instead.
+      POSTGRES_URL: ${POSTGRES_URL:-jdbc:postgresql://postgres:5432/messaging}
+      POSTGRES_USER: ${POSTGRES_USER:-messaging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messaging}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_USERNAME: ${REDIS_USERNAME:-}
@@ -23,12 +26,12 @@ services:
       REDIS_SSL_ENABLED: ${REDIS_SSL_ENABLED:-false}
       MESSAGING_REALTIME_BUS: ${MESSAGING_REALTIME_BUS:-redis}
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      # The JRE image has no curl, so ask /actuator/health with bash. UP means the app and Mongo are fine.
+      # The JRE image has no curl, so ask /actuator/health with bash. UP means the app and Postgres are fine.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8082 && printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
       interval: 10s
       timeout: 3s
@@ -38,14 +41,18 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: messaging
+      POSTGRES_USER: ${POSTGRES_USER:-messaging}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messaging}
     ports:
-      - "127.0.0.1:27017:27017"
+      - "127.0.0.1:5432:5432"
     volumes:
-      - mongo-data:/data/db
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d messaging"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -64,4 +71,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  mongo-data:
+  postgres-data:

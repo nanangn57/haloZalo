@@ -1,22 +1,22 @@
 # messaging
 
-Hội thoại, tin, `seq`, file, fan-out. Mongo cho tin, Redis cho fan-out realtime giữa các instance. Media nằm ở service này.
+Hội thoại, tin, `seq`, file, fan-out. PostgreSQL cho hội thoại và tin, Redis cho fan-out realtime giữa các instance. Media nằm ở service này.
 
 Người giữ: P2 Huy. Service này không đọc bảng của service khác.
 
-Cổng `8082`. Mongo, Redis và cấu hình WebSocket nằm trong `resources/application.yml`.
+Cổng `8082`. Postgres, Redis và cấu hình WebSocket nằm trong `resources/application.yml`.
 
 ```
 services/messaging/
   pom.xml
-  resources/          cổng và Mongo URI
+  resources/          cấu hình, và db/migration là schema Postgres
   src/
     app/              khởi động Spring Boot
     conversation/     hội thoại DIRECT hoặc GROUP, thành viên, seq cuối
     message/          tin, loại tin, nội dung theo loại, trạng thái, kiểm tra nội dung
     reaction/         reaction của một user trên một tin
     api/              JSON request và response, đúng shape trong OpenAPI
-    storage/          interface lưu, và implementation Mongo
+    storage/          interface lưu, và implementation Postgres
     event/            đóng phong bì event, ghi log, đẩy sang realtime
     realtime/         WebSocket /ws, socket theo user, heartbeat, fan-out qua Redis
     service/          mở hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, catch-up
@@ -24,15 +24,27 @@ services/messaging/
   test/               cùng các package trên
 ```
 
-Chạy: chép `.env.example` thành `.env.local` trong thư mục này rồi điền giá trị, sau đó `mvn spring-boot:run` từ thư mục này. Không điền gì thì dùng Mongo ở `localhost:27017` và Redis ở `localhost:6379`. Không có Redis thì đặt `MESSAGING_REALTIME_BUS=local`, chỉ dùng cho một instance. Test không cần Mongo hay Redis: `mvn test`.
+Chạy trên máy:
 
-Chạy bằng Docker, gồm Mongo và Redis riêng: `docker compose up --build` trong thư mục này. Service ở `http://localhost:8082`, WebSocket ở `ws://localhost:8082/ws`. `docker compose down -v` xoá luôn dữ liệu Mongo. Compose không đọc `.env.local`, vì trong container `localhost` không phải Mongo hay Redis. Muốn dùng Mongo hay Redis trên cloud thì đặt biến trong shell trước khi chạy compose. Image không chứa `.env.local` và chạy bằng user không phải root.
+```
+./local-deps.sh up          # Postgres 17 ở localhost:5432, Redis 8 ở localhost:6379
+mvn spring-boot:run         # chạy từ thư mục này để đọc .env.local
+./local-deps.sh psql        # mở psql vào database messaging
+./local-deps.sh down        # tắt, giữ dữ liệu; reset thì xoá luôn dữ liệu
+```
 
-`GET /actuator/health` trả `UP` khi app và Mongo chạy. Redis không tính vào health, vì Redis tắt thì gửi tin vẫn được.
+`.env.local` lấy mẫu từ `.env.example`. Không điền gì thì dùng đúng Postgres và Redis của `local-deps.sh`. Không có Redis thì đặt `MESSAGING_REALTIME_BUS=local`, chỉ dùng cho một instance.
+
+`mvn test` không cần Postgres hay Redis. Test repository chạy SQL thật trên một Postgres tạm do Testcontainers bật, và tự bỏ qua khi máy không có Docker.
+
+Chạy cả service bằng Docker, gồm Postgres và Redis riêng: `docker compose up --build` trong thư mục này. Service ở `http://localhost:8082`, WebSocket ở `ws://localhost:8082/ws`. `docker compose down -v` xoá luôn dữ liệu Postgres. Compose và `local-deps.sh` dùng cùng cổng, chỉ chạy một trong hai. Compose không đọc `.env.local`, vì trong container `localhost` không phải Postgres hay Redis. Muốn dùng Postgres hay Redis trên cloud thì đặt biến trong shell trước khi chạy compose. Image không chứa `.env.local` và chạy bằng user không phải root.
+
+`GET /actuator/health` trả `UP` khi app và Postgres chạy, `DOWN` 503 khi mất Postgres. Redis không tính vào health, vì Redis tắt thì gửi tin vẫn được.
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `MONGODB_URI` | `mongodb://localhost:27017/messaging` | Chuỗi kết nối Mongo, gồm user, password và tên database |
+| `POSTGRES_URL` | `jdbc:postgresql://localhost:5432/messaging` | JDBC URL. Cloud thường thêm `?sslmode=require` |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD` | `messaging`, `messaging` | User và password của database |
 | `REDIS_HOST`, `REDIS_PORT` | `localhost`, `6379` | Redis cho fan-out realtime |
 | `REDIS_USERNAME`, `REDIS_PASSWORD` | trống | Để trống khi Redis không có auth |
 | `REDIS_SSL_ENABLED` | `false` | `true` khi Redis bật TLS, ví dụ ElastiCache |
@@ -51,7 +63,7 @@ Conversation (DIRECT: đúng 2 người, GROUP: từ 3 người)
 
 Tin không có `receiverId`. Người nhận là thành viên hội thoại. Người gửi phải là thành viên.
 
-`MessageContent` là sealed interface, mỗi `MessageType` một record: `Text`, `Emotion`, `Image`, `Video`, `Document`. `type` là discriminator. Thêm loại mới là thêm một record, một nhánh trong `ContentValidator`, `MongoMessageRepository` và `MessageResponse`. Không có bảng riêng cho từng loại.
+`MessageContent` là sealed interface, mỗi `MessageType` một record: `Text`, `Emotion`, `Image`, `Video`, `Document`. `type` là discriminator. Thêm loại mới là thêm một record, một nhánh trong `ContentValidator`, `MessageContentJson` và `MessageResponse`, và thêm loại vào CHECK của cột `messages.type` bằng một migration mới. Không có bảng riêng cho từng loại.
 
 `metadata` chỉ giữ thông tin phụ. Người gửi, loại, `replyTo`, `forwardedFrom`, trạng thái và thời gian luôn là field riêng.
 
@@ -63,15 +75,22 @@ Xoá là xoá mềm: `status = DELETED`, `deletedAt` được ghi, dòng vẫn c
 
 Reaction dùng bộ mã của emotion. Một user một mã một lần trên một tin.
 
-## Mongo
+## PostgreSQL
 
-| Collection | Khoá | Index |
+Schema nằm ở `resources/db/migration`. Flyway chạy lúc khởi động, mỗi file một lần theo số version. Đổi schema thì thêm file `V2__...sql`, không sửa file đã chạy.
+
+| Bảng | Khoá | Ràng buộc |
 |---|---|---|
-| `conversations` | `_id` = conversationId | — |
-| `messages` | `_id` = messageId | unique `(senderId, clientMsgId)`, unique `(conversationId, seq)` |
-| `message_reactions` | `_id` = reactionId | unique `(messageId, userId, code)` |
+| `conversations` | `id` | `type` là `DIRECT` hoặc `GROUP`; `last_seq` là `seq` của tin mới nhất |
+| `conversation_members` | `(conversation_id, user_id)` | index `user_id` cho danh sách hội thoại của một user |
+| `messages` | `id` | unique `(sender_id, client_msg_id)`, unique `(conversation_id, seq)`; `content` và `metadata` là JSONB; `reply_to`, `forwarded_from` là khoá ngoại tới `messages` |
+| `message_reactions` | `id` | unique `(message_id, user_id, code)`; `message_id` là khoá ngoại tới `messages` |
 
-Index được tạo lúc khởi động. `seq` tăng bằng `$inc` trên `conversations.lastSeq`, nên mỗi hội thoại bắt đầu từ 1. Hai lần gửi cùng `clientMsgId` chạy đồng thời thì một lần thắng nhờ index unique. Lần thua trả tin đã ghi, nhưng `seq` nó đã lấy bỏ trống.
+User nằm ở Identity, nên `user_id` và `sender_id` chỉ là UUID, không có khoá ngoại sang service khác.
+
+Gửi tin là một transaction: tăng `conversations.last_seq` rồi `INSERT` tin. `UPDATE` khoá dòng hội thoại, nên tin trong một hội thoại nhận `seq` lần lượt, bắt đầu từ 1. Trùng `clientMsgId` thì rollback cả transaction, nên `seq` không bao giờ có lỗ. Test đã chạy 100 lần gửi song song và 10 lần retry song song trên Postgres thật.
+
+Mọi id là UUID và được trả về chữ thường. Client hay gateway gửi chữ hoa vẫn được hiểu là cùng một id.
 
 ## API
 
@@ -79,7 +98,7 @@ Index được tạo lúc khởi động. `seq` tăng bằng `$inc` trên `conve
 
 `GET /conversations/{conversationId}/messages?afterSeq=N&limit=M` là catch-up. Trả `{ messages, hasMore }`, `messages` là `Message` của OpenAPI, xếp theo `seq` tăng dần, chỉ gồm tin có `seq > afterSeq`. `afterSeq` mặc định 0, `limit` mặc định 100, tối đa 200. Còn `hasMore` thì gọi tiếp với `seq` cuối vừa nhận. Chỉ thành viên gọi được.
 
-Tin đã xoá vẫn có trong catch-up, với `status: "DELETED"` và `deletedAt`, không có `body`. Nhờ vậy client thấy đủ mọi `seq`, không chờ một tin không bao giờ tới. `hasMore: false` nghĩa là đã đủ, kể cả khi `seq` có lỗ do hai lần retry chạy đồng thời. Query đi theo index `(conversationId, seq)`.
+Tin đã xoá vẫn có trong catch-up, với `status: "DELETED"` và `deletedAt`, không có `body`. Nhờ vậy client thấy đủ mọi `seq`, không chờ một tin không bao giờ tới. `hasMore: false` nghĩa là đã đủ. Query đi theo ràng buộc unique `(conversation_id, seq)`.
 
 Catch-up chỉ trả tin mới hơn `afterSeq`. Tin cũ hơn bị xoá, hoặc reaction đổi trên tin cũ, khi client đang offline thì catch-up chưa báo.
 
@@ -116,7 +135,7 @@ Mọi event dùng phong bì trong `doc/contract/events.md`. Event được ghi l
 
 Đường đi của một event:
 
-1. Ghi Mongo xong, `EnvelopeEventPublisher` đóng phong bì và đọc thành viên hội thoại.
+1. Transaction ghi Postgres commit xong, `EnvelopeEventPublisher` đóng phong bì và đọc thành viên hội thoại.
 2. Phát `{ recipients, envelope }` lên Redis channel `messaging.realtime`.
 3. Mọi instance nhận và gửi cho socket của người nhận đang mở ở instance đó.
 

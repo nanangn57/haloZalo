@@ -7,9 +7,17 @@ spring:
   config:
     # Local secrets, never committed. Real environment variables win over this file. See .env.example.
     import: optional:file:./.env.local[.properties]
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/messaging}
+    username: ${POSTGRES_USER:messaging}
+    password: ${POSTGRES_PASSWORD:messaging}
+    hikari:
+      # Fail fast instead of queueing requests for half a minute when Postgres is down.
+      connection-timeout: 5000
+  flyway:
+    # Creates and upgrades the schema from resources/db/migration on start.
+    locations: classpath:db/migration
   data:
-    mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/messaging}
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
