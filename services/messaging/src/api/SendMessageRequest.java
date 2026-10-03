@@ -7,20 +7,24 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Body of POST /conversations/{conversationId}/messages. The contract only accepts TEXT and EMOTION.
+ * replyTo is optional and not in the contract yet.
  */
 public final class SendMessageRequest {
     private final String type;
     private final String body;
     private final String clientMsgId;
+    private final String replyTo;
 
     @JsonCreator
     public SendMessageRequest(
         @JsonProperty("type") String type,
         @JsonProperty("body") String body,
-        @JsonProperty("clientMsgId") String clientMsgId) {
+        @JsonProperty("clientMsgId") String clientMsgId,
+        @JsonProperty("replyTo") String replyTo) {
         this.type = type;
         this.body = body;
         this.clientMsgId = clientMsgId;
+        this.replyTo = replyTo;
     }
 
     /**
@@ -46,5 +50,9 @@ public final class SendMessageRequest {
 
     public String getClientMsgId() {
         return clientMsgId;
+    }
+
+    public String getReplyTo() {
+        return replyTo;
     }
 }

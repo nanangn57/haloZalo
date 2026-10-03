@@ -3,8 +3,11 @@ package api;
 import message.Message;
 import message.MessageContent;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * The contract's Message: MessageBase plus type and body. Only TEXT and EMOTION have a contract shape yet.
+ * replyTo and forwardedFrom are left out when null, so a plain message keeps the exact contract shape.
  */
 public final class MessageResponse {
     private final String messageId;
@@ -14,6 +17,8 @@ public final class MessageResponse {
     private final String type;
     private final String body;
     private final String clientMsgId;
+    private final String replyTo;
+    private final String forwardedFrom;
     private final String createdAt;
 
     public MessageResponse(Message message) {
@@ -24,6 +29,8 @@ public final class MessageResponse {
         this.type = message.getType().name();
         this.body = body(message.getContent());
         this.clientMsgId = message.getClientMsgId();
+        this.replyTo = message.getReplyTo();
+        this.forwardedFrom = message.getForwardedFrom();
         this.createdAt = message.getCreatedAt().toString();
     }
 
@@ -63,6 +70,16 @@ public final class MessageResponse {
 
     public String getClientMsgId() {
         return clientMsgId;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getReplyTo() {
+        return replyTo;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getForwardedFrom() {
+        return forwardedFrom;
     }
 
     public String getCreatedAt() {

@@ -119,8 +119,11 @@ public final class MessageService {
     /**
      * Soft delete: the row stays because replies and forwards may point at it. Only the sender can delete.
      */
-    public Message delete(String messageId, String userId) {
+    public Message delete(String conversationId, String messageId, String userId) {
         Message message = visibleMessage(messageId, userId);
+        if (!message.getConversationId().equals(conversationId)) {
+            throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
+        }
         if (!message.getSenderId().equals(userId)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, "Only the sender can delete a message");
         }

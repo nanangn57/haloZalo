@@ -138,8 +138,9 @@ class MessageServiceTest {
         Message reply = service.send(DIRECT, BOB, UUID.randomUUID().toString(),
             new MessageContent.Text("what?"), null, original.getMessageId()).getMessage();
 
-        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.delete(original.getMessageId(), BOB));
-        Message deleted = service.delete(original.getMessageId(), ALICE);
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.delete(DIRECT, original.getMessageId(), BOB));
+        assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.delete(GROUP, original.getMessageId(), ALICE));
+        Message deleted = service.delete(DIRECT, original.getMessageId(), ALICE);
 
         assertEquals(MessageStatus.DELETED, deleted.getStatus());
         assertNotNull(deleted.getDeletedAt());

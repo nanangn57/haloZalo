@@ -1,6 +1,7 @@
 package http;
 
 import api.ConversationResponse;
+import api.ForwardMessageRequest;
 import api.MessageResponse;
 import api.OpenConversationRequest;
 import api.SendMessageRequest;
@@ -11,6 +12,7 @@ import service.MessageService;
 import java.util.Arrays;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,8 +41,26 @@ public final class MessageController {
         if (content == null) {
             throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Message type must be TEXT or EMOTION");
         }
-        MessageService.Sent sent = messages.send(conversationId, userId, request.getClientMsgId(), content, null, null);
-        return ResponseEntity.status(sent.isCreated() ? 201 : 200).body(new MessageResponse(sent.getMessage()));
+        MessageService.Sent sent = messages.send(
+            conversationId, userId, request.getClientMsgId(), content, null, request.getReplyTo());
+        return sentResponse(sent);
+    }
+
+    @PostMapping("/conversations/{conversationId}/forwards")
+    public ResponseEntity<MessageResponse> forward(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @RequestBody ForwardMessageRequest request) {
+        return sentResponse(messages.forward(conversationId, userId, request.getClientMsgId(), request.getMessageId()));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}/messages/{messageId}")
+    public ResponseEntity<Void> delete(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId) {
+        messages.delete(conversationId, messageId, userId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/internal/conversations")
@@ -51,5 +71,9 @@ public final class MessageController {
             .orElse(null);
         return ResponseEntity.status(201).body(new ConversationResponse(
             messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
+    }
+
+    private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {
+        return ResponseEntity.status(sent.isCreated() ? 201 : 200).body(new MessageResponse(sent.getMessage()));
     }
 }

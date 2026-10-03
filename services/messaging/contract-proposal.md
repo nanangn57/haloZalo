@@ -9,9 +9,19 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 3. **Thành viên hội thoại.** Messaging giữ bản sao `memberIds` trong collection `conversations`, tức là chọn đường "nhận event thành viên rồi giữ bản sao" của timeline. Tạm thời hội thoại được mở bằng `POST /internal/conversations`. Khi Identity có nhóm, cần event kiểu `identity.group.member_added` / `member_removed` để đồng bộ bản sao này.
 4. **Hội thoại phải tồn tại trước khi gửi.** decisions.md cho phép `conversationId` do client sinh mà không cần tạo trước. Với kiểm tra thành viên, client phải mở hội thoại trước. Cần sửa câu đó, hoặc thêm API tạo hội thoại public.
 
+## Endpoint trả lời, chuyển tiếp, xoá
+
+Đã chạy trong service, chưa có trong OpenAPI:
+
+- `SendMessageRequest` thêm `replyTo` (uuid, không bắt buộc). Hiện contract để `additionalProperties: false`.
+- `POST /conversations/{conversationId}/forwards`, body `{ messageId, clientMsgId }`, trả `Message`, 201 hoặc 200.
+- `DELETE /conversations/{conversationId}/messages/{messageId}`, trả 204.
+- Lỗi mới `NOT_FOUND` 404, cho tin không tồn tại.
+- Thiết bị khác cần biết tin đã bị xoá. Đề xuất event `messaging.message.deleted`, payload `{ messageId, conversationId, deletedAt }`.
+
 ## Shape `Message` cho bản sau
 
-Đề xuất thêm vào `MessageBase`, đều không bắt buộc nên client cũ không vỡ:
+Đề xuất thêm vào `MessageBase`, đều không bắt buộc nên client cũ không vỡ. `replyTo` và `forwardedFrom` đã được trả khi có giá trị:
 
 | Field | Kiểu | Ý nghĩa |
 |---|---|---|
