@@ -1,0 +1,67 @@
+# Messaging with its own Mongo and Redis, for local development.
+#   docker compose up --build        start everything on http://localhost:8082 and ws://localhost:8082/ws
+#   docker compose down              stop; Mongo data stays in the mongo-data volume
+#   docker compose down -v           stop and delete the data
+# Requests need the X-User-Id header, which the gateway adds in the real system.
+
+name: halozalo-messaging
+
+services:
+  messaging:
+    build: .
+    image: halozalo/messaging:local
+    ports:
+      - "8082:8082"
+    environment:
+      # Inside the compose network the databases are reached by service name, not localhost.
+      # Set these in your shell to point at cloud Mongo or Redis instead.
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/messaging}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SSL_ENABLED: ${REDIS_SSL_ENABLED:-false}
+      MESSAGING_REALTIME_BUS: ${MESSAGING_REALTIME_BUS:-redis}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The JRE image has no curl, so ask /actuator/health with bash. UP means the app and Mongo are fine.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8082 && printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
+      interval: 10s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+    # Matches server.shutdown: graceful, so sockets close with 1001 before the container stops.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    # Pub/sub only: nothing to persist, so no volume.
+    image: redis:8-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
