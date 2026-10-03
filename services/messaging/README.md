@@ -24,7 +24,17 @@ services/messaging/
   test/               cùng các package trên
 ```
 
-Chạy: `mvn spring-boot:run` khi có Mongo ở `localhost:27017` và Redis ở `localhost:6379`. Không có Redis thì chạy một instance với `--messaging.realtime.bus=local`. Test không cần Mongo hay Redis: `mvn test`.
+Chạy: chép `.env.example` thành `.env.local` trong thư mục này rồi điền giá trị, sau đó `mvn spring-boot:run` từ thư mục này. Không điền gì thì dùng Mongo ở `localhost:27017` và Redis ở `localhost:6379`. Không có Redis thì đặt `MESSAGING_REALTIME_BUS=local`, chỉ dùng cho một instance. Test không cần Mongo hay Redis: `mvn test`.
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `MONGODB_URI` | `mongodb://localhost:27017/messaging` | Chuỗi kết nối Mongo, gồm user, password và tên database |
+| `REDIS_HOST`, `REDIS_PORT` | `localhost`, `6379` | Redis cho fan-out realtime |
+| `REDIS_USERNAME`, `REDIS_PASSWORD` | trống | Để trống khi Redis không có auth |
+| `REDIS_SSL_ENABLED` | `false` | `true` khi Redis bật TLS, ví dụ ElastiCache |
+| `MESSAGING_REALTIME_BUS` | `redis` | `local` khi chạy một instance không có Redis |
+
+`.env.local` không được commit. Biến môi trường thật, ví dụ trên AWS, thắng giá trị trong file. File đọc kiểu properties: không đặt dấu nháy, dấu `\` trong giá trị phải viết `\\`.
 
 ## Mô hình
 

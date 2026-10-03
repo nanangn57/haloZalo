@@ -4,12 +4,19 @@ server:
   shutdown: graceful
 
 spring:
+  config:
+    # Local secrets, never committed. Real environment variables win over this file. See .env.example.
+    import: optional:file:./.env.local[.properties]
   data:
     mongodb:
-      uri: mongodb://localhost:27017/messaging
+      uri: ${MONGODB_URI:mongodb://localhost:27017/messaging}
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
       # A slow Redis must not hold up a send for long.
       timeout: 2s
       connect-timeout: 2s
@@ -17,7 +24,7 @@ spring:
 messaging:
   realtime:
     # redis: fan-out across every instance through Redis pub/sub. local: this instance only, for development.
-    bus: redis
+    bus: ${MESSAGING_REALTIME_BUS:redis}
     allowed-origins: "*"
     ping-interval: 25s
     pong-timeout: 60s
