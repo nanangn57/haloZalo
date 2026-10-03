@@ -31,3 +31,13 @@ messaging:
     send-time-limit: 10s
     send-buffer-limit: 512KB
     max-text-message-size: 8KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  health:
+    # Sending still works while Redis is down (clients catch up by seq), so Redis must not mark the service DOWN.
+    redis:
+      enabled: false

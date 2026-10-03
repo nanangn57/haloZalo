@@ -26,6 +26,10 @@ services/messaging/
 
 Chạy: chép `.env.example` thành `.env.local` trong thư mục này rồi điền giá trị, sau đó `mvn spring-boot:run` từ thư mục này. Không điền gì thì dùng Mongo ở `localhost:27017` và Redis ở `localhost:6379`. Không có Redis thì đặt `MESSAGING_REALTIME_BUS=local`, chỉ dùng cho một instance. Test không cần Mongo hay Redis: `mvn test`.
 
+Chạy bằng Docker, gồm Mongo và Redis riêng: `docker compose up --build` trong thư mục này. Service ở `http://localhost:8082`, WebSocket ở `ws://localhost:8082/ws`. `docker compose down -v` xoá luôn dữ liệu Mongo. Compose không đọc `.env.local`, vì trong container `localhost` không phải Mongo hay Redis. Muốn dùng Mongo hay Redis trên cloud thì đặt biến trong shell trước khi chạy compose. Image không chứa `.env.local` và chạy bằng user không phải root.
+
+`GET /actuator/health` trả `UP` khi app và Mongo chạy. Redis không tính vào health, vì Redis tắt thì gửi tin vẫn được.
+
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017/messaging` | Chuỗi kết nối Mongo, gồm user, password và tên database |
