@@ -19,6 +19,16 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 - Lỗi mới `NOT_FOUND` 404, cho tin không tồn tại.
 - Event `messaging.message.deleted`, payload `{ messageId, conversationId, deletedAt }`. Đã phát (log), cần thêm vào `events.md`.
 
+## Catch-up
+
+Đã chạy trong service, chưa có trong OpenAPI. Timeline tuần 5 cần P1 sửa OpenAPI trước #11.
+
+- `GET /conversations/{conversationId}/messages?afterSeq=&limit=`, trả `{ messages: Message[], hasMore: boolean }`.
+- `afterSeq` mặc định 0, `limit` mặc định 100, tối đa 200. Sai thì 400.
+- Tin đã xoá trả `status: "DELETED"`, `deletedAt`, không có `body`. Vì vậy `body` trong `TextMessage` và `EmotionMessage` phải thành không bắt buộc khi `status` là `DELETED`.
+- Chưa có: xoá và reaction trên tin cũ hơn `afterSeq` lúc client offline. Muốn đủ thì cần thêm một bộ đếm thay đổi theo hội thoại, hoặc client tải lại trang tin đang hiện khi kết nối lại.
+- Mốc đã đọc (tuần 5) vẫn chưa có. Catch-up không đổi gì ở mốc đó.
+
 ## Shape `Message` cho bản sau
 
 Đề xuất thêm vào `MessageBase`, đều không bắt buộc nên client cũ không vỡ. `replyTo` và `forwardedFrom` đã được trả khi có giá trị:

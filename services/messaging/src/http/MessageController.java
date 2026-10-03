@@ -1,5 +1,6 @@
 package http;
 
+import api.CatchUpResponse;
 import api.ConversationResponse;
 import api.ForwardMessageRequest;
 import api.MessageResponse;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -47,6 +49,18 @@ public final class MessageController {
         MessageService.Sent sent = messages.send(
             conversationId, userId, request.getClientMsgId(), content, null, request.getReplyTo());
         return sentResponse(sent);
+    }
+
+    /**
+     * Catch-up after a reconnect or a seq gap. Call again with the last seq received while hasMore is true.
+     */
+    @GetMapping("/conversations/{conversationId}/messages")
+    public CatchUpResponse catchUp(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @RequestParam(required = false) Long afterSeq,
+        @RequestParam(required = false) Integer limit) {
+        return new CatchUpResponse(messages.catchUp(conversationId, userId, afterSeq, limit));
     }
 
     @PostMapping("/conversations/{conversationId}/forwards")

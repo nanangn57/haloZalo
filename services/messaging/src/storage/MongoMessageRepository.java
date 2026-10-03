@@ -16,12 +16,15 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.gt;
 
 @Component
 public final class MongoMessageRepository implements MessageRepository {
@@ -59,6 +62,18 @@ public final class MongoMessageRepository implements MessageRepository {
     @Override
     public Message findBySenderAndClientMsgId(String senderId, String clientMsgId) {
         return fromDocument(messages.find(and(eq("senderId", senderId), eq("clientMsgId", clientMsgId))).first());
+    }
+
+    @Override
+    public List<Message> findAfterSeq(String conversationId, long afterSeq, int limit) {
+        // Served by the unique (conversationId, seq) index.
+        List<Message> rows = new ArrayList<>();
+        for (Document row : messages.find(and(eq("conversationId", conversationId), gt("seq", afterSeq)))
+            .sort(Indexes.ascending("seq"))
+            .limit(limit)) {
+            rows.add(fromDocument(row));
+        }
+        return rows;
     }
 
     static Document toDocument(Message message) {

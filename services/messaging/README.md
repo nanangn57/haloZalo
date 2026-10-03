@@ -19,7 +19,7 @@ services/messaging/
     storage/          interface lưu, và implementation Mongo
     event/            đóng phong bì event, ghi log, đẩy sang realtime
     realtime/         WebSocket /ws, socket theo user, heartbeat, fan-out qua Redis
-    service/          mở hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction
+    service/          mở hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, catch-up
     http/             nhận HTTP, đổi lỗi thành status
   test/               cùng các package trên
 ```
@@ -62,6 +62,12 @@ Index được tạo lúc khởi động. `seq` tăng bằng `$inc` trên `conve
 ## API
 
 `POST /conversations/{conversationId}/messages` nhận `SendMessageRequest` của OpenAPI, chỉ `TEXT` và `EMOTION`. Trả `Message` của OpenAPI: 201 khi tin mới, 200 khi trùng `clientMsgId`. Ghi xong mới log `messaging.message.created`.
+
+`GET /conversations/{conversationId}/messages?afterSeq=N&limit=M` là catch-up. Trả `{ messages, hasMore }`, `messages` là `Message` của OpenAPI, xếp theo `seq` tăng dần, chỉ gồm tin có `seq > afterSeq`. `afterSeq` mặc định 0, `limit` mặc định 100, tối đa 200. Còn `hasMore` thì gọi tiếp với `seq` cuối vừa nhận. Chỉ thành viên gọi được.
+
+Tin đã xoá vẫn có trong catch-up, với `status: "DELETED"` và `deletedAt`, không có `body`. Nhờ vậy client thấy đủ mọi `seq`, không chờ một tin không bao giờ tới. `hasMore: false` nghĩa là đã đủ, kể cả khi `seq` có lỗ do hai lần retry chạy đồng thời. Query đi theo index `(conversationId, seq)`.
+
+Catch-up chỉ trả tin mới hơn `afterSeq`. Tin cũ hơn bị xoá, hoặc reaction đổi trên tin cũ, khi client đang offline thì catch-up chưa báo.
 
 Body có thể thêm `replyTo`: id một tin trong cùng hội thoại, sai thì 400. Response có `replyTo` khi tin là trả lời, tin thường giữ đúng shape cũ.
 
@@ -109,10 +115,10 @@ Người gửi cũng là thành viên, nên thiết bị khác của người g�
 | Client đọc chậm | Mỗi socket gửi tuần tự, tối đa 10 giây và 512KB chờ. Quá thì đóng, mã 1011 |
 | Deploy hoặc tắt instance | `server.shutdown: graceful`, đóng mọi socket bằng 1001 trước khi tắt web server |
 | Redis hoặc fan-out lỗi | Không làm hỏng request: tin đã ghi, trả 201 bình thường. Lettuce từ chối lệnh ngay khi mất kết nối, timeout 2 giây |
-| Client lỡ frame | Redis pub/sub không lưu. Client thấy lỗ `seq` hoặc vừa kết nối lại thì gọi catch-up |
+| Client lỡ frame | Redis pub/sub không lưu. Client thấy lỗ `seq` hoặc vừa kết nối lại thì gọi catch-up với `seq` cuối đã có |
 
 Nhận mã đóng 1001 hoặc 1011, hoặc mất kết nối, thì client nên kết nối lại với backoff có jitter, rồi gọi catch-up. Ping và pong là frame điều khiển: trình duyệt và `java.net.http` tự trả pong, client không cần code thêm.
 
 Thứ tự: event của cùng một instance đi theo thứ tự ghi. Giữa hai instance thì không chắc, nên client xếp tin theo `seq`, không theo lúc frame đến.
 
-Đã chạy thử hai instance dùng chung Redis: tin gửi ở instance A tới socket ở instance B. Tắt Redis thì gửi tin vẫn 201 trong vài mili giây. Bật lại Redis thì tự đẩy tiếp.
+Đã chạy thử hai instance dùng chung Redis: tin gửi ở instance A tới socket ở instance B. Tắt Redis thì gửi tin vẫn 201 trong vài mili giây. Bật lại Redis thì tự đẩy tiếp. Tin lỡ trong lúc Redis tắt lấy lại đủ bằng catch-up, kể cả tin đã bị xoá.

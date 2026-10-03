@@ -28,6 +28,8 @@ public final class MessageService {
     private static final Pattern UUID_PATTERN =
         Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     private static final String NOT_MEMBER = "Not a member of this conversation";
+    public static final int CATCH_UP_DEFAULT_LIMIT = 100;
+    public static final int CATCH_UP_MAX_LIMIT = 200;
 
     private final ConversationRepository conversations;
     private final MessageRepository messages;
@@ -114,6 +116,26 @@ public final class MessageService {
         }
         String original = source.getForwardedFrom() == null ? source.getMessageId() : source.getForwardedFrom();
         return store(target, senderId, clientMsgId, source.getContent(), null, null, original);
+    }
+
+    /**
+     * Messages after the client's last seen seq, deleted ones included so the client can fill every slot.
+     * hasMore is false once nothing newer exists, even when seq has a hole left by a lost retry race.
+     */
+    public CatchUp catchUp(String conversationId, String userId, Long afterSeq, Integer limit) {
+        long after = afterSeq == null ? 0 : afterSeq;
+        int size = limit == null ? CATCH_UP_DEFAULT_LIMIT : limit;
+        if (after < 0) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "afterSeq must be 0 or more");
+        }
+        if (size < 1 || size > CATCH_UP_MAX_LIMIT) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "limit must be between 1 and " + CATCH_UP_MAX_LIMIT);
+        }
+        memberConversation(conversationId, userId);
+        // One extra row tells whether another page exists without a count query.
+        List<Message> rows = messages.findAfterSeq(conversationId, after, size + 1);
+        boolean hasMore = rows.size() > size;
+        return new CatchUp(hasMore ? rows.subList(0, size) : rows, hasMore);
     }
 
     /**
@@ -239,6 +261,9 @@ public final class MessageService {
     private static Instant now() {
         // Mongo keeps milliseconds, so the stored and the returned time must match.
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    }
+
+    public record CatchUp(List<Message> messages, boolean hasMore) {
     }
 
     public static final class Sent {

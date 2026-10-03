@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public final class MessageExceptionHandler {
@@ -28,6 +29,11 @@ public final class MessageExceptionHandler {
             case CONFLICT -> "CONFLICT";
         };
         return ResponseEntity.status(status).body(new ErrorResponse(code, rejected.getMessage()));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> mistyped(MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.badRequest().body(new ErrorResponse("VALIDATION_ERROR", ex.getName() + " is not a valid number"));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

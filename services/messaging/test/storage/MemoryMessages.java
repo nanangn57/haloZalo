@@ -2,7 +2,9 @@ package storage;
 
 import message.Message;
 
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public final class MemoryMessages implements MessageRepository {
@@ -33,6 +35,15 @@ public final class MemoryMessages implements MessageRepository {
             .filter(row -> row.getSenderId().equals(senderId) && row.getClientMsgId().equals(clientMsgId))
             .findFirst()
             .orElse(null);
+    }
+
+    @Override
+    public List<Message> findAfterSeq(String conversationId, long afterSeq, int limit) {
+        return rows.values().stream()
+            .filter(row -> row.getConversationId().equals(conversationId) && row.getSeq() > afterSeq)
+            .sorted(Comparator.comparingLong(Message::getSeq))
+            .limit(limit)
+            .toList();
     }
 
     public int size() {

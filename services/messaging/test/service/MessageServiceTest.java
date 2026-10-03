@@ -27,6 +27,7 @@ class MessageServiceTest {
     private static final String DIRECT = "cccccccc-0000-4000-8000-000000000001";
     private static final String GROUP = "cccccccc-0000-4000-8000-000000000002";
 
+    private MemoryConversations conversations;
     private MemoryMessages messages;
     private RecordingEvents events;
     private MessageService service;
@@ -35,7 +36,8 @@ class MessageServiceTest {
     void setUp() {
         messages = new MemoryMessages();
         events = new RecordingEvents();
-        service = new MessageService(new MemoryConversations(), messages, new MemoryReactions(), events);
+        conversations = new MemoryConversations();
+        service = new MessageService(conversations, messages, new MemoryReactions(), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         service.openConversation(GROUP, ConversationType.GROUP, List.of(ALICE, BOB, CAROL));
     }
@@ -179,6 +181,61 @@ class MessageServiceTest {
         assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.react(GROUP, message.getMessageId(), BOB, "heart"));
         assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.react(GROUP, UUID.randomUUID().toString(), BOB, "like"));
         assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.react(DIRECT, message.getMessageId(), BOB, "like"));
+    }
+
+    @Test
+    void catchUpPagesThroughOneConversationInSeqOrder() {
+        for (int i = 1; i <= 5; i++) {
+            text(DIRECT, i % 2 == 0 ? BOB : ALICE, "m" + i);
+        }
+        text(GROUP, CAROL, "elsewhere");
+
+        MessageService.CatchUp first = service.catchUp(DIRECT, BOB, 1L, 2);
+        MessageService.CatchUp last = service.catchUp(DIRECT, BOB, 3L, 2);
+        MessageService.CatchUp nothingNew = service.catchUp(DIRECT, BOB, 5L, 2);
+        MessageService.CatchUp fromStart = service.catchUp(DIRECT, BOB, null, null);
+
+        assertEquals(List.of(2L, 3L), first.messages().stream().map(Message::getSeq).toList());
+        assertTrue(first.hasMore());
+        assertEquals(List.of(4L, 5L), last.messages().stream().map(Message::getSeq).toList());
+        assertFalse(last.hasMore());
+        assertEquals(List.of(), nothingNew.messages());
+        assertFalse(nothingNew.hasMore());
+        assertEquals(5, fromStart.messages().size());
+    }
+
+    @Test
+    void catchUpKeepsDeletedMessagesSoNoSeqSlotLooksMissing() {
+        Message gone = text(DIRECT, ALICE, "oops").getMessage();
+        text(DIRECT, BOB, "after");
+        service.delete(DIRECT, gone.getMessageId(), ALICE);
+
+        List<Message> caughtUp = service.catchUp(DIRECT, BOB, 0L, null).messages();
+
+        assertEquals(List.of(1L, 2L), caughtUp.stream().map(Message::getSeq).toList());
+        assertEquals(MessageStatus.DELETED, caughtUp.get(0).getStatus());
+    }
+
+    @Test
+    void catchUpEndsCleanlyAcrossASeqHoleLeftByALostRetryRace() {
+        text(DIRECT, ALICE, "one");
+        conversations.nextSeq(DIRECT);
+        text(DIRECT, ALICE, "three");
+
+        MessageService.CatchUp caughtUp = service.catchUp(DIRECT, BOB, 0L, null);
+
+        assertEquals(List.of(1L, 3L), caughtUp.messages().stream().map(Message::getSeq).toList());
+        assertFalse(caughtUp.hasMore());
+    }
+
+    @Test
+    void catchUpIsForMembersAndRejectsBadPaging() {
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.catchUp(DIRECT, CAROL, 0L, null));
+        assertReason(MessageService.Rejected.Reason.UNAUTHENTICATED, () -> service.catchUp(DIRECT, null, 0L, null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.catchUp(DIRECT, ALICE, -1L, null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.catchUp(DIRECT, ALICE, 0L, 0));
+        assertReason(MessageService.Rejected.Reason.VALIDATION,
+            () -> service.catchUp(DIRECT, ALICE, 0L, MessageService.CATCH_UP_MAX_LIMIT + 1));
     }
 
     private MessageService.Sent text(String conversationId, String senderId, String text) {

@@ -258,6 +258,64 @@ class MessageControllerTest {
         return "/conversations/" + conversationId + "/messages/" + messageId + "/reactions";
     }
 
+    @Test
+    void catchUpReturnsContractMessagesInSeqOrderWithPaging() throws Exception {
+        String first = messageId(sendText(DIRECT, ALICE, "one"));
+        sendText(DIRECT, BOB, "two");
+        sendText(DIRECT, ALICE, "three");
+
+        catchUp(DIRECT, BOB, "?afterSeq=0&limit=2")
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.hasMore").value(true))
+            .andExpect(jsonPath("$.messages.length()").value(2))
+            .andExpect(jsonPath("$.messages[0].messageId").value(first))
+            .andExpect(jsonPath("$.messages[0].seq").value(1))
+            .andExpect(jsonPath("$.messages[0].type").value("TEXT"))
+            .andExpect(jsonPath("$.messages[0].body").value("one"))
+            .andExpect(jsonPath("$.messages[0].clientMsgId").isNotEmpty())
+            .andExpect(jsonPath("$.messages[0].status").doesNotExist())
+            .andExpect(jsonPath("$.messages[1].seq").value(2));
+
+        catchUp(DIRECT, BOB, "?afterSeq=2&limit=2")
+            .andExpect(jsonPath("$.hasMore").value(false))
+            .andExpect(jsonPath("$.messages.length()").value(1))
+            .andExpect(jsonPath("$.messages[0].body").value("three"));
+
+        catchUp(DIRECT, BOB, "")
+            .andExpect(jsonPath("$.messages.length()").value(3));
+    }
+
+    @Test
+    void catchUpShowsADeletedMessageAsAnEmptySlot() throws Exception {
+        String gone = messageId(sendText(DIRECT, ALICE, "secret"));
+        deleteMessage(DIRECT, gone, ALICE).andExpect(status().isNoContent());
+
+        catchUp(DIRECT, BOB, "?afterSeq=0")
+            .andExpect(jsonPath("$.messages[0].messageId").value(gone))
+            .andExpect(jsonPath("$.messages[0].seq").value(1))
+            .andExpect(jsonPath("$.messages[0].status").value("DELETED"))
+            .andExpect(jsonPath("$.messages[0].deletedAt").isNotEmpty())
+            .andExpect(jsonPath("$.messages[0].body").doesNotExist());
+    }
+
+    @Test
+    void catchUpRejectsBadParametersOutsidersAndMissingUser() throws Exception {
+        catchUp(DIRECT, BOB, "?afterSeq=abc")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        catchUp(DIRECT, BOB, "?limit=500")
+            .andExpect(status().isBadRequest());
+        catchUp(DIRECT, CAROL, "")
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/conversations/" + DIRECT + "/messages"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    private ResultActions catchUp(String conversationId, String userId, String query) throws Exception {
+        return mvc.perform(get("/conversations/" + conversationId + "/messages" + query)
+            .header(MessageController.USER_HEADER, userId));
+    }
+
     private ResultActions send(String userId, String body) throws Exception {
         return send(DIRECT, userId, body);
     }

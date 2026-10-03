@@ -7,7 +7,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
  * The contract's Message: MessageBase plus type and body. Only TEXT and EMOTION have a contract shape yet.
- * replyTo and forwardedFrom are left out when null, so a plain message keeps the exact contract shape.
+ * replyTo, forwardedFrom, status and deletedAt are left out when null, so a plain message keeps the exact
+ * contract shape. A deleted message keeps its seq slot but never shows its content again.
  */
 public final class MessageResponse {
     private final String messageId;
@@ -19,6 +20,8 @@ public final class MessageResponse {
     private final String clientMsgId;
     private final String replyTo;
     private final String forwardedFrom;
+    private final String status;
+    private final String deletedAt;
     private final String createdAt;
 
     public MessageResponse(Message message) {
@@ -27,10 +30,12 @@ public final class MessageResponse {
         this.seq = message.getSeq();
         this.senderId = message.getSenderId();
         this.type = message.getType().name();
-        this.body = body(message.getContent());
+        this.body = message.isDeleted() ? null : body(message.getContent());
         this.clientMsgId = message.getClientMsgId();
         this.replyTo = message.getReplyTo();
         this.forwardedFrom = message.getForwardedFrom();
+        this.status = message.isDeleted() ? message.getStatus().name() : null;
+        this.deletedAt = message.isDeleted() ? message.getDeletedAt().toString() : null;
         this.createdAt = message.getCreatedAt().toString();
     }
 
@@ -64,6 +69,7 @@ public final class MessageResponse {
         return type;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getBody() {
         return body;
     }
@@ -80,6 +86,16 @@ public final class MessageResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getForwardedFrom() {
         return forwardedFrom;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getStatus() {
+        return status;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getDeletedAt() {
+        return deletedAt;
     }
 
     public String getCreatedAt() {
