@@ -1,6 +1,7 @@
 package service;
 
 import conversation.ConversationType;
+import event.RecordingEvents;
 import message.Message;
 import message.MessageContent;
 import message.MessageStatus;
@@ -10,7 +11,6 @@ import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,14 +28,14 @@ class MessageServiceTest {
     private static final String GROUP = "cccccccc-0000-4000-8000-000000000002";
 
     private MemoryMessages messages;
-    private List<Message> published;
+    private RecordingEvents events;
     private MessageService service;
 
     @BeforeEach
     void setUp() {
         messages = new MemoryMessages();
-        published = new ArrayList<>();
-        service = new MessageService(new MemoryConversations(), messages, new MemoryReactions(), published::add);
+        events = new RecordingEvents();
+        service = new MessageService(new MemoryConversations(), messages, new MemoryReactions(), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         service.openConversation(GROUP, ConversationType.GROUP, List.of(ALICE, BOB, CAROL));
     }
@@ -62,7 +62,7 @@ class MessageServiceTest {
         assertEquals(2, second.getSeq());
         assertEquals(1, inGroup.getSeq());
         assertEquals(MessageStatus.SENT, first.getStatus());
-        assertEquals(List.of(first, second, inGroup), published);
+        assertEquals(List.of(first, second, inGroup), events.created);
     }
 
     @Test
@@ -76,7 +76,7 @@ class MessageServiceTest {
         assertFalse(retry.isCreated());
         assertEquals(first.getMessage().getMessageId(), retry.getMessage().getMessageId());
         assertEquals(2, next.getSeq());
-        assertEquals(2, published.size());
+        assertEquals(2, events.created.size());
     }
 
     @Test
@@ -141,12 +141,14 @@ class MessageServiceTest {
         assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.delete(DIRECT, original.getMessageId(), BOB));
         assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.delete(GROUP, original.getMessageId(), ALICE));
         Message deleted = service.delete(DIRECT, original.getMessageId(), ALICE);
+        service.delete(DIRECT, original.getMessageId(), ALICE);
 
         assertEquals(MessageStatus.DELETED, deleted.getStatus());
         assertNotNull(deleted.getDeletedAt());
         assertEquals(deleted.getDeletedAt(), deleted.getUpdatedAt());
         assertEquals(MessageStatus.DELETED, messages.findById(original.getMessageId()).getStatus());
         assertEquals(original.getMessageId(), messages.findById(reply.getMessageId()).getReplyTo());
+        assertEquals(List.of(deleted), events.deleted);
         assertReason(MessageService.Rejected.Reason.VALIDATION,
             () -> service.forward(GROUP, BOB, UUID.randomUUID().toString(), original.getMessageId()));
     }
@@ -162,7 +164,15 @@ class MessageServiceTest {
         assertEquals(3, service.reactions(GROUP, message.getMessageId(), ALICE).size());
 
         service.unreact(GROUP, message.getMessageId(), CAROL, "haha");
+        service.unreact(GROUP, message.getMessageId(), CAROL, "haha");
         assertEquals(2, service.reactions(GROUP, message.getMessageId(), ALICE).size());
+        String id = message.getMessageId();
+        assertEquals(List.of(
+            "added " + GROUP + " " + id + " " + BOB + " love",
+            "added " + GROUP + " " + id + " " + CAROL + " love",
+            "added " + GROUP + " " + id + " " + CAROL + " haha",
+            "removed " + GROUP + " " + id + " " + CAROL + " haha"
+        ), events.reactions);
 
         Message direct = text(DIRECT, ALICE, "private").getMessage();
         assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.react(DIRECT, direct.getMessageId(), CAROL, "like"));

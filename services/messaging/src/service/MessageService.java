@@ -129,11 +129,12 @@ public final class MessageService {
         }
         Message deleted = message.softDeleted(now());
         messages.update(deleted);
+        events.publishMessageDeleted(deleted);
         return deleted;
     }
 
     /**
-     * Adding the same reaction twice is a no-op.
+     * Adding the same reaction twice is a no-op and publishes nothing.
      */
     public void react(String conversationId, String messageId, String userId, String code) {
         if (!MessageContent.EMOTION_CODES.contains(code)) {
@@ -143,15 +144,20 @@ public final class MessageService {
         if (message.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot get reactions");
         }
-        reactions.insert(new MessageReaction(UUID.randomUUID().toString(), messageId, userId, code, now()));
+        MessageReaction reaction = new MessageReaction(UUID.randomUUID().toString(), messageId, userId, code, now());
+        if (reactions.insert(reaction)) {
+            events.publishReactionAdded(conversationId, reaction);
+        }
     }
 
     /**
-     * Removing a reaction that is not there is a no-op.
+     * Removing a reaction that is not there is a no-op and publishes nothing.
      */
     public void unreact(String conversationId, String messageId, String userId, String code) {
         messageIn(conversationId, messageId, userId);
-        reactions.delete(messageId, userId, code);
+        if (reactions.delete(messageId, userId, code)) {
+            events.publishReactionRemoved(conversationId, messageId, userId, code);
+        }
     }
 
     public List<MessageReaction> reactions(String conversationId, String messageId, String userId) {

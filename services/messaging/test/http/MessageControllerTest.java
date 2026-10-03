@@ -1,5 +1,6 @@
 package http;
 
+import event.RecordingEvents;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -36,7 +37,7 @@ class MessageControllerTest {
     @BeforeEach
     void setUp() throws Exception {
         MessageService service = new MessageService(
-            new MemoryConversations(), new MemoryMessages(), new MemoryReactions(), message -> { });
+            new MemoryConversations(), new MemoryMessages(), new MemoryReactions(), new RecordingEvents());
         mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
             .setControllerAdvice(new MessageExceptionHandler())
             .build();

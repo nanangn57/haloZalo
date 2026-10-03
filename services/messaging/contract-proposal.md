@@ -17,7 +17,7 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 - `POST /conversations/{conversationId}/forwards`, body `{ messageId, clientMsgId }`, trả `Message`, 201 hoặc 200.
 - `DELETE /conversations/{conversationId}/messages/{messageId}`, trả 204.
 - Lỗi mới `NOT_FOUND` 404, cho tin không tồn tại.
-- Thiết bị khác cần biết tin đã bị xoá. Đề xuất event `messaging.message.deleted`, payload `{ messageId, conversationId, deletedAt }`.
+- Event `messaging.message.deleted`, payload `{ messageId, conversationId, deletedAt }`. Đã phát (log), cần thêm vào `events.md`.
 
 ## Shape `Message` cho bản sau
 
@@ -45,4 +45,8 @@ Loại tin media dùng `content` có cấu trúc thay cho `body` chuỗi:
 - `DELETE` cùng path, trả 204.
 - `GET /conversations/{conversationId}/messages/{messageId}/reactions`, trả `{ reactions: [{ userId, code, createdAt }] }`.
 
-Để thiết bị khác thấy reaction ngay, cần event kiểu `messaging.reaction.added` / `messaging.reaction.removed`, payload `{ messageId, conversationId, userId, code }`.
+Event `messaging.reaction.added` và `messaging.reaction.removed`, payload `{ messageId, conversationId, userId, code }`. Đã phát (log), cần thêm vào `events.md`. Analytics có thể đếm reaction từ hai event này.
+
+## Event mới và WebSocket
+
+`events.md` nói WebSocket `/ws` bản v1 chỉ đẩy `messaging.message.created`. Để thiết bị khác thấy xoá và reaction ngay, `/ws` cần đẩy thêm ba event trên. Ba event chỉ phát khi có thay đổi thật, nên client áp dụng thẳng, không cần tự lọc trùng theo nội dung.
