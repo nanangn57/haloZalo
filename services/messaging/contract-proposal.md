@@ -9,7 +9,7 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 1. **Header user từ gateway.** Messaging đọc `X-User-Id`. decisions.md nói gateway gắn `userId` nhưng chưa nói tên header.
 2. **Lỗi 403 `FORBIDDEN`.** F-B9 cần chặn người ngoài hội thoại. `ErrorResponse.code` hiện chỉ có `VALIDATION_ERROR`, `UNAUTHENTICATED`, `CONFLICT`. `sendMessage` cần thêm response 403.
 3. **Thành viên hội thoại.** Messaging giữ bản sao `memberIds` trong collection `conversations`, tức là chọn đường "nhận event thành viên rồi giữ bản sao" của timeline. Tạm thời hội thoại được mở bằng `POST /internal/conversations`. Khi Identity có nhóm, cần event kiểu `identity.group.member_added` / `member_removed` để đồng bộ bản sao này.
-4. **Hội thoại phải tồn tại trước khi gửi.** decisions.md cho phép `conversationId` do client sinh mà không cần tạo trước. Với kiểm tra thành viên, client phải mở hội thoại trước. Cần sửa câu đó, hoặc thêm API tạo hội thoại public.
+4. **Hội thoại phải tồn tại trước khi gửi.** decisions.md cho phép `conversationId` do client sinh mà không cần tạo trước. Với kiểm tra thành viên, client phải mở hội thoại trước, bằng `POST /conversations/direct` (đã có, xem mục Hội thoại). Cần sửa câu đó trong decisions.md.
 
 ## Endpoint trả lời, chuyển tiếp, xoá
 
@@ -21,12 +21,24 @@ Gửi P1. Code trong service này đã có những phần dưới, nhưng HTTP v
 - Lỗi mới `NOT_FOUND` 404, cho tin không tồn tại.
 - Event `messaging.message.deleted`, payload `{ messageId, conversationId, deletedAt }`. Đã phát (log), cần thêm vào `events.md`.
 
-## Catch-up
+## Hội thoại
+
+Đã chạy trong service, chưa có trong OpenAPI. Web và mobile cần trước khi mở được chat (#9, tuần 3).
+
+- `POST /conversations/direct`, body `{ userId }`, trả `Conversation`: 201 khi tạo, 200 khi đã có. Một cặp user một hội thoại DIRECT. Với chính mình thì 400.
+- `GET /conversations?cursor=&limit=`, trả `{ conversations: Conversation[], nextCursor: string | null }`, hoạt động gần nhất trước. `limit` mặc định 50, tối đa 100.
+- `GET /conversations/{conversationId}`, trả `Conversation`, 403 với người ngoài.
+- Schema `Conversation`: `conversationId`, `type` (`DIRECT` | `GROUP`), `memberIds`, `lastSeq`, `createdAt`, và không bắt buộc `lastMessageAt`, `lastMessage` (`Message`).
+- Tạo nhóm vẫn là việc của Identity. Khi Identity tạo nhóm, messaging cần biết để mở hội thoại GROUP: event `identity.group.created` có `groupId` và thành viên, dùng `groupId` làm `conversationId`.
+- Messaging không kiểm tra `userId` có tồn tại. Nếu cần, gateway hoặc client kiểm với Identity trước.
+
+## Lịch sử và catch-up
 
 Đã chạy trong service, chưa có trong OpenAPI. Timeline tuần 5 cần P1 sửa OpenAPI trước #11.
 
-- `GET /conversations/{conversationId}/messages?afterSeq=&limit=`, trả `{ messages: Message[], hasMore: boolean }`.
-- `afterSeq` mặc định 0, `limit` mặc định 100, tối đa 200. Sai thì 400.
+- `GET /conversations/{conversationId}/messages?afterSeq=&beforeSeq=&limit=`, trả `{ messages: Message[], hasMore: boolean }`, luôn theo `seq` tăng dần.
+- Không có `afterSeq`: lịch sử, trang mới nhất, `beforeSeq` để xem cũ hơn. Có `afterSeq`: catch-up, tin sau mốc đó. Cả hai cùng lúc thì 400.
+- `limit` mặc định 100, tối đa 200. Sai thì 400.
 - Tin đã xoá trả `status: "DELETED"`, `deletedAt`, không có `body`. Vì vậy `body` trong `TextMessage` và `EmotionMessage` phải thành không bắt buộc khi `status` là `DELETED`.
 - Chưa có: xoá và reaction trên tin cũ hơn `afterSeq` lúc client offline. Muốn đủ thì cần thêm một bộ đếm thay đổi theo hội thoại, hoặc client tải lại trang tin đang hiện khi kết nối lại.
 - Mốc đã đọc (tuần 5) vẫn chưa có. Catch-up không đổi gì ở mốc đó.

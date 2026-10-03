@@ -1,6 +1,8 @@
 package service;
 
 import conversation.Conversation;
+import conversation.ConversationCursor;
+import conversation.ConversationSummary;
 import conversation.ConversationType;
 import event.EventPublisher;
 import message.ContentValidator;
@@ -17,6 +19,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -25,8 +28,10 @@ import org.springframework.stereotype.Service;
 @Service
 public final class MessageService {
     private static final String NOT_MEMBER = "Not a member of this conversation";
-    public static final int CATCH_UP_DEFAULT_LIMIT = 100;
-    public static final int CATCH_UP_MAX_LIMIT = 200;
+    public static final int MESSAGES_DEFAULT_LIMIT = 100;
+    public static final int MESSAGES_MAX_LIMIT = 200;
+    public static final int CONVERSATIONS_DEFAULT_LIMIT = 50;
+    public static final int CONVERSATIONS_MAX_LIMIT = 100;
 
     private final ConversationRepository conversations;
     private final MessageRepository messages;
@@ -67,6 +72,54 @@ public final class MessageService {
             throw new Rejected(Rejected.Reason.CONFLICT, "Conversation already exists");
         }
         return conversation;
+    }
+
+    /**
+     * The one DIRECT conversation between the caller and another user, created on first use. Two users opening
+     * it at the same moment get the same conversation.
+     */
+    public Opened openDirect(String userId, String otherUserId) {
+        String user = user(userId);
+        String other = uuid(otherUserId, "userId");
+        if (user.equals(other)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "A direct conversation needs another user");
+        }
+        String key = Conversation.directKey(Set.of(user, other));
+        Conversation existing = conversations.findDirect(key);
+        if (existing != null) {
+            return new Opened(summary(existing), false);
+        }
+        Conversation created = new Conversation(UUID.randomUUID().toString(), ConversationType.DIRECT, Set.of(user, other), 0, now());
+        if (conversations.insert(created)) {
+            return new Opened(new ConversationSummary(created, null), true);
+        }
+        // The other user opened it between our lookup and our insert.
+        Conversation winner = conversations.findDirect(key);
+        if (winner == null) {
+            throw new IllegalStateException("Direct conversation was neither inserted nor found: " + key);
+        }
+        return new Opened(summary(winner), false);
+    }
+
+    /**
+     * The caller's conversations, most recent activity first, each with its newest message.
+     */
+    public ConversationPage conversations(String userId, String cursor, Integer limit) {
+        String user = user(userId);
+        int size = limit(limit, CONVERSATIONS_DEFAULT_LIMIT, CONVERSATIONS_MAX_LIMIT);
+        List<Conversation> rows = conversations.findForMember(user, cursor(cursor), size + 1);
+        boolean hasMore = rows.size() > size;
+        List<Conversation> page = hasMore ? rows.subList(0, size) : rows;
+        Map<String, Message> latest = messages.findLatest(page.stream().map(Conversation::getConversationId).toList());
+        List<ConversationSummary> summaries = page.stream()
+            .map(conversation -> new ConversationSummary(conversation, latest.get(conversation.getConversationId())))
+            .toList();
+        String next = hasMore ? ConversationCursor.after(page.get(page.size() - 1)).encode() : null;
+        return new ConversationPage(summaries, next);
+    }
+
+    public ConversationSummary conversation(String conversationId, String userId) {
+        return summary(memberConversation(conversationId, user(userId)));
     }
 
     /**
@@ -121,23 +174,33 @@ public final class MessageService {
     }
 
     /**
-     * Messages after the client's last seen seq, deleted ones included so the client can fill every slot.
-     * hasMore is false once nothing newer exists.
+     * A page of messages in seq order, deleted ones included so the client can fill every slot.
+     * With afterSeq it is catch-up: the oldest messages after it, and hasMore means newer ones exist.
+     * Otherwise it is history: the newest messages before beforeSeq (or the newest of all), and hasMore means
+     * older ones exist.
      */
-    public CatchUp catchUp(String conversationId, String userId, Long afterSeq, Integer limit) {
-        long after = afterSeq == null ? 0 : afterSeq;
-        int size = limit == null ? CATCH_UP_DEFAULT_LIMIT : limit;
-        if (after < 0) {
+    public MessagePage messages(String conversationId, String userId, Long afterSeq, Long beforeSeq, Integer limit) {
+        if (afterSeq != null && beforeSeq != null) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Use afterSeq or beforeSeq, not both");
+        }
+        if (afterSeq != null && afterSeq < 0) {
             throw new Rejected(Rejected.Reason.VALIDATION, "afterSeq must be 0 or more");
         }
-        if (size < 1 || size > CATCH_UP_MAX_LIMIT) {
-            throw new Rejected(Rejected.Reason.VALIDATION, "limit must be between 1 and " + CATCH_UP_MAX_LIMIT);
+        if (beforeSeq != null && beforeSeq < 1) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "beforeSeq must be 1 or more");
         }
-        Conversation conversation = memberConversation(conversationId, user(userId));
+        int size = limit(limit, MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT);
+        String id = memberConversation(conversationId, user(userId)).getConversationId();
         // One extra row tells whether another page exists without a count query.
-        List<Message> rows = messages.findAfterSeq(conversation.getConversationId(), after, size + 1);
+        if (afterSeq != null) {
+            List<Message> rows = messages.findAfterSeq(id, afterSeq, size + 1);
+            boolean hasMore = rows.size() > size;
+            return new MessagePage(hasMore ? rows.subList(0, size) : rows, hasMore);
+        }
+        List<Message> rows = messages.findBeforeSeq(id, beforeSeq == null ? Long.MAX_VALUE : beforeSeq, size + 1);
         boolean hasMore = rows.size() > size;
-        return new CatchUp(hasMore ? rows.subList(0, size) : rows, hasMore);
+        // Rows are in seq order, so the extra one is the oldest.
+        return new MessagePage(hasMore ? rows.subList(1, rows.size()) : rows, hasMore);
     }
 
     /**
@@ -259,6 +322,35 @@ public final class MessageService {
         return message;
     }
 
+    private ConversationSummary summary(Conversation conversation) {
+        Map<String, Message> latest = messages.findLatest(List.of(conversation.getConversationId()));
+        return new ConversationSummary(conversation, latest.get(conversation.getConversationId()));
+    }
+
+    private static int limit(Integer limit, int fallback, int max) {
+        int size = limit == null ? fallback : limit;
+        if (size < 1 || size > max) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "limit must be between 1 and " + max);
+        }
+        return size;
+    }
+
+    private static ConversationCursor cursor(String value) {
+        if (value == null) {
+            return null;
+        }
+        int split = value.indexOf('_');
+        String id = split < 0 ? null : Ids.canonical(value.substring(split + 1));
+        try {
+            if (id != null) {
+                return new ConversationCursor(Instant.ofEpochMilli(Long.parseLong(value.substring(0, split))), id);
+            }
+        } catch (NumberFormatException ex) {
+            // Falls through to the rejection below.
+        }
+        throw new Rejected(Rejected.Reason.VALIDATION, "cursor is not valid");
+    }
+
     private static String uuid(String value, String field) {
         String id = Ids.canonical(value);
         if (id == null) {
@@ -283,7 +375,16 @@ public final class MessageService {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
-    public record CatchUp(List<Message> messages, boolean hasMore) {
+    public record MessagePage(List<Message> messages, boolean hasMore) {
+    }
+
+    /**
+     * nextCursor is null on the last page.
+     */
+    public record ConversationPage(List<ConversationSummary> conversations, String nextCursor) {
+    }
+
+    public record Opened(ConversationSummary conversation, boolean created) {
     }
 
     public static final class Sent {

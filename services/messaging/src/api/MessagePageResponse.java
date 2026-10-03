@@ -7,13 +7,13 @@ import java.util.List;
 /**
  * Body of GET /conversations/{conversationId}/messages. Messages are in seq order.
  */
-public final class CatchUpResponse {
+public final class MessagePageResponse {
     private final List<MessageResponse> messages;
     private final boolean hasMore;
 
-    public CatchUpResponse(MessageService.CatchUp catchUp) {
-        this.messages = catchUp.messages().stream().map(MessageResponse::new).toList();
-        this.hasMore = catchUp.hasMore();
+    public MessagePageResponse(MessageService.MessagePage page) {
+        this.messages = page.messages().stream().map(MessageResponse::new).toList();
+        this.hasMore = page.hasMore();
     }
 
     public List<MessageResponse> getMessages() {

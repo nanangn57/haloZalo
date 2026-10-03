@@ -12,11 +12,13 @@ import storage.MemoryMessages;
 import storage.MemoryReactions;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,15 +29,17 @@ class MessageServiceTest {
     private static final String DIRECT = "cccccccc-0000-4000-8000-000000000001";
     private static final String GROUP = "cccccccc-0000-4000-8000-000000000002";
 
+    private MemoryConversations conversations;
     private MemoryMessages messages;
     private RecordingEvents events;
     private MessageService service;
 
     @BeforeEach
     void setUp() {
-        messages = new MemoryMessages();
         events = new RecordingEvents();
-        service = new MessageService(new MemoryConversations(), messages, new MemoryReactions(), events);
+        conversations = new MemoryConversations();
+        messages = new MemoryMessages(conversations);
+        service = new MessageService(conversations, messages, new MemoryReactions(), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         service.openConversation(GROUP, ConversationType.GROUP, List.of(ALICE, BOB, CAROL));
     }
@@ -188,10 +192,10 @@ class MessageServiceTest {
         }
         text(GROUP, CAROL, "elsewhere");
 
-        MessageService.CatchUp first = service.catchUp(DIRECT, BOB, 1L, 2);
-        MessageService.CatchUp last = service.catchUp(DIRECT, BOB, 3L, 2);
-        MessageService.CatchUp nothingNew = service.catchUp(DIRECT, BOB, 5L, 2);
-        MessageService.CatchUp fromStart = service.catchUp(DIRECT, BOB, null, null);
+        MessageService.MessagePage first = service.messages(DIRECT, BOB, 1L, null, 2);
+        MessageService.MessagePage last = service.messages(DIRECT, BOB, 3L, null, 2);
+        MessageService.MessagePage nothingNew = service.messages(DIRECT, BOB, 5L, null, 2);
+        MessageService.MessagePage fromStart = service.messages(DIRECT, BOB, null, null, null);
 
         assertEquals(List.of(2L, 3L), first.messages().stream().map(Message::getSeq).toList());
         assertTrue(first.hasMore());
@@ -208,7 +212,7 @@ class MessageServiceTest {
         text(DIRECT, BOB, "after");
         service.delete(DIRECT, gone.getMessageId(), ALICE);
 
-        List<Message> caughtUp = service.catchUp(DIRECT, BOB, 0L, null).messages();
+        List<Message> caughtUp = service.messages(DIRECT, BOB, 0L, null, null).messages();
 
         assertEquals(List.of(1L, 2L), caughtUp.stream().map(Message::getSeq).toList());
         assertEquals(MessageStatus.DELETED, caughtUp.get(0).getStatus());
@@ -237,12 +241,99 @@ class MessageServiceTest {
 
     @Test
     void catchUpIsForMembersAndRejectsBadPaging() {
-        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.catchUp(DIRECT, CAROL, 0L, null));
-        assertReason(MessageService.Rejected.Reason.UNAUTHENTICATED, () -> service.catchUp(DIRECT, null, 0L, null));
-        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.catchUp(DIRECT, ALICE, -1L, null));
-        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.catchUp(DIRECT, ALICE, 0L, 0));
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.messages(DIRECT, CAROL, 0L, null, null));
+        assertReason(MessageService.Rejected.Reason.UNAUTHENTICATED, () -> service.messages(DIRECT, null, 0L, null, null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, ALICE, -1L, null, null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, ALICE, 0L, null, 0));
         assertReason(MessageService.Rejected.Reason.VALIDATION,
-            () -> service.catchUp(DIRECT, ALICE, 0L, MessageService.CATCH_UP_MAX_LIMIT + 1));
+            () -> service.messages(DIRECT, ALICE, 0L, null, MessageService.MESSAGES_MAX_LIMIT + 1));
+    }
+
+    @Test
+    void directConversationIsOnePerPairWhoeverOpensIt() {
+        String dave = "aaaaaaaa-0000-4000-8000-000000000004";
+
+        MessageService.Opened first = service.openDirect(CAROL, dave);
+        MessageService.Opened again = service.openDirect(dave.toUpperCase(), CAROL);
+        MessageService.Opened setUpPair = service.openDirect(BOB, ALICE);
+
+        assertTrue(first.created());
+        assertFalse(again.created());
+        assertEquals(first.conversation().conversation().getConversationId(),
+            again.conversation().conversation().getConversationId());
+        assertEquals(ConversationType.DIRECT, first.conversation().conversation().getType());
+        assertEquals(Set.of(CAROL, dave), first.conversation().conversation().getMemberIds());
+        assertFalse(setUpPair.created());
+        assertEquals(DIRECT, setUpPair.conversation().conversation().getConversationId());
+        assertReason(MessageService.Rejected.Reason.CONFLICT,
+            () -> service.openConversation(null, ConversationType.DIRECT, List.of(BOB, ALICE)));
+    }
+
+    @Test
+    void directConversationNeedsAnotherValidUser() {
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.openDirect(ALICE, ALICE.toUpperCase()));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.openDirect(ALICE, "bob"));
+        assertReason(MessageService.Rejected.Reason.UNAUTHENTICATED, () -> service.openDirect(null, BOB));
+    }
+
+    @Test
+    void conversationListIsNewestActivityFirstWithTheLastMessageAndPages() throws Exception {
+        text(DIRECT, ALICE, "older");
+        Thread.sleep(5);
+        Message newest = text(GROUP, BOB, "newer").getMessage();
+
+        MessageService.ConversationPage first = service.conversations(ALICE, null, 1);
+        MessageService.ConversationPage second = service.conversations(ALICE, first.nextCursor(), 1);
+        MessageService.ConversationPage carol = service.conversations(CAROL, null, null);
+
+        assertEquals(GROUP, first.conversations().get(0).conversation().getConversationId());
+        assertEquals(newest.getMessageId(), first.conversations().get(0).lastMessage().getMessageId());
+        assertNotNull(first.nextCursor());
+        assertEquals(DIRECT, second.conversations().get(0).conversation().getConversationId());
+        assertEquals("older", ((MessageContent.Text) second.conversations().get(0).lastMessage().getContent()).text());
+        assertNull(second.nextCursor());
+        assertEquals(List.of(GROUP), carol.conversations().stream().map(row -> row.conversation().getConversationId()).toList());
+    }
+
+    @Test
+    void conversationListRejectsBadCursorAndLimit() {
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.conversations(ALICE, "yesterday", null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.conversations(ALICE, "12_not-a-uuid", null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION,
+            () -> service.conversations(ALICE, null, MessageService.CONVERSATIONS_MAX_LIMIT + 1));
+    }
+
+    @Test
+    void oneConversationIsForMembersOnly() {
+        Message last = text(DIRECT, BOB, "hi").getMessage();
+
+        assertEquals(last.getMessageId(), service.conversation(DIRECT, ALICE).lastMessage().getMessageId());
+        assertNull(service.conversation(GROUP, ALICE).lastMessage());
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.conversation(DIRECT, CAROL));
+    }
+
+    @Test
+    void historyStartsAtTheNewestPageAndScrollsBack() {
+        for (int i = 1; i <= 5; i++) {
+            text(DIRECT, ALICE, "m" + i);
+        }
+
+        MessageService.MessagePage newest = service.messages(DIRECT, BOB, null, null, 2);
+        MessageService.MessagePage older = service.messages(DIRECT, BOB, null, 4L, 2);
+        MessageService.MessagePage oldest = service.messages(DIRECT, BOB, null, 2L, 2);
+
+        assertEquals(List.of(4L, 5L), newest.messages().stream().map(Message::getSeq).toList());
+        assertTrue(newest.hasMore());
+        assertEquals(List.of(2L, 3L), older.messages().stream().map(Message::getSeq).toList());
+        assertTrue(older.hasMore());
+        assertEquals(List.of(1L), oldest.messages().stream().map(Message::getSeq).toList());
+        assertFalse(oldest.hasMore());
+    }
+
+    @Test
+    void historyAndCatchUpCannotBeMixed() {
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, BOB, 1L, 5L, null));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, BOB, null, 0L, null));
     }
 
     private MessageService.Sent text(String conversationId, String senderId, String text) {

@@ -1,6 +1,7 @@
 package storage;
 
 import conversation.Conversation;
+import conversation.ConversationCursor;
 import conversation.ConversationType;
 import message.Message;
 import message.MessageContent;
@@ -199,6 +200,84 @@ class PostgresRepositoriesTest {
         assertEquals(1, left.size());
         assertEquals(ALICE, left.get(0).getUserId());
         assertNotNull(left.get(0).getCreatedAt());
+    }
+
+    @Test
+    void oneDirectConversationPerPairEvenWhenBothOpenItAtOnce() throws Exception {
+        String carol = UUID.randomUUID().toString();
+        String dave = UUID.randomUUID().toString();
+        List<Callable<Boolean>> opens = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            Set<String> pair = i % 2 == 0 ? Set.of(carol, dave) : Set.of(dave, carol);
+            opens.add(() -> conversations.insert(
+                new Conversation(UUID.randomUUID().toString(), ConversationType.DIRECT, pair, 0, NOW)));
+        }
+
+        long inserted = runAll(opens).stream().filter(Boolean::booleanValue).count();
+
+        assertEquals(1, inserted);
+        Conversation found = conversations.findDirect(Conversation.directKey(Set.of(carol, dave)));
+        assertEquals(Set.of(carol, dave), found.getMemberIds());
+        assertEquals(conversationId, conversations.findDirect(Conversation.directKey(Set.of(ALICE, BOB))).getConversationId());
+    }
+
+    @Test
+    void conversationListIsNewestActivityFirstAndPagesWithTheCursor() {
+        String quiet = UUID.randomUUID().toString();
+        String busy = UUID.randomUUID().toString();
+        conversations.insert(new Conversation(quiet, ConversationType.GROUP, Set.of(ALICE, BOB, UUID.randomUUID().toString()), 0, NOW.plusSeconds(10)));
+        conversations.insert(new Conversation(busy, ConversationType.GROUP, Set.of(ALICE, UUID.randomUUID().toString(), UUID.randomUUID().toString()), 0, NOW));
+        messages.append(draftIn(busy, NOW.plusSeconds(20)));
+        Message newest = messages.append(draftIn(busy, NOW.plusSeconds(30)));
+
+        List<Conversation> all = conversations.findForMember(ALICE, null, 10);
+        List<Conversation> firstPage = conversations.findForMember(ALICE, null, 2);
+        List<Conversation> rest = conversations.findForMember(ALICE, ConversationCursor.after(firstPage.get(1)), 2);
+
+        assertEquals(List.of(busy, quiet, conversationId), all.stream().map(Conversation::getConversationId).toList());
+        assertEquals(NOW.plusSeconds(30), all.get(0).getLastMessageAt());
+        assertEquals(2L, all.get(0).getLastSeq());
+        assertEquals(3, all.get(0).getMemberIds().size());
+        assertEquals(List.of(conversationId), rest.stream().map(Conversation::getConversationId).toList());
+        assertEquals(List.of(quiet), conversations.findForMember(BOB, null, 10).stream()
+            .map(Conversation::getConversationId).filter(id -> !id.equals(conversationId)).toList());
+
+        Map<String, Message> latest = messages.findLatest(List.of(busy, quiet, conversationId));
+        assertEquals(Set.of(busy), latest.keySet());
+        assertEquals(newest.getMessageId(), latest.get(busy).getMessageId());
+    }
+
+    @Test
+    void historyTakesTheNewestPageBeforeASeqInSeqOrder() {
+        for (int i = 0; i < 5; i++) {
+            messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("m" + i)));
+        }
+
+        assertEquals(List.of(4L, 5L), seqs(messages.findBeforeSeq(conversationId, Long.MAX_VALUE, 2)));
+        assertEquals(List.of(2L, 3L), seqs(messages.findBeforeSeq(conversationId, 4, 2)));
+        assertEquals(List.of(1L), seqs(messages.findBeforeSeq(conversationId, 2, 2)));
+    }
+
+    private Message draftIn(String conversation, Instant at) {
+        return new Message(UUID.randomUUID().toString(), conversation, 0, ALICE, UUID.randomUUID().toString(),
+            new MessageContent.Text("hi"), null, null, null, MessageStatus.SENT, at, at, null);
+    }
+
+    private static List<Long> seqs(List<Message> rows) {
+        return rows.stream().map(Message::getSeq).toList();
+    }
+
+    private static <T> List<T> runAll(List<Callable<T>> tasks) throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            List<T> results = new ArrayList<>();
+            for (Future<T> result : pool.invokeAll(tasks)) {
+                results.add(result.get());
+            }
+            return results;
+        } finally {
+            pool.shutdown();
+        }
     }
 
     private Message draft(String sender, String clientMsgId, MessageContent content) {

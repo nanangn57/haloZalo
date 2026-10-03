@@ -11,12 +11,24 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 public final class PostgresMessageRepository implements MessageRepository {
     private static final String COLUMNS = "id, conversation_id, seq, sender_id, client_msg_id, type, content, metadata, "
         + "reply_to, forwarded_from, status, created_at, updated_at, deleted_at";
+    /**
+     * The same columns qualified with the alias m, for queries that join messages with conversations.
+     */
+    private static final String COLUMNS_OF_M = Arrays.stream(COLUMNS.split(", "))
+        .map(column -> "m." + column)
+        .collect(Collectors.joining(", "));
 
     private static final RowMapper<Message> MESSAGE = (row, index) -> {
         MessageType type = MessageType.valueOf(row.getString("type"));
@@ -53,8 +65,9 @@ public final class PostgresMessageRepository implements MessageRepository {
     public Message append(Message draft) {
         return transaction.execute(status -> {
             Long seq = jdbc.query(
-                "UPDATE conversations SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq",
+                "UPDATE conversations SET last_seq = last_seq + 1, last_message_at = ? WHERE id = ? RETURNING last_seq",
                 rows -> rows.next() ? rows.getLong(1) : null,
+                Sql.time(draft.getCreatedAt()),
                 Sql.uuid(draft.getConversationId()));
             if (seq == null) {
                 throw new IllegalStateException("Conversation not found: " + draft.getConversationId());
@@ -113,5 +126,33 @@ public final class PostgresMessageRepository implements MessageRepository {
         return jdbc.query(
             "SELECT " + COLUMNS + " FROM messages WHERE conversation_id = ? AND seq > ? ORDER BY seq LIMIT ?",
             MESSAGE, Sql.uuid(conversationId), afterSeq, limit);
+    }
+
+    @Override
+    public List<Message> findBeforeSeq(String conversationId, long beforeSeq, int limit) {
+        // Newest first to take the right page, then back to seq order for the client.
+        return jdbc.query(
+            "SELECT * FROM (SELECT " + COLUMNS + " FROM messages WHERE conversation_id = ? AND seq < ? "
+                + "ORDER BY seq DESC LIMIT ?) page ORDER BY seq",
+            MESSAGE, Sql.uuid(conversationId), beforeSeq, limit);
+    }
+
+    @Override
+    public Map<String, Message> findLatest(Collection<String> conversationIds) {
+        Map<String, Message> latest = new HashMap<>();
+        if (conversationIds.isEmpty()) {
+            return latest;
+        }
+        String placeholders = String.join(", ", Collections.nCopies(conversationIds.size(), "?"));
+        // last_seq points at the newest message, and (conversation_id, seq) is unique: one indexed lookup each.
+        List<Message> rows = jdbc.query(
+            "SELECT " + COLUMNS_OF_M + " FROM messages m "
+                + "JOIN conversations c ON c.id = m.conversation_id AND m.seq = c.last_seq "
+                + "WHERE c.id IN (" + placeholders + ")",
+            MESSAGE, conversationIds.stream().map(Sql::uuid).toArray());
+        for (Message row : rows) {
+            latest.put(row.getConversationId(), row);
+        }
+        return latest;
     }
 }

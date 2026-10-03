@@ -1,12 +1,15 @@
 package http;
 
-import api.CatchUpResponse;
+import api.ConversationListResponse;
 import api.ConversationResponse;
 import api.ForwardMessageRequest;
+import api.MessagePageResponse;
 import api.MessageResponse;
+import api.OpenDirectRequest;
 import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
+import conversation.ConversationSummary;
 import conversation.ConversationType;
 import message.MessageContent;
 import service.MessageService;
@@ -52,15 +55,43 @@ public final class MessageController {
     }
 
     /**
-     * Catch-up after a reconnect or a seq gap. Call again with the last seq received while hasMore is true.
+     * Get-or-create the 1-1 conversation with another user: 201 when created, 200 when it already existed.
+     */
+    @PostMapping("/conversations/direct")
+    public ResponseEntity<ConversationResponse> openDirect(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @RequestBody OpenDirectRequest request) {
+        MessageService.Opened opened = messages.openDirect(userId, request.getUserId());
+        return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation()));
+    }
+
+    @GetMapping("/conversations")
+    public ConversationListResponse conversations(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @RequestParam(required = false) String cursor,
+        @RequestParam(required = false) Integer limit) {
+        return new ConversationListResponse(messages.conversations(userId, cursor, limit));
+    }
+
+    @GetMapping("/conversations/{conversationId}")
+    public ConversationResponse conversation(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId) {
+        return new ConversationResponse(messages.conversation(conversationId, userId));
+    }
+
+    /**
+     * History without afterSeq: the newest page, then beforeSeq = the first seq received to scroll back.
+     * Catch-up with afterSeq: call again with the last seq received while hasMore is true.
      */
     @GetMapping("/conversations/{conversationId}/messages")
-    public CatchUpResponse catchUp(
+    public MessagePageResponse messages(
         @RequestHeader(value = USER_HEADER, required = false) String userId,
         @PathVariable String conversationId,
         @RequestParam(required = false) Long afterSeq,
+        @RequestParam(required = false) Long beforeSeq,
         @RequestParam(required = false) Integer limit) {
-        return new CatchUpResponse(messages.catchUp(conversationId, userId, afterSeq, limit));
+        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit));
     }
 
     @PostMapping("/conversations/{conversationId}/forwards")
@@ -114,8 +145,8 @@ public final class MessageController {
             .filter(value -> value.name().equals(request.getType()))
             .findFirst()
             .orElse(null);
-        return ResponseEntity.status(201).body(new ConversationResponse(
-            messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
+        return ResponseEntity.status(201).body(new ConversationResponse(new ConversationSummary(
+            messages.openConversation(request.getConversationId(), type, request.getMemberIds()), null)));
     }
 
     private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {

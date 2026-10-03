@@ -36,8 +36,9 @@ class MessageControllerTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        MemoryConversations conversations = new MemoryConversations();
         MessageService service = new MessageService(
-            new MemoryConversations(), new MemoryMessages(), new MemoryReactions(), new RecordingEvents());
+            conversations, new MemoryMessages(conversations), new MemoryReactions(), new RecordingEvents());
         mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
             .setControllerAdvice(new MessageExceptionHandler())
             .build();
@@ -309,6 +310,88 @@ class MessageControllerTest {
             .andExpect(status().isForbidden());
         mvc.perform(get("/conversations/" + DIRECT + "/messages"))
             .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void openDirectCreatesOnceAndReturnsTheSameConversationToTheOtherUser() throws Exception {
+        String dave = "aaaaaaaa-0000-4000-8000-000000000004";
+
+        MvcResult created = mvc.perform(post("/conversations/direct")
+                .header(MessageController.USER_HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + dave + "\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.type").value("DIRECT"))
+            .andExpect(jsonPath("$.memberIds.length()").value(2))
+            .andExpect(jsonPath("$.lastSeq").value(0))
+            .andExpect(jsonPath("$.createdAt").isNotEmpty())
+            .andExpect(jsonPath("$.lastMessage").doesNotExist())
+            .andReturn();
+        String id = JsonPath.read(created.getResponse().getContentAsString(), "$.conversationId");
+
+        mvc.perform(post("/conversations/direct")
+                .header(MessageController.USER_HEADER, dave)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + CAROL + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversationId").value(id));
+
+        mvc.perform(post("/conversations/direct")
+                .header(MessageController.USER_HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + CAROL + "\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/conversations/direct")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + dave + "\"}"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void conversationListAndDetailShowTheLastMessage() throws Exception {
+        sendText(DIRECT, BOB, "latest");
+
+        mvc.perform(get("/conversations").header(MessageController.USER_HEADER, ALICE))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversations.length()").value(2))
+            .andExpect(jsonPath("$.conversations[0].conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.conversations[0].lastSeq").value(1))
+            .andExpect(jsonPath("$.conversations[0].lastMessageAt").isNotEmpty())
+            .andExpect(jsonPath("$.conversations[0].lastMessage.body").value("latest"))
+            .andExpect(jsonPath("$.conversations[0].lastMessage.senderId").value(BOB))
+            .andExpect(jsonPath("$.conversations[1].conversationId").value(GROUP))
+            .andExpect(jsonPath("$.conversations[1].lastMessage").doesNotExist())
+            .andExpect(jsonPath("$.nextCursor").doesNotExist());
+
+        mvc.perform(get("/conversations?limit=1").header(MessageController.USER_HEADER, ALICE))
+            .andExpect(jsonPath("$.conversations.length()").value(1))
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty());
+
+        mvc.perform(get("/conversations/" + DIRECT).header(MessageController.USER_HEADER, BOB))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.lastMessage.body").value("latest"));
+        mvc.perform(get("/conversations/" + DIRECT).header(MessageController.USER_HEADER, CAROL))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/conversations?cursor=nope").header(MessageController.USER_HEADER, ALICE))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void historyScrollsBackWithBeforeSeq() throws Exception {
+        for (int i = 1; i <= 3; i++) {
+            sendText(DIRECT, ALICE, "m" + i);
+        }
+
+        catchUp(DIRECT, BOB, "?limit=2")
+            .andExpect(jsonPath("$.messages[0].seq").value(2))
+            .andExpect(jsonPath("$.messages[1].seq").value(3))
+            .andExpect(jsonPath("$.hasMore").value(true));
+        catchUp(DIRECT, BOB, "?beforeSeq=2&limit=2")
+            .andExpect(jsonPath("$.messages.length()").value(1))
+            .andExpect(jsonPath("$.messages[0].body").value("m1"))
+            .andExpect(jsonPath("$.hasMore").value(false));
+        catchUp(DIRECT, BOB, "?beforeSeq=2&afterSeq=1")
+            .andExpect(status().isBadRequest());
     }
 
     private ResultActions catchUp(String conversationId, String userId, String query) throws Exception {

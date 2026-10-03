@@ -60,9 +60,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "messaging.realtime.bus=local")
 class RealtimeIntegrationTest {
-    private static final String ALICE = "aaaaaaaa-0000-4000-8000-000000000001";
-    private static final String BOB = "aaaaaaaa-0000-4000-8000-000000000002";
-    private static final String CAROL = "aaaaaaaa-0000-4000-8000-000000000003";
+    // New users for every test: the app is shared, and a pair of users has only one DIRECT conversation.
+    private final String aliceId = UUID.randomUUID().toString();
+    private final String bobId = UUID.randomUUID().toString();
+    private final String carolId = UUID.randomUUID().toString();
 
     @LocalServerPort
     private int port;
@@ -82,7 +83,7 @@ class RealtimeIntegrationTest {
     @BeforeEach
     void setUp() {
         conversationId = UUID.randomUUID().toString();
-        service.openConversation(conversationId, ConversationType.DIRECT, List.of(ALICE, BOB));
+        service.openConversation(conversationId, ConversationType.DIRECT, List.of(aliceId, bobId));
     }
 
     @AfterEach
@@ -96,15 +97,15 @@ class RealtimeIntegrationTest {
 
     @Test
     void everyDeviceOfEveryMemberGetsTheEnvelopeAndOutsidersGetNothing() throws Exception {
-        BlockingQueue<String> alice = connect(ALICE);
-        BlockingQueue<String> bobWeb = connect(BOB);
-        BlockingQueue<String> bobMobile = connect(BOB);
-        BlockingQueue<String> carol = connect(CAROL);
-        awaitSockets(ALICE, 1);
-        awaitSockets(BOB, 2);
+        BlockingQueue<String> alice = connect(aliceId);
+        BlockingQueue<String> bobWeb = connect(bobId);
+        BlockingQueue<String> bobMobile = connect(bobId);
+        BlockingQueue<String> carol = connect(carolId);
+        awaitSockets(aliceId, 1);
+        awaitSockets(bobId, 2);
 
         String clientMsgId = UUID.randomUUID().toString();
-        ResponseEntity<String> sent = post("/conversations/" + conversationId + "/messages", ALICE,
+        ResponseEntity<String> sent = post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hello\",\"clientMsgId\":\"" + clientMsgId + "\"}");
         assertEquals(201, sent.getStatusCode().value());
         String messageId = JsonPath.read(sent.getBody(), "$.messageId");
@@ -120,25 +121,25 @@ class RealtimeIntegrationTest {
         assertNull(carol.poll(300, TimeUnit.MILLISECONDS));
 
         // A retry with the same clientMsgId stores nothing new, so nothing is pushed.
-        post("/conversations/" + conversationId + "/messages", ALICE,
+        post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hello\",\"clientMsgId\":\"" + clientMsgId + "\"}");
         assertNull(bobWeb.poll(300, TimeUnit.MILLISECONDS));
     }
 
     @Test
     void reactionsAndDeletesArePushedToTheOtherDevices() throws Exception {
-        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", ALICE,
+        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hi\",\"clientMsgId\":\"" + UUID.randomUUID() + "\"}").getBody(), "$.messageId");
-        BlockingQueue<String> aliceMobile = connect(ALICE);
-        awaitSockets(ALICE, 1);
+        BlockingQueue<String> aliceMobile = connect(aliceId);
+        awaitSockets(aliceId, 1);
 
-        exchange(HttpMethod.PUT, "/conversations/" + conversationId + "/messages/" + messageId + "/reactions/love", BOB);
+        exchange(HttpMethod.PUT, "/conversations/" + conversationId + "/messages/" + messageId + "/reactions/love", bobId);
         String added = next(aliceMobile);
         assertEquals("messaging.reaction.added", JsonPath.read(added, "$.type"));
-        assertEquals(BOB, JsonPath.read(added, "$.payload.userId"));
+        assertEquals(bobId, JsonPath.read(added, "$.payload.userId"));
         assertEquals("love", JsonPath.read(added, "$.payload.code"));
 
-        exchange(HttpMethod.DELETE, "/conversations/" + conversationId + "/messages/" + messageId, ALICE);
+        exchange(HttpMethod.DELETE, "/conversations/" + conversationId + "/messages/" + messageId, aliceId);
         String deleted = next(aliceMobile);
         assertEquals("messaging.message.deleted", JsonPath.read(deleted, "$.type"));
         assertEquals(messageId, JsonPath.read(deleted, "$.payload.messageId"));
@@ -156,13 +157,13 @@ class RealtimeIntegrationTest {
 
     @Test
     void aClosedDeviceIsForgottenWhileTheOtherStaysConnected() throws Exception {
-        connect(BOB);
-        connect(BOB);
-        awaitSockets(BOB, 2);
+        connect(bobId);
+        connect(bobId);
+        awaitSockets(bobId, 2);
 
         open.get(0).close(CloseStatus.NORMAL);
 
-        awaitSockets(BOB, 1);
+        awaitSockets(bobId, 1);
     }
 
     private BlockingQueue<String> connect(String userId) throws Exception {
@@ -223,8 +224,8 @@ class RealtimeIntegrationTest {
         }
 
         @Bean
-        MemoryMessages messages() {
-            return new MemoryMessages();
+        MemoryMessages messages(MemoryConversations conversations) {
+            return new MemoryMessages(conversations);
         }
 
         @Bean

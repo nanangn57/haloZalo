@@ -19,7 +19,7 @@ services/messaging/
     storage/          interface lưu, và implementation Postgres
     event/            đóng phong bì event, ghi log, đẩy sang realtime
     realtime/         WebSocket /ws, socket theo user, heartbeat, fan-out qua Redis
-    service/          mở hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, catch-up
+    service/          hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, lịch sử, catch-up
     http/             nhận HTTP, đổi lỗi thành status
   test/               cùng các package trên
 ```
@@ -96,9 +96,30 @@ Mọi id là UUID và được trả về chữ thường. Client hay gateway g�
 
 `POST /conversations/{conversationId}/messages` nhận `SendMessageRequest` của OpenAPI, chỉ `TEXT` và `EMOTION`. Trả `Message` của OpenAPI: 201 khi tin mới, 200 khi trùng `clientMsgId`. Ghi xong mới log `messaging.message.created`.
 
-`GET /conversations/{conversationId}/messages?afterSeq=N&limit=M` là catch-up. Trả `{ messages, hasMore }`, `messages` là `Message` của OpenAPI, xếp theo `seq` tăng dần, chỉ gồm tin có `seq > afterSeq`. `afterSeq` mặc định 0, `limit` mặc định 100, tối đa 200. Còn `hasMore` thì gọi tiếp với `seq` cuối vừa nhận. Chỉ thành viên gọi được.
+### Hội thoại
 
-Tin đã xoá vẫn có trong catch-up, với `status: "DELETED"` và `deletedAt`, không có `body`. Nhờ vậy client thấy đủ mọi `seq`, không chờ một tin không bao giờ tới. `hasMore: false` nghĩa là đã đủ. Query đi theo ràng buộc unique `(conversation_id, seq)`.
+`POST /conversations/direct` nhận `{ userId }` của người kia, trả hội thoại 1-1 giữa hai người: 201 khi vừa tạo, 200 khi đã có. Mỗi cặp user chỉ có một hội thoại DIRECT, ai mở trước cũng vậy, kể cả khi hai người mở cùng lúc: ràng buộc unique `direct_key` trong Postgres giữ điều đó. Mở với chính mình thì 400. Service không hỏi Identity xem `userId` có tồn tại không.
+
+`GET /conversations?cursor=&limit=` trả `{ conversations, nextCursor }`: hội thoại của người gọi, hoạt động gần nhất trước, mỗi hội thoại kèm `lastMessage`. `limit` mặc định 50, tối đa 100. Còn trang sau thì gửi lại `nextCursor` làm `cursor`; trang cuối có `nextCursor: null`. Hai query cho mỗi trang, không phụ thuộc số hội thoại.
+
+`GET /conversations/{conversationId}` trả một hội thoại, chỉ cho thành viên.
+
+Mỗi hội thoại có `conversationId`, `type`, `memberIds`, `lastSeq`, `createdAt`, và khi đã có tin thì `lastMessageAt`, `lastMessage` (shape `Message`). Tin cuối đã xoá thì hiện như ô trống. Chưa có số tin chưa đọc: cần mốc đã đọc của tuần 5.
+
+Tin tới một hội thoại mà client chưa biết (người kia vừa mở rồi gửi) thì client gọi `GET /conversations/{conversationId}` để lấy thông tin. Không có event riêng khi mở hội thoại.
+
+Nhóm vẫn mở bằng `POST /internal/conversations`, vì nhóm thuộc Identity.
+
+### Tin trong hội thoại
+
+`GET /conversations/{conversationId}/messages` trả `{ messages, hasMore }`, `messages` là `Message` của OpenAPI, luôn xếp theo `seq` tăng dần. `limit` mặc định 100, tối đa 200. Chỉ thành viên gọi được. Có hai cách dùng:
+
+- Lịch sử: không có `afterSeq`. Trả trang mới nhất. Muốn xem cũ hơn thì gửi `beforeSeq` là `seq` nhỏ nhất vừa nhận. `hasMore` nghĩa là còn tin cũ hơn.
+- Catch-up: `afterSeq` là `seq` cuối client đã có. Trả tin cũ nhất sau mốc đó. `hasMore` nghĩa là còn tin mới hơn, gọi tiếp với `seq` cuối vừa nhận.
+
+Gửi cả `afterSeq` và `beforeSeq` thì 400.
+
+Tin đã xoá vẫn có trong cả hai cách, với `status: "DELETED"` và `deletedAt`, không có `body`. Nhờ vậy client thấy đủ mọi `seq`, không chờ một tin không bao giờ tới. `hasMore: false` nghĩa là đã đủ. Query đi theo ràng buộc unique `(conversation_id, seq)`.
 
 Catch-up chỉ trả tin mới hơn `afterSeq`. Tin cũ hơn bị xoá, hoặc reaction đổi trên tin cũ, khi client đang offline thì catch-up chưa báo.
 
