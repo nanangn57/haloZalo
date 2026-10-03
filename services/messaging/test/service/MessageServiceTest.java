@@ -155,19 +155,20 @@ class MessageServiceTest {
     void reactionsAreOnePerUserAndCodeAndOnlyForMembers() {
         Message message = text(GROUP, ALICE, "party").getMessage();
 
-        service.react(message.getMessageId(), BOB, "love");
-        service.react(message.getMessageId(), BOB, "love");
-        service.react(message.getMessageId(), CAROL, "love");
-        service.react(message.getMessageId(), CAROL, "haha");
-        assertEquals(3, service.reactions(message.getMessageId(), ALICE).size());
+        service.react(GROUP, message.getMessageId(), BOB, "love");
+        service.react(GROUP, message.getMessageId(), BOB, "love");
+        service.react(GROUP, message.getMessageId(), CAROL, "love");
+        service.react(GROUP, message.getMessageId(), CAROL, "haha");
+        assertEquals(3, service.reactions(GROUP, message.getMessageId(), ALICE).size());
 
-        service.unreact(message.getMessageId(), CAROL, "haha");
-        assertEquals(2, service.reactions(message.getMessageId(), ALICE).size());
+        service.unreact(GROUP, message.getMessageId(), CAROL, "haha");
+        assertEquals(2, service.reactions(GROUP, message.getMessageId(), ALICE).size());
 
         Message direct = text(DIRECT, ALICE, "private").getMessage();
-        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.react(direct.getMessageId(), CAROL, "like"));
-        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.react(message.getMessageId(), BOB, "heart"));
-        assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.react(UUID.randomUUID().toString(), BOB, "like"));
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.react(DIRECT, direct.getMessageId(), CAROL, "like"));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.react(GROUP, message.getMessageId(), BOB, "heart"));
+        assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.react(GROUP, UUID.randomUUID().toString(), BOB, "like"));
+        assertReason(MessageService.Rejected.Reason.NOT_FOUND, () -> service.react(DIRECT, message.getMessageId(), BOB, "like"));
     }
 
     private MessageService.Sent text(String conversationId, String senderId, String text) {

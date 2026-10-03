@@ -39,4 +39,10 @@ Loại tin media dùng `content` có cấu trúc thay cho `body` chuỗi:
 
 ## Reaction (E3, hạng 2)
 
-Đã có collection `message_reactions` với unique `(messageId, userId, code)` và bộ mã giống emotion. Khi làm E3 cần thêm API thêm/bỏ reaction và một event cập nhật để fan-out tới mọi thiết bị.
+Đã chạy trong service, chưa có trong OpenAPI. Collection `message_reactions` có unique `(messageId, userId, code)`, bộ mã giống emotion.
+
+- `PUT /conversations/{conversationId}/messages/{messageId}/reactions/{code}`, trả 204, gọi lại không đổi gì.
+- `DELETE` cùng path, trả 204.
+- `GET /conversations/{conversationId}/messages/{messageId}/reactions`, trả `{ reactions: [{ userId, code, createdAt }] }`.
+
+Để thiết bị khác thấy reaction ngay, cần event kiểu `messaging.reaction.added` / `messaging.reaction.removed`, payload `{ messageId, conversationId, userId, code }`.

@@ -4,6 +4,7 @@ import api.ConversationResponse;
 import api.ForwardMessageRequest;
 import api.MessageResponse;
 import api.OpenConversationRequest;
+import api.ReactionsResponse;
 import api.SendMessageRequest;
 import conversation.ConversationType;
 import message.MessageContent;
@@ -13,8 +14,10 @@ import java.util.Arrays;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,6 +64,34 @@ public final class MessageController {
         @PathVariable String messageId) {
         messages.delete(conversationId, messageId, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
+    public ResponseEntity<Void> react(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId,
+        @PathVariable String code) {
+        messages.react(conversationId, messageId, userId, code);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
+    public ResponseEntity<Void> unreact(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId,
+        @PathVariable String code) {
+        messages.unreact(conversationId, messageId, userId, code);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages/{messageId}/reactions")
+    public ReactionsResponse reactions(
+        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId) {
+        return new ReactionsResponse(messages.reactions(conversationId, messageId, userId));
     }
 
     @PostMapping("/internal/conversations")

@@ -17,7 +17,9 @@ import com.jayway.jsonpath.JsonPath;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -187,6 +189,72 @@ class MessageControllerTest {
             .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
         deleteMessage(DIRECT, UUID.randomUUID().toString(), ALICE)
             .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void reactionsCanBeAddedListedAndRemoved() throws Exception {
+        String message = messageId(sendText(GROUP, ALICE, "party"));
+
+        react(GROUP, message, "love", BOB).andExpect(status().isNoContent());
+        react(GROUP, message, "love", BOB).andExpect(status().isNoContent());
+        react(GROUP, message, "love", CAROL).andExpect(status().isNoContent());
+        react(GROUP, message, "haha", CAROL).andExpect(status().isNoContent());
+
+        reactions(GROUP, message, ALICE)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reactions.length()").value(3))
+            .andExpect(jsonPath("$.reactions[0].userId").value(BOB))
+            .andExpect(jsonPath("$.reactions[0].code").value("love"))
+            .andExpect(jsonPath("$.reactions[0].createdAt").isNotEmpty())
+            .andExpect(jsonPath("$.reactions[0].messageId").doesNotExist());
+
+        unreact(GROUP, message, "haha", CAROL).andExpect(status().isNoContent());
+        unreact(GROUP, message, "haha", CAROL).andExpect(status().isNoContent());
+
+        reactions(GROUP, message, BOB)
+            .andExpect(jsonPath("$.reactions.length()").value(2))
+            .andExpect(jsonPath("$.reactions[1].userId").value(CAROL))
+            .andExpect(jsonPath("$.reactions[1].code").value("love"));
+    }
+
+    @Test
+    void reactionsRejectUnknownCodeOutsidersWrongConversationAndDeletedMessage() throws Exception {
+        String message = messageId(sendText(DIRECT, ALICE, "private"));
+
+        react(DIRECT, message, "heart", BOB)
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        react(DIRECT, message, "like", CAROL)
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        reactions(DIRECT, message, CAROL).andExpect(status().isForbidden());
+        react(GROUP, message, "like", BOB)
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+        mvc.perform(put("/conversations/" + DIRECT + "/messages/" + message + "/reactions/like"))
+            .andExpect(status().isUnauthorized());
+
+        deleteMessage(DIRECT, message, ALICE).andExpect(status().isNoContent());
+        react(DIRECT, message, "like", BOB).andExpect(status().isBadRequest());
+    }
+
+    private ResultActions react(String conversationId, String messageId, String code, String userId) throws Exception {
+        return mvc.perform(put(reactionPath(conversationId, messageId) + "/" + code)
+            .header(MessageController.USER_HEADER, userId));
+    }
+
+    private ResultActions unreact(String conversationId, String messageId, String code, String userId) throws Exception {
+        return mvc.perform(delete(reactionPath(conversationId, messageId) + "/" + code)
+            .header(MessageController.USER_HEADER, userId));
+    }
+
+    private ResultActions reactions(String conversationId, String messageId, String userId) throws Exception {
+        return mvc.perform(get(reactionPath(conversationId, messageId))
+            .header(MessageController.USER_HEADER, userId));
+    }
+
+    private static String reactionPath(String conversationId, String messageId) {
+        return "/conversations/" + conversationId + "/messages/" + messageId + "/reactions";
     }
 
     private ResultActions send(String userId, String body) throws Exception {

@@ -120,10 +120,7 @@ public final class MessageService {
      * Soft delete: the row stays because replies and forwards may point at it. Only the sender can delete.
      */
     public Message delete(String conversationId, String messageId, String userId) {
-        Message message = visibleMessage(messageId, userId);
-        if (!message.getConversationId().equals(conversationId)) {
-            throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
-        }
+        Message message = messageIn(conversationId, messageId, userId);
         if (!message.getSenderId().equals(userId)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, "Only the sender can delete a message");
         }
@@ -138,24 +135,27 @@ public final class MessageService {
     /**
      * Adding the same reaction twice is a no-op.
      */
-    public void react(String messageId, String userId, String code) {
+    public void react(String conversationId, String messageId, String userId, String code) {
         if (!MessageContent.EMOTION_CODES.contains(code)) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Unknown reaction code");
         }
-        Message message = visibleMessage(messageId, userId);
+        Message message = messageIn(conversationId, messageId, userId);
         if (message.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot get reactions");
         }
         reactions.insert(new MessageReaction(UUID.randomUUID().toString(), messageId, userId, code, now()));
     }
 
-    public void unreact(String messageId, String userId, String code) {
-        visibleMessage(messageId, userId);
+    /**
+     * Removing a reaction that is not there is a no-op.
+     */
+    public void unreact(String conversationId, String messageId, String userId, String code) {
+        messageIn(conversationId, messageId, userId);
         reactions.delete(messageId, userId, code);
     }
 
-    public List<MessageReaction> reactions(String messageId, String userId) {
-        visibleMessage(messageId, userId);
+    public List<MessageReaction> reactions(String conversationId, String messageId, String userId) {
+        messageIn(conversationId, messageId, userId);
         return reactions.findByMessageId(messageId);
     }
 
@@ -210,6 +210,17 @@ public final class MessageService {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
         }
         memberConversation(message.getConversationId(), userId);
+        return message;
+    }
+
+    /**
+     * A message addressed through a conversation path must belong to that conversation.
+     */
+    private Message messageIn(String conversationId, String messageId, String userId) {
+        Message message = visibleMessage(messageId, userId);
+        if (!message.getConversationId().equals(conversationId)) {
+            throw new Rejected(Rejected.Reason.NOT_FOUND, "Message not found");
+        }
         return message;
     }
 
