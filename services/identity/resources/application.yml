@@ -1,11 +1,13 @@
 server:
-  port: 8081
+  port: 8080
 
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/identity
-    username: identity
-    password: identity
+    url: jdbc:postgresql://localhost:5432/halozalo
+    username: halozalo
+    password: halozalo
+    hikari:
+      connection-init-sql: SET search_path TO identity
   sql:
     init:
       mode: always

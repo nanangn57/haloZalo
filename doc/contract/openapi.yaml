@@ -3,9 +3,10 @@ info:
   title: haloZalo API
   version: 0.1.0
   description: |
-    Hợp đồng bản v1 cho Identity, Messaging và client-core.
+    Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
     Bản này có đăng ký, đăng nhập, kiểm tra token, và gửi một tin TEXT hoặc EMOTION.
+    Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
   - url: https://api.example.com
     description: URL cloud của tuần hiện tại. P4 thay khi có URL thật.
