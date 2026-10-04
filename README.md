@@ -6,7 +6,7 @@
 
 Người dùng đăng ký, tạo nhóm, nhắn tin và xem thống kê hoạt động. Tin gồm chữ, emotion, ảnh, tài liệu và video. Tin mới tới qua WebSocket, không cần tải lại trang.
 
-Bốn người làm trong một repo. Mỗi service giữ store của mình: muốn dữ liệu của service khác thì gọi HTTP hoặc nhận event. Client chỉ gọi API gateway.
+Bốn người làm trong một repo. Một process, một MySQL, mỗi module một schema. Muốn dữ liệu của module khác thì gọi interface trong process hoặc nhận event. Client chỉ gọi app.
 
 ## Tính năng
 
@@ -24,13 +24,13 @@ Phạm vi đầy đủ nằm ở [doc/requirement.md](doc/requirement.md).
 
 | Thành phần | Vai trò | Lưu trữ |
 |---|---|---|
-| gateway | Cửa public duy nhất | — |
-| identity | Tài khoản, session, nhóm, thành viên | MySQL |
-| analytics | Ghi event, đọc bảng tổng hợp | MySQL |
-| messaging | Hội thoại, tin, `seq`, file, fan-out | Mongo, Redis |
+| app | Cửa HTTP public, filter session, WebSocket | — |
+| identity | Tài khoản, session, nhóm, thành viên | Schema `identity` |
+| analytics | Ghi event, đọc bảng tổng hợp | Schema `analytics` |
+| messaging | Hội thoại, tin, `seq`, file, fan-out | Schema `messaging` |
 | client | Web và mobile dùng chung `clients/core` | Cache trên thiết bị |
 
-Identity cấp session id và giữ bảng session. Gateway hỏi Identity bằng HTTP, không tự lưu session. Tin được ghi xong rồi mới phát ra WebSocket.
+Ba schema nằm trên cùng một instance MySQL. Identity cấp session id và giữ bảng session. Filter trong app gọi Identity trong process, không giữ session và không có API HTTP nội bộ. Tin được ghi xong rồi mới phát ra WebSocket.
 
 Quyết định đã chốt: [doc/contract/decisions.md](doc/contract/decisions.md).
 Hợp đồng HTTP: [doc/contract/openapi.yaml](doc/contract/openapi.yaml).
@@ -44,7 +44,7 @@ Mỗi người sửa thư mục của mình.
 | Thư mục | Việc | Người |
 |---|---|---|
 | `doc/contract/` | OpenAPI, envelope event, quyết định kiến trúc | P1 Ngọc Anh |
-| `services/gateway/` | Cửa public duy nhất | P1 Ngọc Anh |
+| `services/gateway/` | Không còn process riêng. Cửa public nằm ở app | P1 Ngọc Anh |
 | `services/identity/` | Tài khoản, token, nhóm, thành viên | P1 Ngọc Anh |
 | `services/analytics/` | Ghi event, đọc bảng tổng hợp | P1 Ngọc Anh |
 | `services/messaging/` | Hội thoại, tin, `seq`, file, fan-out. Media nằm ở đây | P2 Huy |
@@ -77,7 +77,7 @@ Mẫu mô tả task: [doc/taskTemplate.md](doc/taskTemplate.md).
 
 | Người | Phần |
 |---|---|
-| P1 Ngọc Anh | Hợp đồng, gateway, identity, analytics |
+| P1 Ngọc Anh | Hợp đồng, app, identity, analytics |
 | P2 Huy | Messaging và media |
 | P3 Khanh | client-core và web |
 | P4 Thành | Mobile và phát hành |

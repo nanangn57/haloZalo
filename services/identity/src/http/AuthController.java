@@ -46,11 +46,6 @@ public final class AuthController {
         return user;
     }
 
-    @GetMapping("/internal/sessions/current")
-    public Map<String, String> current(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        return Map.of("userId", auth.currentUserId(sessionId(authorization)));
-    }
-
     private static String sessionId(String authorization) {
         if (authorization == null || !authorization.startsWith(BEARER)) {
             throw new AuthService.Rejected(AuthService.Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");

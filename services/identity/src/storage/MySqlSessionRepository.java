@@ -21,7 +21,7 @@ public final class MySqlSessionRepository implements SessionRepository {
 
     @Override
     public void save(Session session) {
-        String sql = "INSERT INTO sessions (session_id, user_id, expires_at) VALUES (?, ?, ?)";
+        String sql = "INSERT INTO identity.sessions (session_id, user_id, expires_at) VALUES (?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, session.getSessionId());
@@ -35,7 +35,7 @@ public final class MySqlSessionRepository implements SessionRepository {
 
     @Override
     public Session findById(String sessionId) {
-        String sql = "SELECT session_id, user_id, expires_at FROM sessions WHERE session_id = ?";
+        String sql = "SELECT session_id, user_id, expires_at FROM identity.sessions WHERE session_id = ?";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, sessionId);

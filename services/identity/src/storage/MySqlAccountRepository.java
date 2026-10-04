@@ -20,7 +20,7 @@ public final class MySqlAccountRepository implements AccountRepository {
 
     @Override
     public void save(Account account) {
-        String sql = "INSERT INTO accounts (user_id, username, email, password_hash) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO identity.accounts (user_id, username, email, password_hash) VALUES (?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, account.getUserId());
@@ -35,17 +35,17 @@ public final class MySqlAccountRepository implements AccountRepository {
 
     @Override
     public Account findByUsername(String username) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE username = ?", username);
+        return findOne("SELECT user_id, username, email, password_hash FROM identity.accounts WHERE username = ?", username);
     }
 
     @Override
     public Account findByEmail(String email) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE email = ?", email);
+        return findOne("SELECT user_id, username, email, password_hash FROM identity.accounts WHERE email = ?", email);
     }
 
     @Override
     public Account findById(String userId) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE user_id = ?", userId);
+        return findOne("SELECT user_id, username, email, password_hash FROM identity.accounts WHERE user_id = ?", userId);
     }
 
     private Account findOne(String sql, String value) {

@@ -97,7 +97,7 @@ class AuthControllerTest {
     }
 
     @Test
-    void meAndCurrentSessionReturnTheSameUser() throws Exception {
+    void meReturnsTheRegisteredUser() throws Exception {
         MvcResult registered = registerNgocAnh();
         String token = JsonPath.read(registered.getResponse().getContentAsString(), "$.accessToken");
         String userId = JsonPath.read(registered.getResponse().getContentAsString(), "$.user.userId");
@@ -108,11 +108,12 @@ class AuthControllerTest {
             .andExpect(jsonPath("$.username").value("ngoc_anh"))
             .andExpect(jsonPath("$.email").value("anh@example.com"))
             .andExpect(jsonPath("$.passwordHash").doesNotExist());
+    }
 
-        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.userId").value(userId))
-            .andExpect(jsonPath("$.username").doesNotExist());
+    @Test
+    void sessionCheckIsNotAnHttpEndpoint() throws Exception {
+        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer token"))
+            .andExpect(status().isNotFound());
     }
 
     private MvcResult registerNgocAnh() throws Exception {
