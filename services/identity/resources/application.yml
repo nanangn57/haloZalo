@@ -3,11 +3,11 @@ server:
 
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/identity
+    url: jdbc:postgresql://localhost:5432/halozalo
     username: halozalo
     password: halozalo
     hikari:
-      connection-init-sql: USE identity
+      connection-init-sql: SET search_path TO identity
   sql:
     init:
       mode: always

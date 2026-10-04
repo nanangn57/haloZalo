@@ -1,26 +1,25 @@
 services:
-  mysql:
-    image: mysql:8.4
-    container_name: halozalo-mysql
+  postgres:
+    image: postgres:16
+    container_name: halozalo-postgres
     ports:
-      - "3306:3306"
+      - "5432:5432"
     environment:
-      MYSQL_ROOT_PASSWORD: halozalo
-      MYSQL_USER: halozalo
-      MYSQL_PASSWORD: halozalo
-      MYSQL_DATABASE: identity
+      POSTGRES_USER: halozalo
+      POSTGRES_PASSWORD: halozalo
+      POSTGRES_DB: halozalo
       TZ: UTC
     volumes:
-      - halozalo-mysql:/var/lib/mysql
-      - ./mysql/01-schemas.sql:/docker-entrypoint-initdb.d/01-schemas.sql:ro
+      - halozalo-postgres:/var/lib/postgresql/data
+      - ./postgres/01-schemas.sql:/docker-entrypoint-initdb.d/01-schemas.sql:ro
       - ../services/identity/resources/schema.sql:/docker-entrypoint-initdb.d/02-identity.sql:ro
-      - ./mysql/03-dummy.sql:/docker-entrypoint-initdb.d/03-dummy.sql:ro
+      - ./postgres/03-dummy.sql:/docker-entrypoint-initdb.d/03-dummy.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uhalozalo", "-phalozalo"]
+      test: ["CMD-SHELL", "pg_isready -U halozalo -d halozalo"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 20s
 
 volumes:
-  halozalo-mysql:
+  halozalo-postgres:

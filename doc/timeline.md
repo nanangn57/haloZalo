@@ -35,14 +35,14 @@ flowchart TB
   msg -->|"interface thành viên"| id
 ```
 
-Cả ba schema nằm trên một instance MySQL. P4 giữ lệnh deploy, đưa một process và MySQL đó lên một URL mỗi tuần.
+Cả ba schema nằm trên database PostgreSQL `halozalo`. P4 giữ lệnh deploy, đưa một process và PostgreSQL đó lên một URL mỗi tuần.
 
 | Việc | Ai quyết |
 |---|---|
 | Module nào tồn tại, schema nào, cổng public, shape `Message`, phong bì event | Cả nhóm, qua `doc/contract/`. P1 là người sửa file |
 | Code, bảng, handler bên trong một module | Người giữ thư mục đó |
 | Web và mobile lệch cách đồng bộ | Không ai. Cả hai gọi cùng `clients/core` |
-| Tách lại thành nhiều process | Không. Lệnh deploy giữ một process và một MySQL |
+| Tách lại thành nhiều process | Không. Lệnh deploy giữ một process và một PostgreSQL |
 
 | Thành phần | Giữ gì | Nói chuyện với ai |
 |---|---|---|
@@ -100,7 +100,7 @@ Tuần này bốn người chưa cần chờ nhau. `conversationId` do client si
 | P1 | [#7](https://github.com/nanangn57/haloZalo/issues/7), [#5](https://github.com/nanangn57/haloZalo/issues/5) | Mọi request có token đi qua filter của app; tạo nhóm, thêm và xoá thành viên, xem nhóm của mình |
 | P2 | nối [#30](https://github.com/nanangn57/haloZalo/issues/30) vào HTTP của OpenAPI | `POST` tin TEXT đúng hợp đồng, vẫn nhận `conversationId` do client sinh |
 | P3 | phần auth của [#13](https://github.com/nanangn57/haloZalo/issues/13) | Core gọi đăng nhập thật và giữ access token |
-| P4 | deploy app và MySQL | Cùng lệnh tuần 1, URL làm được đăng ký và đăng nhập |
+| P4 | deploy app và PostgreSQL | Cùng lệnh tuần 1, URL làm được đăng ký và đăng nhập |
 
 - [ ] Trên URL: đăng ký, đăng nhập, gọi `/me`
 - [ ] OpenAPI có API nhóm trước khi web gọi
@@ -112,7 +112,7 @@ Tuần này bốn người chưa cần chờ nhau. `conversationId` do client si
 | P1 | [#6](https://github.com/nanangn57/haloZalo/issues/6), bắt đầu [#8](https://github.com/nanangn57/haloZalo/issues/8) | Tìm user; analytics ghi được login và tạo nhóm |
 | P2 | [#9](https://github.com/nanangn57/haloZalo/issues/9) | Chat 1-1 và nhóm, text và emotion, lịch sử gần nhất; người ngoài nhóm bị chặn |
 | P3 | [#14](https://github.com/nanangn57/haloZalo/issues/14) | Web đăng nhập, tìm user, tạo nhóm, quản lý thành viên |
-| P4 | Cùng một MySQL, schema `identity` | URL làm được tạo nhóm |
+| P4 | Cùng một PostgreSQL, schema `identity` | URL làm được tạo nhóm |
 
 - [ ] Trên URL: tìm user, tạo nhóm, xem danh sách nhóm
 

@@ -1,6 +1,6 @@
 # messaging
 
-Hội thoại, tin, `seq`, file, fan-out. Schema `messaging` trên cùng instance MySQL. Kết nối WebSocket nằm trong bộ nhớ của process. Media nằm ở module này.
+Hội thoại, tin, `seq`, file, fan-out. Schema `messaging` trên cùng database PostgreSQL `halozalo`. Kết nối WebSocket nằm trong bộ nhớ của process. Media nằm ở module này.
 
 Người giữ: P2 Huy. Module này không đọc schema khác. Hỏi thành viên nhóm qua interface của identity.
 

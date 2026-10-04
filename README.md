@@ -6,7 +6,7 @@
 
 Người dùng đăng ký, tạo nhóm, nhắn tin và xem thống kê hoạt động. Tin gồm chữ, emotion, ảnh, tài liệu và video. Tin mới tới qua WebSocket, không cần tải lại trang.
 
-Bốn người làm trong một repo. Một process, một MySQL, mỗi module một schema. Muốn dữ liệu của module khác thì gọi interface trong process hoặc nhận event. Client chỉ gọi app.
+Bốn người làm trong một repo. Một process, một PostgreSQL, mỗi module một schema. Muốn dữ liệu của module khác thì gọi interface trong process hoặc nhận event. Client chỉ gọi app.
 
 ## Tính năng
 
@@ -30,7 +30,7 @@ Phạm vi đầy đủ nằm ở [doc/requirement.md](doc/requirement.md).
 | messaging | Hội thoại, tin, `seq`, file, fan-out | Schema `messaging` |
 | client | Web và mobile dùng chung `clients/core` | Cache trên thiết bị |
 
-Ba schema nằm trên cùng một instance MySQL. Identity cấp session id và giữ bảng session. Filter trong app gọi Identity trong process, không giữ session và không có API HTTP nội bộ. Tin được ghi xong rồi mới phát ra WebSocket.
+Ba schema nằm trên cùng database PostgreSQL `halozalo`. Identity cấp session id và giữ bảng session. Filter trong app gọi Identity trong process, không giữ session và không có API HTTP nội bộ. Tin được ghi xong rồi mới phát ra WebSocket.
 
 Quyết định đã chốt: [doc/contract/decisions.md](doc/contract/decisions.md).
 Hợp đồng HTTP: [doc/contract/openapi.yaml](doc/contract/openapi.yaml).

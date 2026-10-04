@@ -7,15 +7,16 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Component;
 
 @Component
-public final class MySqlSessionRepository implements SessionRepository {
+public final class PostgresSessionRepository implements SessionRepository {
     private final DataSource dataSource;
 
-    public MySqlSessionRepository(DataSource dataSource) {
+    public PostgresSessionRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
@@ -26,7 +27,7 @@ public final class MySqlSessionRepository implements SessionRepository {
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, session.getSessionId());
             statement.setString(2, session.getUserId());
-            statement.setTimestamp(3, Timestamp.from(session.getExpiresAt()));
+            statement.setObject(3, OffsetDateTime.ofInstant(session.getExpiresAt(), ZoneOffset.UTC));
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save session", ex);
@@ -46,7 +47,7 @@ public final class MySqlSessionRepository implements SessionRepository {
                 return new Session(
                     rows.getString("session_id"),
                     rows.getString("user_id"),
-                    rows.getTimestamp("expires_at").toInstant()
+                    rows.getObject("expires_at", OffsetDateTime.class).toInstant()
                 );
             }
         } catch (SQLException ex) {

@@ -1,10 +1,10 @@
 # identity
 
-Tài khoản và session. Schema `identity` trên instance MySQL dùng chung. Session id opaque, hết hạn sau 3 ngày, tính từ lúc cấp. Đăng nhập mới không xóa session cũ. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
+Tài khoản và session. Schema `identity` trên database PostgreSQL `halozalo` dùng chung. Session id opaque, hết hạn sau 3 ngày, tính từ lúc cấp. Đăng nhập mới không xóa session cũ. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
 
 Người giữ: P1 Ngọc Anh.
 
-Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào schema `identity`.
+Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào database `halozalo`. Pool đặt `search_path` là schema `identity`.
 
 ```
 services/identity/
@@ -16,7 +16,7 @@ services/identity/
     session/          dữ liệu session
     auth/             JSON request và response
     password/         hash và so khớp bcrypt
-    storage/          interface lưu, và implementation MySQL
+    storage/          interface lưu, và implementation PostgreSQL
     event/            phát event đăng nhập trong process
     service/          đăng ký, đăng nhập, kiểm tra session
     http/             nhận HTTP public, đổi lỗi thành status
@@ -35,8 +35,8 @@ Lỗi: `VALIDATION_ERROR` 400, `CONFLICT` 409, `UNAUTHENTICATED` 401.
 
 ## Schema
 
-`resources/schema.sql` tạo bảng lúc khởi động, trong schema `identity`. `CREATE TABLE IF NOT EXISTS` nên lần chạy sau không xóa dữ liệu. Schema phải tồn tại trước khi app nối vào.
+`resources/schema.sql` tạo schema `identity` và bảng lúc khởi động. `CREATE TABLE IF NOT EXISTS` nên lần chạy sau không xóa dữ liệu. Database `halozalo` phải tồn tại trước khi app nối vào.
 
-`identity.accounts.user_id` và `identity.sessions.session_id` là khóa chính. `identity.accounts.username` và `identity.accounts.email` là unique. `identity.sessions.user_id` tham chiếu `identity.accounts.user_id`. `password_hash` dài 60 ký tự. `expires_at` đến micro giây.
+`identity.accounts.user_id` và `identity.sessions.session_id` là khóa chính. `identity.accounts.username` và `identity.accounts.email` là unique. `identity.sessions.user_id` tham chiếu `identity.accounts.user_id`. `password_hash` dài 60 ký tự. `expires_at` là `timestamptz`, đến micro giây.
 
 `AuthService` kiểm tra trùng username và email trước khi `INSERT`. Khóa unique chặn lần ghi trùng còn lọt qua. `user_id` và `session_id` là UUID do service cấp.

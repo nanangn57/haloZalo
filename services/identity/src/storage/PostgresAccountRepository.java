@@ -11,10 +11,10 @@ import java.sql.SQLException;
 import org.springframework.stereotype.Component;
 
 @Component
-public final class MySqlAccountRepository implements AccountRepository {
+public final class PostgresAccountRepository implements AccountRepository {
     private final DataSource dataSource;
 
-    public MySqlAccountRepository(DataSource dataSource) {
+    public PostgresAccountRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 

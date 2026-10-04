@@ -1,10 +1,10 @@
 # infra
 
-Một process app và một MySQL. Một lệnh deploy, CI, URL cloud mỗi tuần.
+Một process app và một PostgreSQL. Một lệnh deploy, CI, URL cloud mỗi tuần.
 
 Người giữ: P4 Thành.
 
-## MySQL thử trên cloud
+## PostgreSQL thử trên cloud
 
 Đứng trong thư mục này:
 
@@ -12,14 +12,14 @@ Người giữ: P4 Thành.
 docker compose up -d
 ```
 
-Lần đầu container tạo schema `identity`, `messaging`, `analytics`, bảng tài khoản và session, rồi hai tài khoản mẫu. Volume còn dữ liệu thì script không chạy lại. Tạo lại từ đầu:
+Lần đầu container tạo database `halozalo`, schema `identity`, `messaging`, `analytics`, bảng tài khoản và session, rồi hai tài khoản mẫu. Volume còn dữ liệu thì script không chạy lại. Tạo lại từ đầu:
 
 ```
 docker compose down -v
 docker compose up -d
 ```
 
-Nối vào cổng `3306`, user `halozalo`, password `halozalo`, schema `identity`. Khớp `services/identity/resources/application.yml`.
+Nối vào cổng `5432`, database `halozalo`, user `halozalo`, password `halozalo`, schema `identity`. Khớp `services/identity/resources/application.yml`.
 
 | username | email | password | session id (access token) |
 |---|---|---|---|
