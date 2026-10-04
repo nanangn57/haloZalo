@@ -1,0 +1,30 @@
+/* App button */
+.app-button {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+  /* border: 1px solid var(--app-border); */
+}
+
+.app-button:hover,
+.app-button:focus {
+  background-color: var(--app-surface-hover);
+  color: var(--app-text);
+  border-color: var(--app-border);
+}
+
+/* Rows in contact list */
+.contact-row {
+  display: flex;
+  align-items: center;
+  background-color: var(--app-bg);
+  color: var(--app-text);
+  background: none !important;
+  /* border-color: var(--app-border); */
+}
+
+.input-placeholder::placeholder {
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 400;
+  opacity: 1;
+}
