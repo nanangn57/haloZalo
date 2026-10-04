@@ -1,0 +1,43 @@
+server:
+  port: 8082
+  # Finish in-flight HTTP writes before stopping; open sockets are closed with 1001 so clients reconnect elsewhere.
+  shutdown: graceful
+
+spring:
+  config:
+    # Local secrets, never committed. Real environment variables win over this file. See .env.example.
+    import: optional:file:./.env.local[.properties]
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/messaging}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
+      # A slow Redis must not hold up a send for long.
+      timeout: 2s
+      connect-timeout: 2s
+
+messaging:
+  realtime:
+    # redis: fan-out across every instance through Redis pub/sub. local: this instance only, for development.
+    bus: ${MESSAGING_REALTIME_BUS:redis}
+    allowed-origins: "*"
+    ping-interval: 25s
+    pong-timeout: 60s
+    send-time-limit: 10s
+    send-buffer-limit: 512KB
+    max-text-message-size: 8KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  health:
+    # Sending still works while Redis is down (clients catch up by seq), so Redis must not mark the service DOWN.
+    redis:
+      enabled: false
