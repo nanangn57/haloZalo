@@ -5,20 +5,21 @@ info:
   description: |
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
-    Bản này có đăng ký, đăng nhập, kiểm tra token, và gửi một tin TEXT hoặc EMOTION.
+    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, nhóm, và gửi một tin TEXT hoặc EMOTION.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
   - url: https://api.example.com
     description: URL cloud của tuần hiện tại. P4 thay khi có URL thật.
 tags:
   - name: Auth
+  - name: Groups
   - name: Messages
 paths:
   /auth/register:
     post:
       tags: [Auth]
       operationId: register
-      summary: Đăng ký tài khoản
+      summary: Gửi link xác minh để đăng ký
       requestBody:
         required: true
         content:
@@ -26,14 +27,53 @@ paths:
             schema:
               $ref: "#/components/schemas/RegisterRequest"
       responses:
-        "201":
-          description: Đã tạo tài khoản và cấp token.
+        "202":
+          description: Đã gửi link xác minh. Tài khoản chưa được tạo.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TokenResponse"
+                $ref: "#/components/schemas/RegisterAccepted"
         "400":
           $ref: "#/components/responses/ValidationError"
+        "409":
+          description: Username hoặc email đã có tài khoản, hoặc còn bản chờ chưa hết hạn.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: CONFLICT
+                  message: Username or email already exists
+  /auth/verify:
+    get:
+      tags: [Auth]
+      operationId: verifyEmail
+      summary: Xác minh email và tạo tài khoản
+      description: Link trong email trỏ tới đây. Token hết hạn sau 2 phút kể từ lúc đăng ký.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Đã tạo tài khoản. Chưa cấp token đăng nhập.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Link hết hạn hoặc không hợp lệ.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Verification link is invalid or expired
         "409":
           description: Username hoặc email đã tồn tại.
           content:
@@ -90,6 +130,107 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+  /groups:
+    post:
+      tags: [Groups]
+      operationId: createGroup
+      summary: Tạo nhóm, người tạo là owner
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGroupRequest"
+      responses:
+        "201":
+          description: Đã tạo nhóm và ghi người tạo là owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    get:
+      tags: [Groups]
+      operationId: listGroups
+      summary: Xem danh sách nhóm của user hiện tại
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Các nhóm user đang là thành viên, kể cả nhóm user làm owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /groups/{groupId}/members:
+    post:
+      tags: [Groups]
+      operationId: addGroupMember
+      summary: Owner thêm thành viên
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMemberRequest"
+      responses:
+        "201":
+          description: Đã thêm thành viên với role MEMBER.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membership"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: User đã là thành viên.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: CONFLICT
+                  message: User is already a member
+  /groups/{groupId}/members/{userId}:
+    delete:
+      tags: [Groups]
+      operationId: removeGroupMember
+      summary: Owner xoá thành viên, hoặc thành viên tự rời
+      description: |
+        Owner xoá user khác. Thành viên tự rời khi userId là chính mình.
+        Owner không tự rời và không bị xoá.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã xoá membership.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /conversations/{conversationId}/messages:
     post:
       tags: [Messages]
@@ -161,6 +302,20 @@ components:
       schema:
         type: string
         format: uuid
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MemberUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Unauthenticated:
       description: Thiếu session, session không tồn tại, hoặc session hết hạn.
@@ -182,6 +337,26 @@ components:
             error:
               code: VALIDATION_ERROR
               message: Text body exceeds 4096 bytes
+    Forbidden:
+      description: User không có quyền với nhóm này.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: FORBIDDEN
+              message: Not allowed to change this group
+    NotFound:
+      description: Nhóm hoặc user không tồn tại.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_FOUND
+              message: Group not found
   schemas:
     RegisterRequest:
       type: object
@@ -202,6 +377,15 @@ components:
           format: password
           minLength: 8
           maxLength: 72
+    RegisterAccepted:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
     LoginRequest:
       type: object
       additionalProperties: false
@@ -249,6 +433,63 @@ components:
           format: email
         displayName:
           type: string
+    CreateGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+    AddMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+    Group:
+      type: object
+      additionalProperties: false
+      required: [groupId, name, ownerId, role]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        ownerId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          description: Role của user hiện tại trong nhóm.
+          enum: [OWNER, MEMBER]
+    GroupList:
+      type: object
+      additionalProperties: false
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/Group"
+    Membership:
+      type: object
+      additionalProperties: false
+      required: [groupId, userId, role]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [MEMBER]
     SendMessageRequest:
       oneOf:
         - $ref: "#/components/schemas/SendTextRequest"
@@ -354,6 +595,6 @@ components:
           properties:
             code:
               type: string
-              enum: [VALIDATION_ERROR, UNAUTHENTICATED, CONFLICT]
+              enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT]
             message:
               type: string

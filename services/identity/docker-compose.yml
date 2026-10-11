@@ -1,0 +1,53 @@
+# Identity with its own PostgreSQL, so this module can run without the rest of the app.
+#   docker compose up --build        start on http://localhost:8080
+#   docker compose down              stop; database data stays in the postgres-data volume
+#   docker compose down -v           stop and delete the data
+# Host port 5432 belongs to infra/docker-compose.yml. This file publishes Postgres on 5433.
+
+name: halozalo-identity
+
+services:
+  identity:
+    build: .
+    image: halozalo/identity:local
+    ports:
+      - "8080:8080"
+    environment:
+      # Inside the compose network the database is the service name, not localhost.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/halozalo
+      SPRING_DATASOURCE_USERNAME: halozalo
+      SPRING_DATASOURCE_PASSWORD: halozalo
+      # The link in the log is opened on the host, so it stays localhost.
+      IDENTITY_PUBLIC_BASE_URL: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The JRE image has no curl. A 401 from /me means the process is serving.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /me HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '401' <&3"]
+      interval: 10s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      POSTGRES_USER: halozalo
+      POSTGRES_PASSWORD: halozalo
+      POSTGRES_DB: halozalo
+      TZ: UTC
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U halozalo -d halozalo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
