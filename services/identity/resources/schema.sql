@@ -11,6 +11,18 @@ CREATE TABLE IF NOT EXISTS identity.accounts (
     CONSTRAINT accounts_email UNIQUE (email)
 );
 
+CREATE TABLE IF NOT EXISTS identity.verifications (
+    token VARCHAR(36) NOT NULL,
+    username VARCHAR(32) NOT NULL,
+    email VARCHAR(254) NOT NULL,
+    password_hash VARCHAR(60) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL,
+    expires_at TIMESTAMPTZ(6) NOT NULL,
+    PRIMARY KEY (token),
+    CONSTRAINT verifications_username UNIQUE (username),
+    CONSTRAINT verifications_email UNIQUE (email)
+);
+
 CREATE TABLE IF NOT EXISTS identity.sessions (
     session_id VARCHAR(36) NOT NULL,
     user_id VARCHAR(36) NOT NULL,

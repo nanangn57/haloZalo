@@ -1,0 +1,11 @@
+# Secrets never go into the image. Configuration comes from environment variables.
+.env
+.env.*
+!.env.example
+
+target/
+.idea/
+*.iml
+.project
+.classpath
+.settings/

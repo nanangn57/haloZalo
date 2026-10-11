@@ -2,52 +2,106 @@ package service;
 
 import account.Account;
 import auth.LoginRequest;
+import auth.RegisterAccepted;
 import auth.RegisterRequest;
 import auth.TokenResponse;
 import event.EventPublisher;
+import mail.MailSender;
 import password.PasswordHasher;
 import session.Session;
 import storage.AccountRepository;
 import storage.SessionRepository;
+import storage.VerificationRepository;
+import verification.EmailVerification;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
 public final class AuthService {
     public static final int SESSION_TTL_SECONDS = 259200;
+    public static final int VERIFICATION_TTL_SECONDS = 120;
     private static final Pattern USERNAME = Pattern.compile("^[a-zA-Z0-9_]{3,32}$");
     private static final String DUMMY_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+    private static final String VERIFY_SUBJECT = "Verify your email";
 
     private final PasswordHasher passwordHasher;
     private final AccountRepository accounts;
     private final SessionRepository sessions;
     private final EventPublisher events;
+    private final VerificationRepository verifications;
+    private final MailSender mail;
+    private final Clock clock;
+    private final String publicBaseUrl;
 
-    public AuthService(PasswordHasher passwordHasher, AccountRepository accounts, SessionRepository sessions, EventPublisher events) {
+    public AuthService(
+        PasswordHasher passwordHasher,
+        AccountRepository accounts,
+        SessionRepository sessions,
+        EventPublisher events,
+        VerificationRepository verifications,
+        MailSender mail,
+        Clock clock,
+        @Value("${identity.public-base-url}") String publicBaseUrl
+    ) {
         this.passwordHasher = passwordHasher;
         this.accounts = accounts;
         this.sessions = sessions;
         this.events = events;
+        this.verifications = verifications;
+        this.mail = mail;
+        this.clock = clock;
+        this.publicBaseUrl = stripTrailingSlash(publicBaseUrl);
     }
 
-    public TokenResponse register(RegisterRequest request) {
+    public RegisterAccepted register(RegisterRequest request) {
         validateRegister(request);
-        if (accounts.findByUsername(request.getUsername()) != null || accounts.findByEmail(request.getEmail()) != null) {
-            throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
-        }
-        Account account = new Account(
+        reserve(request.getUsername(), request.getEmail());
+        Instant createdAt = clock.instant();
+        EmailVerification pending = new EmailVerification(
             UUID.randomUUID().toString(),
             request.getUsername(),
             request.getEmail(),
             passwordHasher.hash(request.getPassword()),
-            Instant.now()
+            createdAt,
+            createdAt.plusSeconds(VERIFICATION_TTL_SECONDS)
+        );
+        verifications.save(pending);
+        try {
+            mail.send(pending.getEmail(), VERIFY_SUBJECT, verificationLink(pending.getToken()));
+        } catch (RuntimeException ex) {
+            verifications.delete(pending.getToken());
+            throw ex;
+        }
+        return new RegisterAccepted(pending.getEmail());
+    }
+
+    public Account verify(String token) {
+        if (token == null || token.isBlank()) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Verification link is invalid or expired");
+        }
+        EmailVerification pending = verifications.findByToken(token);
+        if (pending == null || !pending.getExpiresAt().isAfter(clock.instant())) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Verification link is invalid or expired");
+        }
+        if (accounts.findByUsername(pending.getUsername()) != null || accounts.findByEmail(pending.getEmail()) != null) {
+            throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
+        }
+        Account account = new Account(
+            UUID.randomUUID().toString(),
+            pending.getUsername(),
+            pending.getEmail(),
+            pending.getPasswordHash(),
+            clock.instant()
         );
         accounts.save(account);
-        return new TokenResponse(account, openSession(account.getUserId()), SESSION_TTL_SECONDS);
+        verifications.delete(pending.getToken());
+        return account;
     }
 
     public TokenResponse login(LoginRequest request) {
@@ -82,6 +136,38 @@ public final class AuthService {
             throw new Rejected(Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");
         }
         return account;
+    }
+
+    private void reserve(String username, String email) {
+        if (accounts.findByUsername(username) != null || accounts.findByEmail(email) != null) {
+            throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
+        }
+        EmailVerification byUsername = verifications.findByUsername(username);
+        EmailVerification byEmail = verifications.findByEmail(email);
+        if (active(byUsername) || active(byEmail)) {
+            throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
+        }
+        if (byUsername != null) {
+            verifications.delete(byUsername.getToken());
+        }
+        if (byEmail != null && (byUsername == null || !byEmail.getToken().equals(byUsername.getToken()))) {
+            verifications.delete(byEmail.getToken());
+        }
+    }
+
+    private boolean active(EmailVerification verification) {
+        return verification != null && verification.getExpiresAt().isAfter(clock.instant());
+    }
+
+    private String verificationLink(String token) {
+        return publicBaseUrl + "/auth/verify?token=" + token;
+    }
+
+    private static String stripTrailingSlash(String url) {
+        if (url.endsWith("/")) {
+            return url.substring(0, url.length() - 1);
+        }
+        return url;
     }
 
     private Session openSession(String userId) {
