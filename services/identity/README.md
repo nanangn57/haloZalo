@@ -37,6 +37,6 @@ Lỗi: `VALIDATION_ERROR` 400, `CONFLICT` 409, `UNAUTHENTICATED` 401.
 
 `resources/schema.sql` tạo schema `identity` và bảng lúc khởi động. `CREATE TABLE IF NOT EXISTS` nên lần chạy sau không xóa dữ liệu. Database `halozalo` phải tồn tại trước khi app nối vào.
 
-`identity.accounts.user_id` và `identity.sessions.session_id` là khóa chính. `identity.accounts.username` và `identity.accounts.email` là unique. `identity.sessions.user_id` tham chiếu `identity.accounts.user_id`. `password_hash` dài 60 ký tự. `expires_at` là `timestamptz`, đến micro giây.
+`identity.accounts.user_id` và `identity.sessions.session_id` là khóa chính. `identity.accounts.username` và `identity.accounts.email` là unique. `identity.sessions.user_id` tham chiếu `identity.accounts.user_id`. `password_hash` dài 60 ký tự. `created_at` và `expires_at` là `timestamptz`, đến micro giây. `created_at` là lúc Identity tạo dòng. Bảng đã có từ trước được thêm cột này lúc khởi động; dòng cũ nhận `now()` vì không còn mốc tạo thật.
 
 `AuthService` kiểm tra trùng username và email trước khi `INSERT`. Khóa unique chặn lần ghi trùng còn lọt qua. `user_id` và `session_id` là UUID do service cấp.

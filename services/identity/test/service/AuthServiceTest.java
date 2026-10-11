@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -36,14 +37,22 @@ class AuthServiceTest {
 
     @Test
     void registerReturnsOpaqueSessionAndStoresHash() {
+        Instant before = Instant.now();
         TokenResponse response = auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
+        Instant after = Instant.now();
 
         assertEquals("Bearer", response.getTokenType());
         assertEquals(AuthService.SESSION_TTL_SECONDS, response.getExpiresIn());
         assertEquals("ngoc_anh", response.getUser().getUsername());
         assertEquals("anh@example.com", response.getUser().getEmail());
         Account stored = accounts.findByUsername("ngoc_anh");
+        Session session = sessions.findById(response.getAccessToken());
         assertNotEquals("password1", stored.getPasswordHash());
+        assertFalse(stored.getCreatedAt().isBefore(before));
+        assertFalse(stored.getCreatedAt().isAfter(after));
+        assertFalse(session.getCreatedAt().isBefore(before));
+        assertFalse(session.getCreatedAt().isAfter(after));
+        assertEquals(session.getCreatedAt().plusSeconds(AuthService.SESSION_TTL_SECONDS), session.getExpiresAt());
         assertEquals(response.getUser().getUserId(), auth.currentUserId(response.getAccessToken()));
         assertEquals(0, events.userIds.size());
     }
@@ -72,10 +81,15 @@ class AuthServiceTest {
     @Test
     void loginOpensAnotherSessionAndPublishesEvent() {
         TokenResponse registered = auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
+        Instant accountCreatedAt = accounts.findByUsername("ngoc_anh").getCreatedAt();
 
         TokenResponse loggedIn = auth.login(new LoginRequest("anh@example.com", "password1"));
 
+        Session loggedInSession = sessions.findById(loggedIn.getAccessToken());
         assertNotEquals(registered.getAccessToken(), loggedIn.getAccessToken());
+        assertEquals(accountCreatedAt, accounts.findByUsername("ngoc_anh").getCreatedAt());
+        assertFalse(loggedInSession.getCreatedAt().isBefore(accountCreatedAt));
+        assertEquals(loggedInSession.getCreatedAt().plusSeconds(AuthService.SESSION_TTL_SECONDS), loggedInSession.getExpiresAt());
         assertEquals(registered.getUser().getUserId(), auth.currentUserId(registered.getAccessToken()));
         assertEquals(registered.getUser().getUserId(), auth.currentUserId(loggedIn.getAccessToken()));
         assertEquals(List.of(registered.getUser().getUserId()), events.userIds);
@@ -95,9 +109,39 @@ class AuthServiceTest {
     }
 
     @Test
+    void loginRejectsUnknownUserWithoutNewSession() {
+        int before = sessions.size();
+
+        AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
+            () -> auth.login(new LoginRequest("missing_user", "password1")));
+
+        assertEquals(AuthService.Rejected.Reason.UNAUTHENTICATED, rejected.getReason());
+        assertEquals(before, sessions.size());
+        assertEquals(0, events.userIds.size());
+    }
+
+    @Test
+    void registerRejectsInvalidEmail() {
+        AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
+            () -> auth.register(new RegisterRequest("ngoc_anh", "not-an-email", "password1")));
+
+        assertEquals(AuthService.Rejected.Reason.VALIDATION, rejected.getReason());
+        assertEquals(0, sessions.size());
+    }
+
+    @Test
+    void loginByUsernameOpensASession() {
+        TokenResponse registered = auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
+
+        TokenResponse loggedIn = auth.login(new LoginRequest("ngoc_anh", "password1"));
+
+        assertEquals(registered.getUser().getUserId(), auth.currentUserId(loggedIn.getAccessToken()));
+    }
+
+    @Test
     void currentUserIdRejectsMissingAndExpiredSession() {
         AuthService.Rejected missing = assertThrows(AuthService.Rejected.class, () -> auth.currentUserId("missing"));
-        sessions.save(new Session("old-session", "user-1", Instant.now().minusSeconds(1)));
+        sessions.save(new Session("old-session", "user-1", Instant.parse("2020-01-01T00:00:00Z"), Instant.now().minusSeconds(1)));
         AuthService.Rejected expired = assertThrows(AuthService.Rejected.class, () -> auth.currentUserId("old-session"));
 
         assertEquals(AuthService.Rejected.Reason.UNAUTHENTICATED, missing.getReason());

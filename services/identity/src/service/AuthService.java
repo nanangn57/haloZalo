@@ -43,7 +43,8 @@ public final class AuthService {
             UUID.randomUUID().toString(),
             request.getUsername(),
             request.getEmail(),
-            passwordHasher.hash(request.getPassword())
+            passwordHasher.hash(request.getPassword()),
+            Instant.now()
         );
         accounts.save(account);
         return new TokenResponse(account, openSession(account.getUserId()), SESSION_TTL_SECONDS);
@@ -84,10 +85,12 @@ public final class AuthService {
     }
 
     private Session openSession(String userId) {
+        Instant createdAt = Instant.now();
         Session session = new Session(
             UUID.randomUUID().toString(),
             userId,
-            Instant.now().plusSeconds(SESSION_TTL_SECONDS)
+            createdAt,
+            createdAt.plusSeconds(SESSION_TTL_SECONDS)
         );
         sessions.save(session);
         return session;

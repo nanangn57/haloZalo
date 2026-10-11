@@ -22,12 +22,13 @@ public final class PostgresSessionRepository implements SessionRepository {
 
     @Override
     public void save(Session session) {
-        String sql = "INSERT INTO identity.sessions (session_id, user_id, expires_at) VALUES (?, ?, ?)";
+        String sql = "INSERT INTO identity.sessions (session_id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, session.getSessionId());
             statement.setString(2, session.getUserId());
-            statement.setObject(3, OffsetDateTime.ofInstant(session.getExpiresAt(), ZoneOffset.UTC));
+            statement.setObject(3, OffsetDateTime.ofInstant(session.getCreatedAt(), ZoneOffset.UTC));
+            statement.setObject(4, OffsetDateTime.ofInstant(session.getExpiresAt(), ZoneOffset.UTC));
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save session", ex);
@@ -36,7 +37,7 @@ public final class PostgresSessionRepository implements SessionRepository {
 
     @Override
     public Session findById(String sessionId) {
-        String sql = "SELECT session_id, user_id, expires_at FROM identity.sessions WHERE session_id = ?";
+        String sql = "SELECT session_id, user_id, created_at, expires_at FROM identity.sessions WHERE session_id = ?";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, sessionId);
@@ -47,6 +48,7 @@ public final class PostgresSessionRepository implements SessionRepository {
                 return new Session(
                     rows.getString("session_id"),
                     rows.getString("user_id"),
+                    rows.getObject("created_at", OffsetDateTime.class).toInstant(),
                     rows.getObject("expires_at", OffsetDateTime.class).toInstant()
                 );
             }
