@@ -8,7 +8,7 @@ Hạng 2 làm sau khi đường demo hạng 1 chạy trên URL: [#21](https://gi
 
 ## Hệ thống chạy thế nào
 
-Map này là quyết định chung, đã ghi ở [decisions.md](contract/decisions.md). Mỗi người build bên trong hộp mình giữ. Đường nối giữa các hộp thuộc hợp đồng: P1 sửa `doc/contract/` trước, người còn lại sinh type từ file đó. Không ai tự thêm một cửa public, tự đọc bảng của service khác, hay tự đổi shape của `Message`.
+Map này là quyết định chung, đã ghi ở [decisions.md](contract/decisions.md). Mỗi người build bên trong module mình giữ. Đường nối giữa các module thuộc hợp đồng: P1 sửa `doc/contract/` trước, người còn lại sinh type từ file đó. Không ai tự thêm một cửa public, tự đọc bảng schema khác, hay tự đổi shape của `Message`.
 
 ```mermaid
 flowchart TB
@@ -18,53 +18,50 @@ flowchart TB
   web --> core
   mobile --> core
 
-  gw["Gateway · P1<br/>cửa public duy nhất, hỏi Identity về session"]
-  core -->|"HTTP"| gw
-  core -->|"WebSocket /ws"| gw
+  app["App · một process<br/>HTTP public, filter session, WebSocket /ws"]
+  core -->|"HTTP"| app
+  core -->|"WebSocket /ws"| app
 
-  id["Identity · P1<br/>MySQL: tài khoản, session, nhóm, thành viên"]
-  msg["Messaging · P2<br/>Mongo: tin và seq · Redis: kết nối realtime"]
-  an["Analytics · P1<br/>MySQL: bảng tổng hợp"]
+  id["Identity · P1<br/>schema identity: tài khoản, session, nhóm, thành viên"]
+  msg["Messaging · P2<br/>schema messaging: tin và seq"]
+  an["Analytics · P1<br/>schema analytics: bảng tổng hợp"]
 
-  gw --> id
-  gw --> msg
-  gw --> an
+  app --> id
+  app --> msg
+  app --> an
 
-  bus["Event bus<br/>cùng phong bì với frame WebSocket"]
-  id -->|"identity.user.logged_in"| bus
-  msg -->|"messaging.message.created<br/>chỉ phát sau khi ghi Mongo"| bus
-  bus --> an
-
-  msg -.->|"ai thuộc nhóm<br/>HTTP hoặc event, chưa chốt"| id
+  id -->|"identity.user.logged_in<br/>trong process, sau commit"| an
+  msg -->|"messaging.message.created<br/>sau khi ghi schema messaging"| an
+  msg -->|"interface thành viên"| id
 ```
 
-Nét liền là đường đã chốt. Nét đứt là chỗ P1 và P2 còn phải ghi vào decisions khi làm nhóm và chat. P4 giữ lệnh deploy, đưa đúng các hộp này lên một URL mỗi tuần.
+Cả ba schema nằm trên database PostgreSQL `halozalo`. P4 giữ lệnh deploy, đưa một process và PostgreSQL đó lên một URL mỗi tuần.
 
 | Việc | Ai quyết |
 |---|---|
-| Hộp nào tồn tại, store nào, cổng public, shape `Message`, phong bì event | Cả nhóm, qua `doc/contract/`. P1 là người sửa file |
-| Code, bảng, handler bên trong một hộp | Người giữ thư mục đó |
+| Module nào tồn tại, schema nào, cổng public, shape `Message`, phong bì event | Cả nhóm, qua `doc/contract/`. P1 là người sửa file |
+| Code, bảng, handler bên trong một module | Người giữ thư mục đó |
 | Web và mobile lệch cách đồng bộ | Không ai. Cả hai gọi cùng `clients/core` |
-| Gộp service cho dễ deploy | Không thuộc quyền P4. Lệnh deploy phải giữ các hộp trên map |
+| Tách lại thành nhiều process | Không. Lệnh deploy giữ một process và một PostgreSQL |
 
 | Thành phần | Giữ gì | Nói chuyện với ai |
 |---|---|---|
-| gateway | Không giữ session | Hỏi Identity session còn hạn không, rồi chuyển HTTP và WebSocket |
-| identity | Tài khoản, session, nhóm, thành viên. MySQL | Cấp session id. Phát event khi login, tạo nhóm |
-| messaging | Hội thoại, tin, `seq`, file, kết nối realtime. Mongo và Redis | Ghi tin xong mới phát `messaging.message.created` |
-| analytics | Bảng tổng hợp. MySQL | Chỉ đọc event. Không quét bảng message |
+| app | Cửa HTTP public và WebSocket. Không giữ session | Filter gọi Identity trong process, rồi vào handler |
+| identity | Tài khoản, session, nhóm, thành viên. Schema `identity` | Cấp session id. Phát event khi login, tạo nhóm. Cho Messaging hỏi thành viên qua interface |
+| messaging | Hội thoại, tin, `seq`, file. Schema `messaging`. Socket trong bộ nhớ process | Ghi tin xong mới phát `messaging.message.created`. Hỏi thành viên qua interface của Identity |
+| analytics | Bảng tổng hợp. Schema `analytics` | Chỉ nhận event trong process. Không quét bảng schema `messaging` |
 | client-core | Token, outbox, cache, socket, catch-up | Web và mobile dùng chung một thư viện |
 
 Một tin text đi như sau:
 
-1. Client sinh `clientMsgId`, gửi `POST /conversations/{conversationId}/messages` tới gateway, kèm access token.
-2. Gateway gửi session id sang Identity. Không có dòng hoặc hết hạn thì dừng tại gateway. Còn hạn thì chuyển tiếp kèm `userId`.
-3. Messaging ghi Mongo, gán `seq`. Cùng người gửi và cùng `clientMsgId` thì trả tin cũ, không tăng `seq`.
-4. Ghi xong mới phát phong bì `messaging.message.created`. WebSocket đẩy nguyên phong bì đó tới client đang mở. Analytics nhận cùng event để cộng bảng tổng hợp.
+1. Client sinh `clientMsgId`, gửi `POST /conversations/{conversationId}/messages` tới app, kèm access token.
+2. Filter đưa session id cho Identity trong cùng process. Không có dòng hoặc hết hạn thì app trả 401 và dừng. Còn hạn thì gắn `userId` rồi vào handler.
+3. Messaging ghi schema `messaging`, gán `seq`. Cùng người gửi và cùng `clientMsgId` thì trả tin cũ, không tăng `seq`.
+4. Commit xong mới phát phong bì `messaging.message.created`. WebSocket đẩy nguyên phong bì đó tới client đang mở. Analytics nhận cùng event để cộng bảng tổng hợp.
 
 Đọc ở một thiết bị ghi mốc đã đọc theo user và hội thoại. Thiết bị kia hết unread vì đọc mốc đó, không vì sửa tin đã gửi. Mất socket thì client nhìn lỗ `seq` và gọi catch-up; catch-up trả cùng schema `Message`.
 
-Service không đọc bảng của service khác. Messaging cần biết ai thuộc nhóm thì gọi HTTP sang Identity, hoặc nhận event thành viên rồi giữ bản sao của riêng mình. Chốt một đường khi làm [#5](https://github.com/nanangn57/haloZalo/issues/5) và [#9](https://github.com/nanangn57/haloZalo/issues/9), ghi vào [decisions.md](contract/decisions.md).
+Module không đọc bảng schema khác. Messaging biết ai thuộc nhóm bằng interface của Identity, đã ghi ở [decisions.md](contract/decisions.md).
 
 ## Cách xây
 
@@ -73,7 +70,7 @@ Mỗi tuần thêm một việc người dùng làm được trên cùng URL clo
 Đường tới buổi demo bị chấm trực tiếp:
 
 ```
-token → gateway → nhóm và tìm user → gửi tin → realtime
+token → app → nhóm và tìm user → gửi tin → realtime
   → seq, đã đọc, catch-up → web hai phiên → APK dùng cùng core
 ```
 
@@ -100,10 +97,10 @@ Tuần này bốn người chưa cần chờ nhau. `conversationId` do client si
 
 | Người | Issue | Xong khi |
 |---|---|---|
-| P1 | [#7](https://github.com/nanangn57/haloZalo/issues/7), [#5](https://github.com/nanangn57/haloZalo/issues/5) | Mọi request đi qua gateway; tạo nhóm, thêm và xoá thành viên, xem nhóm của mình |
+| P1 | [#7](https://github.com/nanangn57/haloZalo/issues/7), [#5](https://github.com/nanangn57/haloZalo/issues/5) | Mọi request có token đi qua filter của app; tạo nhóm, thêm và xoá thành viên, xem nhóm của mình |
 | P2 | nối [#30](https://github.com/nanangn57/haloZalo/issues/30) vào HTTP của OpenAPI | `POST` tin TEXT đúng hợp đồng, vẫn nhận `conversationId` do client sinh |
 | P3 | phần auth của [#13](https://github.com/nanangn57/haloZalo/issues/13) | Core gọi đăng nhập thật và giữ access token |
-| P4 | deploy gateway + identity | Cùng lệnh tuần 1, URL làm được đăng ký và đăng nhập |
+| P4 | deploy app và PostgreSQL | Cùng lệnh tuần 1, URL làm được đăng ký và đăng nhập |
 
 - [ ] Trên URL: đăng ký, đăng nhập, gọi `/me`
 - [ ] OpenAPI có API nhóm trước khi web gọi
@@ -115,10 +112,9 @@ Tuần này bốn người chưa cần chờ nhau. `conversationId` do client si
 | P1 | [#6](https://github.com/nanangn57/haloZalo/issues/6), bắt đầu [#8](https://github.com/nanangn57/haloZalo/issues/8) | Tìm user; analytics ghi được login và tạo nhóm |
 | P2 | [#9](https://github.com/nanangn57/haloZalo/issues/9) | Chat 1-1 và nhóm, text và emotion, lịch sử gần nhất; người ngoài nhóm bị chặn |
 | P3 | [#14](https://github.com/nanangn57/haloZalo/issues/14) | Web đăng nhập, tìm user, tạo nhóm, quản lý thành viên |
-| P4 | Compose thêm MySQL của identity | URL làm được tạo nhóm |
+| P4 | Cùng một PostgreSQL, schema `identity` | URL làm được tạo nhóm |
 
 - [ ] Trên URL: tìm user, tạo nhóm, xem danh sách nhóm
-- [ ] Đã chốt Messaging biết thành viên bằng HTTP hay bằng event
 
 ### Tuần 4 · 19/10–25/10 · Tin hiện không cần tải lại
 
@@ -127,7 +123,7 @@ Tuần này bốn người chưa cần chờ nhau. `conversationId` do client si
 | P1 | [#8](https://github.com/nanangn57/haloZalo/issues/8) nhận `messaging.message.created` | Một request thống kê không quét bảng message |
 | P2 | [#10](https://github.com/nanangn57/haloZalo/issues/10) | Ghi DB xong mới fan-out; client đang mở nhận tin |
 | P3 | [#15](https://github.com/nanangn57/haloZalo/issues/15), socket và outbox trong [#13](https://github.com/nanangn57/haloZalo/issues/13) | Web gửi text và emotion; tin mới tự hiện; gửi lại không trùng |
-| P4 | Deploy messaging, Mongo, Redis | URL có WebSocket `/ws` |
+| P4 | Cùng một process | URL có WebSocket `/ws` |
 
 - [ ] Trên URL: gửi text, tin hiện ở tab đang mở
 - [ ] Có đường đo p95 gửi → hiện cho text

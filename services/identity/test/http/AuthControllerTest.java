@@ -1,6 +1,7 @@
 package http;
 
 import account.Account;
+import mail.MailSender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -12,9 +13,12 @@ import service.AuthService;
 import session.Session;
 import storage.AccountRepository;
 import storage.SessionRepository;
+import storage.VerificationRepository;
+import verification.EmailVerification;
 
 import com.jayway.jsonpath.JsonPath;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,14 +29,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class AuthControllerTest {
     private MockMvc mvc;
+    private MemoryMail mail;
 
     @BeforeEach
     void setUp() {
+        mail = new MemoryMail();
         AuthService auth = new AuthService(
             new BcryptPasswordHasher(),
             new MemoryAccounts(),
             new MemorySessions(),
-            userId -> { }
+            userId -> { },
+            new MemoryVerifications(),
+            mail,
+            Clock.systemUTC(),
+            "http://localhost:8080"
         );
         mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth))
             .setControllerAdvice(new AuthExceptionHandler())
@@ -40,19 +50,15 @@ class AuthControllerTest {
     }
 
     @Test
-    void registerReturnsNestedUserWithoutPasswordHash() throws Exception {
+    void registerAcceptsEmailWithoutToken() throws Exception {
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.tokenType").value("Bearer"))
-            .andExpect(jsonPath("$.expiresIn").value(259200))
-            .andExpect(jsonPath("$.accessToken").isNotEmpty())
-            .andExpect(jsonPath("$.user.username").value("ngoc_anh"))
-            .andExpect(jsonPath("$.user.email").value("anh@example.com"))
-            .andExpect(jsonPath("$.user.userId").isNotEmpty())
-            .andExpect(jsonPath("$.passwordHash").doesNotExist())
-            .andExpect(jsonPath("$.user.passwordHash").doesNotExist());
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.email").value("anh@example.com"))
+            .andExpect(jsonPath("$.accessToken").doesNotExist())
+            .andExpect(jsonPath("$.password").doesNotExist())
+            .andExpect(jsonPath("$.passwordHash").doesNotExist());
     }
 
     @Test
@@ -77,8 +83,42 @@ class AuthControllerTest {
     }
 
     @Test
+    void verifyReturnsUserWithoutPasswordHash() throws Exception {
+        registerNgocAnh();
+
+        mvc.perform(get("/auth/verify").param("token", verificationToken()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.username").value("ngoc_anh"))
+            .andExpect(jsonPath("$.email").value("anh@example.com"))
+            .andExpect(jsonPath("$.userId").isNotEmpty())
+            .andExpect(jsonPath("$.passwordHash").doesNotExist())
+            .andExpect(jsonPath("$.accessToken").doesNotExist());
+    }
+
+    @Test
+    void verifyRejectsUnknownToken() throws Exception {
+        mvc.perform(get("/auth/verify").param("token", "missing"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+            .andExpect(jsonPath("$.error.message").value("Verification link is invalid or expired"));
+    }
+
+    @Test
+    void loginBeforeVerifyIsUnauthorized() throws Exception {
+        registerNgocAnh();
+
+        mvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("UNAUTHENTICATED"))
+            .andExpect(jsonPath("$.error.message").value("Invalid login or password"));
+    }
+
+    @Test
     void loginRejectsWrongPassword() throws Exception {
         registerNgocAnh();
+        verifyNgocAnh();
 
         mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -97,10 +137,16 @@ class AuthControllerTest {
     }
 
     @Test
-    void meAndCurrentSessionReturnTheSameUser() throws Exception {
-        MvcResult registered = registerNgocAnh();
-        String token = JsonPath.read(registered.getResponse().getContentAsString(), "$.accessToken");
-        String userId = JsonPath.read(registered.getResponse().getContentAsString(), "$.user.userId");
+    void meReturnsTheVerifiedUser() throws Exception {
+        registerNgocAnh();
+        MvcResult verified = verifyNgocAnh();
+        String userId = JsonPath.read(verified.getResponse().getContentAsString(), "$.userId");
+        MvcResult loggedIn = mvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = JsonPath.read(loggedIn.getResponse().getContentAsString(), "$.accessToken");
 
         mvc.perform(get("/me").header("Authorization", "Bearer " + token))
             .andExpect(status().isOk())
@@ -108,19 +154,31 @@ class AuthControllerTest {
             .andExpect(jsonPath("$.username").value("ngoc_anh"))
             .andExpect(jsonPath("$.email").value("anh@example.com"))
             .andExpect(jsonPath("$.passwordHash").doesNotExist());
+    }
 
-        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.userId").value(userId))
-            .andExpect(jsonPath("$.username").doesNotExist());
+    @Test
+    void sessionCheckIsNotAnHttpEndpoint() throws Exception {
+        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer token"))
+            .andExpect(status().isNotFound());
     }
 
     private MvcResult registerNgocAnh() throws Exception {
         return mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
-            .andExpect(status().isCreated())
+            .andExpect(status().isAccepted())
             .andReturn();
+    }
+
+    private MvcResult verifyNgocAnh() throws Exception {
+        return mvc.perform(get("/auth/verify").param("token", verificationToken()))
+            .andExpect(status().isOk())
+            .andReturn();
+    }
+
+    private String verificationToken() {
+        String body = mail.lastBody();
+        return body.substring(body.indexOf("token=") + "token=".length());
     }
 
     private static final class MemoryAccounts implements AccountRepository {
@@ -158,6 +216,48 @@ class AuthControllerTest {
         @Override
         public Session findById(String sessionId) {
             return rows.stream().filter(row -> row.getSessionId().equals(sessionId)).findFirst().orElse(null);
+        }
+    }
+
+    private static final class MemoryVerifications implements VerificationRepository {
+        private final List<EmailVerification> rows = new ArrayList<>();
+
+        @Override
+        public void save(EmailVerification verification) {
+            rows.add(verification);
+        }
+
+        @Override
+        public EmailVerification findByToken(String token) {
+            return rows.stream().filter(row -> row.getToken().equals(token)).findFirst().orElse(null);
+        }
+
+        @Override
+        public EmailVerification findByUsername(String username) {
+            return rows.stream().filter(row -> row.getUsername().equals(username)).findFirst().orElse(null);
+        }
+
+        @Override
+        public EmailVerification findByEmail(String email) {
+            return rows.stream().filter(row -> row.getEmail().equals(email)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void delete(String token) {
+            rows.removeIf(row -> row.getToken().equals(token));
+        }
+    }
+
+    private static final class MemoryMail implements MailSender {
+        private final List<String> bodies = new ArrayList<>();
+
+        @Override
+        public void send(String to, String subject, String body) {
+            bodies.add(body);
+        }
+
+        private String lastBody() {
+            return bodies.get(bodies.size() - 1);
         }
     }
 }

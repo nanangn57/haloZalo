@@ -7,26 +7,29 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Component;
 
 @Component
-public final class MySqlAccountRepository implements AccountRepository {
+public final class PostgresAccountRepository implements AccountRepository {
     private final DataSource dataSource;
 
-    public MySqlAccountRepository(DataSource dataSource) {
+    public PostgresAccountRepository(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
     @Override
     public void save(Account account) {
-        String sql = "INSERT INTO accounts (user_id, username, email, password_hash) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO identity.accounts (user_id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, account.getUserId());
             statement.setString(2, account.getUsername());
             statement.setString(3, account.getEmail());
             statement.setString(4, account.getPasswordHash());
+            statement.setObject(5, OffsetDateTime.ofInstant(account.getCreatedAt(), ZoneOffset.UTC));
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save account", ex);
@@ -35,17 +38,17 @@ public final class MySqlAccountRepository implements AccountRepository {
 
     @Override
     public Account findByUsername(String username) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE username = ?", username);
+        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE username = ?", username);
     }
 
     @Override
     public Account findByEmail(String email) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE email = ?", email);
+        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE email = ?", email);
     }
 
     @Override
     public Account findById(String userId) {
-        return findOne("SELECT user_id, username, email, password_hash FROM accounts WHERE user_id = ?", userId);
+        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE user_id = ?", userId);
     }
 
     private Account findOne(String sql, String value) {
@@ -60,7 +63,8 @@ public final class MySqlAccountRepository implements AccountRepository {
                     rows.getString("user_id"),
                     rows.getString("username"),
                     rows.getString("email"),
-                    rows.getString("password_hash")
+                    rows.getString("password_hash"),
+                    rows.getObject("created_at", OffsetDateTime.class).toInstant()
                 );
             }
         } catch (SQLException ex) {

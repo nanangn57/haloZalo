@@ -2,6 +2,7 @@ package http;
 
 import account.Account;
 import auth.LoginRequest;
+import auth.RegisterAccepted;
 import auth.RegisterRequest;
 import auth.TokenResponse;
 import service.AuthService;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -27,8 +29,14 @@ public final class AuthController {
     }
 
     @PostMapping("/auth/register")
-    public ResponseEntity<TokenResponse> register(@RequestBody RegisterRequest request) {
-        return ResponseEntity.status(201).body(auth.register(request));
+    public ResponseEntity<RegisterAccepted> register(@RequestBody RegisterRequest request) {
+        return ResponseEntity.accepted().body(auth.register(request));
+    }
+
+    @GetMapping("/auth/verify")
+    public TokenResponse.User verify(@RequestParam(value = "token", required = false) String token) {
+        Account account = auth.verify(token);
+        return new TokenResponse.User(account.getUserId(), account.getUsername(), account.getEmail());
     }
 
     @PostMapping("/auth/login")
@@ -44,11 +52,6 @@ public final class AuthController {
         user.put("username", account.getUsername());
         user.put("email", account.getEmail());
         return user;
-    }
-
-    @GetMapping("/internal/sessions/current")
-    public Map<String, String> current(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        return Map.of("userId", auth.currentUserId(sessionId(authorization)));
     }
 
     private static String sessionId(String authorization) {

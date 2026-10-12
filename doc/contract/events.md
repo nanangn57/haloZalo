@@ -1,6 +1,6 @@
 # Envelope event — bản v1
 
-Mọi event đi qua bus và mọi frame WebSocket dùng cùng một phong bì. Analytics chỉ đọc event này, không quét bảng message.
+Mọi event phát trong cùng process, sau khi transaction nguồn commit. Mọi frame WebSocket dùng cùng một phong bì. Analytics chỉ nhận event này, không quét bảng ở schema `messaging`.
 
 ## Phong bì
 
@@ -40,7 +40,7 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | type | Khi nào phát | Producer | Payload |
 |---|---|---|---|
 | `identity.user.logged_in` | Đăng nhập thành công | identity | `{ "userId": "<uuid>" }` |
-| `messaging.message.created` | Tin đã ghi vào Mongo | messaging | `Message` |
+| `messaging.message.created` | Tin đã ghi vào schema `messaging` | messaging | `Message` |
 
 WebSocket `/ws` chỉ đẩy `messaging.message.created` trong bản này. Frame là nguyên phong bì, không có thêm lớp bọc.
 
