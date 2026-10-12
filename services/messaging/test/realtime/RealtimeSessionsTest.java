@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 
 class RealtimeSessionsTest {
     private static final RealtimeProperties PROPERTIES = new RealtimeProperties(
-        RealtimeProperties.Bus.LOCAL, List.of("*"), Duration.ofSeconds(25), Duration.ofSeconds(60),
+        List.of("*"), Duration.ofSeconds(25), Duration.ofSeconds(60),
         Duration.ofSeconds(10), DataSize.ofKilobytes(512), DataSize.ofKilobytes(8));
 
     private MovableClock clock;

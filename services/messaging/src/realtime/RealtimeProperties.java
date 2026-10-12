@@ -12,16 +12,10 @@ import java.util.List;
  */
 @ConfigurationProperties("messaging.realtime")
 public record RealtimeProperties(
-    @DefaultValue("redis") Bus bus,
     @DefaultValue("*") List<String> allowedOrigins,
     @DefaultValue("25s") Duration pingInterval,
     @DefaultValue("60s") Duration pongTimeout,
     @DefaultValue("10s") Duration sendTimeLimit,
     @DefaultValue("512KB") DataSize sendBufferLimit,
     @DefaultValue("8KB") DataSize maxTextMessageSize) {
-
-    public enum Bus {
-        REDIS,
-        LOCAL
-    }
 }

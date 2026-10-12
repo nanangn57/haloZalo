@@ -1,12 +1,13 @@
 package app;
 
 import conversation.ConversationType;
-import http.MessageController;
+import http.CurrentUser;
 import realtime.RealtimeSessions;
 import service.MessageService;
 import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
+import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
@@ -15,10 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.mongo.MongoDataAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration;
-import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
+import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -58,11 +57,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
     classes = RealtimeIntegrationTest.TestApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = "messaging.realtime.bus=local")
+    properties = "messaging.user-header-enabled=true")
 class RealtimeIntegrationTest {
-    private static final String ALICE = "aaaaaaaa-0000-4000-8000-000000000001";
-    private static final String BOB = "aaaaaaaa-0000-4000-8000-000000000002";
-    private static final String CAROL = "aaaaaaaa-0000-4000-8000-000000000003";
+    // New users for every test: the app is shared, and a pair of users has only one DIRECT conversation.
+    private final String aliceId = UUID.randomUUID().toString();
+    private final String bobId = UUID.randomUUID().toString();
+    private final String carolId = UUID.randomUUID().toString();
 
     @LocalServerPort
     private int port;
@@ -82,7 +82,7 @@ class RealtimeIntegrationTest {
     @BeforeEach
     void setUp() {
         conversationId = UUID.randomUUID().toString();
-        service.openConversation(conversationId, ConversationType.DIRECT, List.of(ALICE, BOB));
+        service.openConversation(conversationId, ConversationType.DIRECT, List.of(aliceId, bobId));
     }
 
     @AfterEach
@@ -96,15 +96,15 @@ class RealtimeIntegrationTest {
 
     @Test
     void everyDeviceOfEveryMemberGetsTheEnvelopeAndOutsidersGetNothing() throws Exception {
-        BlockingQueue<String> alice = connect(ALICE);
-        BlockingQueue<String> bobWeb = connect(BOB);
-        BlockingQueue<String> bobMobile = connect(BOB);
-        BlockingQueue<String> carol = connect(CAROL);
-        awaitSockets(ALICE, 1);
-        awaitSockets(BOB, 2);
+        BlockingQueue<String> alice = connect(aliceId);
+        BlockingQueue<String> bobWeb = connect(bobId);
+        BlockingQueue<String> bobMobile = connect(bobId);
+        BlockingQueue<String> carol = connect(carolId);
+        awaitSockets(aliceId, 1);
+        awaitSockets(bobId, 2);
 
         String clientMsgId = UUID.randomUUID().toString();
-        ResponseEntity<String> sent = post("/conversations/" + conversationId + "/messages", ALICE,
+        ResponseEntity<String> sent = post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hello\",\"clientMsgId\":\"" + clientMsgId + "\"}");
         assertEquals(201, sent.getStatusCode().value());
         String messageId = JsonPath.read(sent.getBody(), "$.messageId");
@@ -120,29 +120,54 @@ class RealtimeIntegrationTest {
         assertNull(carol.poll(300, TimeUnit.MILLISECONDS));
 
         // A retry with the same clientMsgId stores nothing new, so nothing is pushed.
-        post("/conversations/" + conversationId + "/messages", ALICE,
+        post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hello\",\"clientMsgId\":\"" + clientMsgId + "\"}");
         assertNull(bobWeb.poll(300, TimeUnit.MILLISECONDS));
     }
 
     @Test
     void reactionsAndDeletesArePushedToTheOtherDevices() throws Exception {
-        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", ALICE,
+        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", aliceId,
             "{\"type\":\"TEXT\",\"body\":\"hi\",\"clientMsgId\":\"" + UUID.randomUUID() + "\"}").getBody(), "$.messageId");
-        BlockingQueue<String> aliceMobile = connect(ALICE);
-        awaitSockets(ALICE, 1);
+        BlockingQueue<String> aliceMobile = connect(aliceId);
+        awaitSockets(aliceId, 1);
 
-        exchange(HttpMethod.PUT, "/conversations/" + conversationId + "/messages/" + messageId + "/reactions/love", BOB);
+        exchange(HttpMethod.PUT, "/conversations/" + conversationId + "/messages/" + messageId + "/reactions/love", bobId);
         String added = next(aliceMobile);
         assertEquals("messaging.reaction.added", JsonPath.read(added, "$.type"));
-        assertEquals(BOB, JsonPath.read(added, "$.payload.userId"));
+        assertEquals(bobId, JsonPath.read(added, "$.payload.userId"));
         assertEquals("love", JsonPath.read(added, "$.payload.code"));
 
-        exchange(HttpMethod.DELETE, "/conversations/" + conversationId + "/messages/" + messageId, ALICE);
+        exchange(HttpMethod.DELETE, "/conversations/" + conversationId + "/messages/" + messageId, aliceId);
         String deleted = next(aliceMobile);
         assertEquals("messaging.message.deleted", JsonPath.read(deleted, "$.type"));
         assertEquals(messageId, JsonPath.read(deleted, "$.payload.messageId"));
         assertNotNull(JsonPath.read(deleted, "$.payload.deletedAt"));
+    }
+
+    @Test
+    void readingOnOneDeviceTellsTheUsersOtherDevicesButNotOtherMembers() throws Exception {
+        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", aliceId,
+            "{\"type\":\"TEXT\",\"body\":\"hi\",\"clientMsgId\":\"" + UUID.randomUUID() + "\"}").getBody(), "$.messageId");
+        BlockingQueue<String> bobMobile = connect(bobId);
+        BlockingQueue<String> alice = connect(aliceId);
+        awaitSockets(bobId, 1);
+        awaitSockets(aliceId, 1);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.add(CurrentUser.HEADER, bobId);
+        ResponseEntity<String> read = http.exchange("/conversations/" + conversationId + "/read", HttpMethod.PUT,
+            new HttpEntity<>("{\"seq\":1}", headers), String.class);
+        assertEquals(200, read.getStatusCode().value());
+        assertEquals(0, (int) JsonPath.read(read.getBody(), "$.unreadCount"));
+
+        String frame = next(bobMobile);
+        assertEquals("messaging.read.updated", JsonPath.read(frame, "$.type"));
+        assertEquals(conversationId, JsonPath.read(frame, "$.payload.conversationId"));
+        assertEquals(1, (int) JsonPath.read(frame, "$.payload.lastReadSeq"));
+        assertNull(alice.poll(300, TimeUnit.MILLISECONDS));
+        assertNotNull(messageId);
     }
 
     @Test
@@ -156,19 +181,19 @@ class RealtimeIntegrationTest {
 
     @Test
     void aClosedDeviceIsForgottenWhileTheOtherStaysConnected() throws Exception {
-        connect(BOB);
-        connect(BOB);
-        awaitSockets(BOB, 2);
+        connect(bobId);
+        connect(bobId);
+        awaitSockets(bobId, 2);
 
         open.get(0).close(CloseStatus.NORMAL);
 
-        awaitSockets(BOB, 1);
+        awaitSockets(bobId, 1);
     }
 
     private BlockingQueue<String> connect(String userId) throws Exception {
         BlockingQueue<String> frames = new LinkedBlockingQueue<>();
         WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         WebSocketSession session = new StandardWebSocketClient().execute(new TextWebSocketHandler() {
             @Override
             protected void handleTextMessage(WebSocketSession session, TextMessage message) {
@@ -196,26 +221,24 @@ class RealtimeIntegrationTest {
     private ResponseEntity<String> post(String path, String userId, String body) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         return http.postForEntity(path, new HttpEntity<>(body, headers), String.class);
     }
 
     private void exchange(HttpMethod method, String path, String userId) {
         HttpHeaders headers = new HttpHeaders();
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         ResponseEntity<String> response = http.exchange(path, method, new HttpEntity<>(headers), String.class);
         assertEquals(204, response.getStatusCode().value());
     }
 
     @SpringBootConfiguration
     @EnableAutoConfiguration(exclude = {
-        MongoAutoConfiguration.class,
-        MongoDataAutoConfiguration.class,
-        RedisAutoConfiguration.class,
-        RedisRepositoriesAutoConfiguration.class
+        DataSourceAutoConfiguration.class,
+        FlywayAutoConfiguration.class
     })
     @ConfigurationPropertiesScan("realtime")
-    @ComponentScan({"api", "event", "http", "realtime", "service"})
+    @ComponentScan({"api", "event", "http", "member", "realtime", "service"})
     static class TestApplication {
         @Bean
         MemoryConversations conversations() {
@@ -223,8 +246,13 @@ class RealtimeIntegrationTest {
         }
 
         @Bean
-        MemoryMessages messages() {
-            return new MemoryMessages();
+        MemoryMessages messages(MemoryConversations conversations) {
+            return new MemoryMessages(conversations);
+        }
+
+        @Bean
+        MemoryReadMarkers readMarkers(MemoryMessages messages) {
+            return new MemoryReadMarkers(messages);
         }
 
         @Bean

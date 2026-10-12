@@ -6,7 +6,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Body of POST /internal/conversations. conversationId is optional: v1 clients generate it themselves.
+ * Body of POST /internal/conversations. DIRECT: memberIds are the two people, conversationId is optional.
+ * GROUP: conversationId is the identity group's id and memberIds is left out, because identity owns the members.
  */
 public final class OpenConversationRequest {
     private final String conversationId;

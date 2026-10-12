@@ -1,6 +1,8 @@
 package event;
 
 import api.MessageResponse;
+import member.ConversationMembers;
+import member.StandaloneGroupMembers;
 import conversation.Conversation;
 import conversation.ConversationType;
 import message.Message;
@@ -25,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 class EnvelopeEventPublisherTest {
+    private static final StandaloneGroupMembers GROUPS = new StandaloneGroupMembers();
+    private static final ConversationMembers MEMBERS = new ConversationMembers(GROUPS);
     private static final Message MESSAGE = new Message(
         "8a1b2c3d-4e5f-6789-abcd-ef0123456789", "11111111-2222-4333-8444-555555555555", 1,
         "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "99999999-8888-4777-8666-555555555555",
@@ -80,9 +84,8 @@ class EnvelopeEventPublisherTest {
 
     @Test
     void everyEventIsPushedToEveryMemberIncludingTheSender() {
-        MemoryConversations conversations = conversationWithThreeMembers();
         List<RealtimeFrame> pushed = new ArrayList<>();
-        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(conversations, pushed::add);
+        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add);
 
         publisher.publishMessageCreated(MESSAGE);
         publisher.publishMessageDeleted(MESSAGE.softDeleted(Instant.parse("2026-09-28T09:05:00Z")));
@@ -98,9 +101,23 @@ class EnvelopeEventPublisherTest {
     }
 
     @Test
+    void readUpdatesGoOnlyToTheReadersOwnDevices() {
+        List<RealtimeFrame> pushed = new ArrayList<>();
+
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add)
+            .publishReadUpdated(MESSAGE.getConversationId(), "bob", 7);
+
+        assertEquals(1, pushed.size());
+        assertEquals(List.of("bob"), pushed.get(0).recipients());
+        assertEquals("messaging.read.updated", JsonPath.read(pushed.get(0).envelope(), "$.type"));
+        assertEquals(Map.of("conversationId", MESSAGE.getConversationId(), "userId", "bob", "lastReadSeq", 7),
+            JsonPath.read(pushed.get(0).envelope(), "$.payload"));
+    }
+
+    @Test
     void aFailedPushDoesNotFailTheChangeThatIsAlreadyStored() {
-        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(conversationWithThreeMembers(), frame -> {
-            throw new IllegalStateException("Redis is down");
+        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> {
+            throw new IllegalStateException("socket send failed");
         });
 
         assertDoesNotThrow(() -> publisher.publishMessageCreated(MESSAGE));
@@ -110,15 +127,18 @@ class EnvelopeEventPublisherTest {
     void anUnknownConversationIsNotPushed() {
         List<RealtimeFrame> pushed = new ArrayList<>();
 
-        new EnvelopeEventPublisher(new MemoryConversations(), pushed::add).publishMessageCreated(MESSAGE);
+        new EnvelopeEventPublisher(new MemoryConversations(), MEMBERS, pushed::add).publishMessageCreated(MESSAGE);
 
         assertEquals(List.of(), pushed);
     }
 
-    private static MemoryConversations conversationWithThreeMembers() {
+    /**
+     * The members live in identity (here the stand-in); the conversation row has none.
+     */
+    private static MemoryConversations groupOfThree() {
+        GROUPS.replace(MESSAGE.getConversationId(), Set.of(MESSAGE.getSenderId(), "bob", "carol"));
         MemoryConversations conversations = new MemoryConversations();
-        conversations.insert(new Conversation(MESSAGE.getConversationId(), ConversationType.GROUP,
-            Set.of(MESSAGE.getSenderId(), "bob", "carol"), 1, Instant.now()));
+        conversations.insert(new Conversation(MESSAGE.getConversationId(), ConversationType.GROUP, Set.of(), 1, Instant.now()));
         return conversations;
     }
 

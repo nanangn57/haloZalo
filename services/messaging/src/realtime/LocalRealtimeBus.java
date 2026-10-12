@@ -1,13 +1,11 @@
 package realtime;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Delivers straight to sockets on this instance. Only correct with a single instance.
+ * Delivers to the sockets held by this process. The app runs as one process, so every socket is here.
  */
 @Component
-@ConditionalOnProperty(name = "messaging.realtime.bus", havingValue = "local")
 public final class LocalRealtimeBus implements RealtimeBus {
     private final RealtimeSessions sessions;
 

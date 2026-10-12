@@ -1,6 +1,9 @@
 package http;
 
 import event.RecordingEvents;
+import member.ConversationMembers;
+import member.StandaloneGroupController;
+import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -12,6 +15,7 @@ import service.MessageService;
 import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
+import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
 
@@ -36,10 +40,14 @@ class MessageControllerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        MessageService service = new MessageService(
-            new MemoryConversations(), new MemoryMessages(), new MemoryReactions(), new RecordingEvents());
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
+        MemoryConversations conversations = new MemoryConversations();
+        StandaloneGroupMembers groups = new StandaloneGroupMembers();
+        MemoryMessages messages = new MemoryMessages(conversations);
+        MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
+            new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service), new StandaloneGroupController(groups))
             .setControllerAdvice(new MessageExceptionHandler())
+            .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -47,11 +55,15 @@ class MessageControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.type").value("DIRECT"))
             .andExpect(jsonPath("$.memberIds.length()").value(2));
+        mvc.perform(put("/internal/groups/" + GROUP + "/members")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"memberIds\":[\"" + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
+            .andExpect(status().isNoContent());
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\",\"memberIds\":[\""
-                    + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
-            .andExpect(status().isCreated());
+                .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.memberIds.length()").value(3));
     }
 
     @Test
@@ -241,17 +253,17 @@ class MessageControllerTest {
 
     private ResultActions react(String conversationId, String messageId, String code, String userId) throws Exception {
         return mvc.perform(put(reactionPath(conversationId, messageId) + "/" + code)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions unreact(String conversationId, String messageId, String code, String userId) throws Exception {
         return mvc.perform(delete(reactionPath(conversationId, messageId) + "/" + code)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions reactions(String conversationId, String messageId, String userId) throws Exception {
         return mvc.perform(get(reactionPath(conversationId, messageId))
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private static String reactionPath(String conversationId, String messageId) {
@@ -311,9 +323,126 @@ class MessageControllerTest {
             .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    void openDirectCreatesOnceAndReturnsTheSameConversationToTheOtherUser() throws Exception {
+        String dave = "aaaaaaaa-0000-4000-8000-000000000004";
+
+        MvcResult created = mvc.perform(post("/conversations/direct")
+                .header(CurrentUser.HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + dave + "\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.type").value("DIRECT"))
+            .andExpect(jsonPath("$.memberIds.length()").value(2))
+            .andExpect(jsonPath("$.lastSeq").value(0))
+            .andExpect(jsonPath("$.createdAt").isNotEmpty())
+            .andExpect(jsonPath("$.lastMessage").doesNotExist())
+            .andReturn();
+        String id = JsonPath.read(created.getResponse().getContentAsString(), "$.conversationId");
+
+        mvc.perform(post("/conversations/direct")
+                .header(CurrentUser.HEADER, dave)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + CAROL + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversationId").value(id));
+
+        mvc.perform(post("/conversations/direct")
+                .header(CurrentUser.HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + CAROL + "\"}"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/conversations/direct")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + dave + "\"}"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void conversationListAndDetailShowTheLastMessage() throws Exception {
+        sendText(DIRECT, BOB, "latest");
+
+        mvc.perform(get("/conversations").header(CurrentUser.HEADER, ALICE))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversations.length()").value(2))
+            .andExpect(jsonPath("$.conversations[0].conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.conversations[0].lastSeq").value(1))
+            .andExpect(jsonPath("$.conversations[0].lastMessageAt").isNotEmpty())
+            .andExpect(jsonPath("$.conversations[0].lastMessage.body").value("latest"))
+            .andExpect(jsonPath("$.conversations[0].lastMessage.senderId").value(BOB))
+            .andExpect(jsonPath("$.conversations[1].conversationId").value(GROUP))
+            .andExpect(jsonPath("$.conversations[1].lastMessage").doesNotExist())
+            .andExpect(jsonPath("$.nextCursor").doesNotExist());
+
+        mvc.perform(get("/conversations?limit=1").header(CurrentUser.HEADER, ALICE))
+            .andExpect(jsonPath("$.conversations.length()").value(1))
+            .andExpect(jsonPath("$.nextCursor").isNotEmpty());
+
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, BOB))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.lastMessage.body").value("latest"));
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, CAROL))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/conversations?cursor=nope").header(CurrentUser.HEADER, ALICE))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void historyScrollsBackWithBeforeSeq() throws Exception {
+        for (int i = 1; i <= 3; i++) {
+            sendText(DIRECT, ALICE, "m" + i);
+        }
+
+        catchUp(DIRECT, BOB, "?limit=2")
+            .andExpect(jsonPath("$.messages[0].seq").value(2))
+            .andExpect(jsonPath("$.messages[1].seq").value(3))
+            .andExpect(jsonPath("$.hasMore").value(true));
+        catchUp(DIRECT, BOB, "?beforeSeq=2&limit=2")
+            .andExpect(jsonPath("$.messages.length()").value(1))
+            .andExpect(jsonPath("$.messages[0].body").value("m1"))
+            .andExpect(jsonPath("$.hasMore").value(false));
+        catchUp(DIRECT, BOB, "?beforeSeq=2&afterSeq=1")
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void markReadMovesTheMarkerAndConversationsShowUnreadCounts() throws Exception {
+        sendText(DIRECT, ALICE, "one");
+        sendText(DIRECT, ALICE, "two");
+
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, BOB))
+            .andExpect(jsonPath("$.lastReadSeq").value(0))
+            .andExpect(jsonPath("$.unreadCount").value(2));
+
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, BOB)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"seq\":1}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.lastReadSeq").value(1))
+            .andExpect(jsonPath("$.unreadCount").value(1));
+
+        mvc.perform(get("/conversations").header(CurrentUser.HEADER, BOB))
+            .andExpect(jsonPath("$.conversations[0].conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.conversations[0].unreadCount").value(1))
+            .andExpect(jsonPath("$.conversations[1].unreadCount").value(0));
+
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"seq\":1}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, BOB)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest());
+    }
+
     private ResultActions catchUp(String conversationId, String userId, String query) throws Exception {
         return mvc.perform(get("/conversations/" + conversationId + "/messages" + query)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions send(String userId, String body) throws Exception {
@@ -322,7 +451,7 @@ class MessageControllerTest {
 
     private ResultActions send(String conversationId, String userId, String body) throws Exception {
         return mvc.perform(post("/conversations/" + conversationId + "/messages")
-            .header(MessageController.USER_HEADER, userId)
+            .header(CurrentUser.HEADER, userId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
     }
@@ -336,14 +465,14 @@ class MessageControllerTest {
 
     private ResultActions forward(String conversationId, String userId, String body) throws Exception {
         return mvc.perform(post("/conversations/" + conversationId + "/forwards")
-            .header(MessageController.USER_HEADER, userId)
+            .header(CurrentUser.HEADER, userId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
     }
 
     private ResultActions deleteMessage(String conversationId, String messageId, String userId) throws Exception {
         return mvc.perform(delete("/conversations/" + conversationId + "/messages/" + messageId)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private static String messageId(MvcResult result) throws Exception {

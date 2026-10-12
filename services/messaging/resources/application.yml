@@ -7,24 +7,27 @@ spring:
   config:
     # Local secrets, never committed. Real environment variables win over this file. See .env.example.
     import: optional:file:./.env.local[.properties]
-  data:
-    mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/messaging}
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      username: ${REDIS_USERNAME:}
-      password: ${REDIS_PASSWORD:}
-      ssl:
-        enabled: ${REDIS_SSL_ENABLED:false}
-      # A slow Redis must not hold up a send for long.
-      timeout: 2s
-      connect-timeout: 2s
+  datasource:
+    # The shared halozalo database. Defaults match infra/docker-compose.yml.
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/halozalo}
+    username: ${POSTGRES_USER:halozalo}
+    password: ${POSTGRES_PASSWORD:halozalo}
+    hikari:
+      # Unqualified table names mean schema messaging. Other schemas are never read.
+      connection-init-sql: SET search_path TO messaging
+      # Fail fast instead of queueing requests for half a minute when Postgres is down.
+      connection-timeout: 5000
+  flyway:
+    # Creates schema messaging if missing, and upgrades it from resources/db/migration on start.
+    schemas: messaging
+    default-schema: messaging
+    locations: classpath:db/migration
 
 messaging:
+  # Accept X-User-Id while messaging runs on its own. Must be false in the app, where the session filter sets the
+  # user; otherwise any client could claim to be any user. See http.CurrentUser.
+  user-header-enabled: ${MESSAGING_USER_HEADER_ENABLED:true}
   realtime:
-    # redis: fan-out across every instance through Redis pub/sub. local: this instance only, for development.
-    bus: ${MESSAGING_REALTIME_BUS:redis}
     allowed-origins: "*"
     ping-interval: 25s
     pong-timeout: 60s
@@ -37,7 +40,3 @@ management:
     web:
       exposure:
         include: health
-  health:
-    # Sending still works while Redis is down (clients catch up by seq), so Redis must not mark the service DOWN.
-    redis:
-      enabled: false

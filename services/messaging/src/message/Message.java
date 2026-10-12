@@ -49,6 +49,11 @@ public final class Message {
         this.deletedAt = deletedAt;
     }
 
+    public Message withSeq(long assigned) {
+        return new Message(messageId, conversationId, assigned, senderId, clientMsgId, content, metadata,
+            replyTo, forwardedFrom, status, createdAt, updatedAt, deletedAt);
+    }
+
     public Message softDeleted(Instant now) {
         return new Message(messageId, conversationId, seq, senderId, clientMsgId, content, metadata,
             replyTo, forwardedFrom, MessageStatus.DELETED, createdAt, now, now);

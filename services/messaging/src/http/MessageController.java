@@ -1,9 +1,13 @@
 package http;
 
-import api.CatchUpResponse;
+import api.ConversationListResponse;
 import api.ConversationResponse;
 import api.ForwardMessageRequest;
+import api.MessagePageResponse;
 import api.MessageResponse;
+import api.MarkReadRequest;
+import api.OpenDirectRequest;
+import api.ReadStateResponse;
 import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
@@ -20,17 +24,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public final class MessageController {
-    /**
-     * The gateway checks the session with Identity and forwards the user id in this header.
-     */
-    public static final String USER_HEADER = "X-User-Id";
-
     private final MessageService messages;
 
     public MessageController(MessageService messages) {
@@ -39,7 +37,7 @@ public final class MessageController {
 
     @PostMapping("/conversations/{conversationId}/messages")
     public ResponseEntity<MessageResponse> send(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestBody SendMessageRequest request) {
         MessageContent content = request.toContent();
@@ -52,20 +50,59 @@ public final class MessageController {
     }
 
     /**
-     * Catch-up after a reconnect or a seq gap. Call again with the last seq received while hasMore is true.
+     * Get-or-create the 1-1 conversation with another user: 201 when created, 200 when it already existed.
+     */
+    @PostMapping("/conversations/direct")
+    public ResponseEntity<ConversationResponse> openDirect(
+        @UserId String userId,
+        @RequestBody OpenDirectRequest request) {
+        MessageService.Opened opened = messages.openDirect(userId, request.getUserId());
+        return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation()));
+    }
+
+    @GetMapping("/conversations")
+    public ConversationListResponse conversations(
+        @UserId String userId,
+        @RequestParam(required = false) String cursor,
+        @RequestParam(required = false) Integer limit) {
+        return new ConversationListResponse(messages.conversations(userId, cursor, limit));
+    }
+
+    @GetMapping("/conversations/{conversationId}")
+    public ConversationResponse conversation(
+        @UserId String userId,
+        @PathVariable String conversationId) {
+        return new ConversationResponse(messages.conversation(conversationId, userId));
+    }
+
+    /**
+     * Marks the conversation read up to seq on all of the caller's devices.
+     */
+    @PutMapping("/conversations/{conversationId}/read")
+    public ReadStateResponse markRead(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody MarkReadRequest request) {
+        return new ReadStateResponse(conversationId, messages.markRead(conversationId, userId, request.getSeq()));
+    }
+
+    /**
+     * History without afterSeq: the newest page, then beforeSeq = the first seq received to scroll back.
+     * Catch-up with afterSeq: call again with the last seq received while hasMore is true.
      */
     @GetMapping("/conversations/{conversationId}/messages")
-    public CatchUpResponse catchUp(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+    public MessagePageResponse messages(
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestParam(required = false) Long afterSeq,
+        @RequestParam(required = false) Long beforeSeq,
         @RequestParam(required = false) Integer limit) {
-        return new CatchUpResponse(messages.catchUp(conversationId, userId, afterSeq, limit));
+        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit));
     }
 
     @PostMapping("/conversations/{conversationId}/forwards")
     public ResponseEntity<MessageResponse> forward(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestBody ForwardMessageRequest request) {
         return sentResponse(messages.forward(conversationId, userId, request.getClientMsgId(), request.getMessageId()));
@@ -73,7 +110,7 @@ public final class MessageController {
 
     @DeleteMapping("/conversations/{conversationId}/messages/{messageId}")
     public ResponseEntity<Void> delete(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId) {
         messages.delete(conversationId, messageId, userId);
@@ -82,7 +119,7 @@ public final class MessageController {
 
     @PutMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
     public ResponseEntity<Void> react(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId,
         @PathVariable String code) {
@@ -92,7 +129,7 @@ public final class MessageController {
 
     @DeleteMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
     public ResponseEntity<Void> unreact(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId,
         @PathVariable String code) {
@@ -102,7 +139,7 @@ public final class MessageController {
 
     @GetMapping("/conversations/{conversationId}/messages/{messageId}/reactions")
     public ReactionsResponse reactions(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId) {
         return new ReactionsResponse(messages.reactions(conversationId, messageId, userId));
