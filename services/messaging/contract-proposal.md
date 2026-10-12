@@ -45,6 +45,16 @@ Messaging đã theo decisions.md mới: một process, schema `messaging` trên 
 - Chưa có: xoá và reaction trên tin cũ hơn `afterSeq` lúc client offline. Muốn đủ thì cần thêm một bộ đếm thay đổi theo hội thoại, hoặc client tải lại trang tin đang hiện khi kết nối lại.
 - Mốc đã đọc (tuần 5) vẫn chưa có. Catch-up không đổi gì ở mốc đó.
 
+## Đã đọc và unread (tuần 5, #11)
+
+Đã chạy trong module, chưa có trong OpenAPI và `events.md`. Mốc không nằm trên tin, đúng như timeline tuần 5 yêu cầu.
+
+- `PUT /conversations/{conversationId}/read`, body `{ seq: integer >= 0 }`, trả `{ conversationId, lastReadSeq, unreadCount }`, 200. Mốc chỉ tiến; `seq` quá tin mới nhất thì lấy tin mới nhất. 403 với người ngoài, 400 khi thiếu hoặc âm.
+- Schema `Conversation` thêm `lastReadSeq` và `unreadCount` (của người gọi). `unreadCount` không tính tin của chính mình và tin đã xoá.
+- Gửi tin tự đánh dấu đã đọc tới tin của mình.
+- Event `messaging.read.updated`, payload `{ conversationId, userId, lastReadSeq }`. Chỉ đẩy tới thiết bị của user đó qua `/ws`, không tới thành viên khác, vì yêu cầu là đồng bộ giữa thiết bị của một người, không phải "đã xem" cho người khác. Nếu sau này muốn hiện "đã xem" thì cần chốt riêng.
+- Chưa có: tổng unread của mọi hội thoại cho badge của app. Client cộng từ danh sách, hoặc thêm một endpoint nếu cần.
+
 ## Shape `Message` cho bản sau
 
 Đề xuất thêm vào `MessageBase`, đều không bắt buộc nên client cũ không vỡ. `replyTo` và `forwardedFrom` đã được trả khi có giá trị:

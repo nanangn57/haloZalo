@@ -15,6 +15,7 @@ import service.MessageService;
 import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
+import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
 
@@ -41,8 +42,9 @@ class MessageControllerTest {
     void setUp() throws Exception {
         MemoryConversations conversations = new MemoryConversations();
         StandaloneGroupMembers groups = new StandaloneGroupMembers();
-        MessageService service = new MessageService(conversations, new MemoryMessages(conversations),
-            new MemoryReactions(), new ConversationMembers(groups), new RecordingEvents());
+        MemoryMessages messages = new MemoryMessages(conversations);
+        MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
+            new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
         mvc = MockMvcBuilders.standaloneSetup(new MessageController(service), new StandaloneGroupController(groups))
             .setControllerAdvice(new MessageExceptionHandler())
             .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
@@ -400,6 +402,41 @@ class MessageControllerTest {
             .andExpect(jsonPath("$.messages[0].body").value("m1"))
             .andExpect(jsonPath("$.hasMore").value(false));
         catchUp(DIRECT, BOB, "?beforeSeq=2&afterSeq=1")
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void markReadMovesTheMarkerAndConversationsShowUnreadCounts() throws Exception {
+        sendText(DIRECT, ALICE, "one");
+        sendText(DIRECT, ALICE, "two");
+
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, BOB))
+            .andExpect(jsonPath("$.lastReadSeq").value(0))
+            .andExpect(jsonPath("$.unreadCount").value(2));
+
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, BOB)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"seq\":1}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.lastReadSeq").value(1))
+            .andExpect(jsonPath("$.unreadCount").value(1));
+
+        mvc.perform(get("/conversations").header(CurrentUser.HEADER, BOB))
+            .andExpect(jsonPath("$.conversations[0].conversationId").value(DIRECT))
+            .andExpect(jsonPath("$.conversations[0].unreadCount").value(1))
+            .andExpect(jsonPath("$.conversations[1].unreadCount").value(0));
+
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, CAROL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"seq\":1}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(put("/conversations/" + DIRECT + "/read")
+                .header(CurrentUser.HEADER, BOB)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
             .andExpect(status().isBadRequest());
     }
 

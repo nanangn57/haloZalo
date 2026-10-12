@@ -1,6 +1,8 @@
 package service;
 
 import conversation.ConversationType;
+import conversation.ConversationSummary;
+import conversation.ReadState;
 import event.RecordingEvents;
 import member.ConversationMembers;
 import member.StandaloneGroupMembers;
@@ -12,10 +14,13 @@ import org.junit.jupiter.api.Test;
 import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
+import storage.MemoryReadMarkers;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,7 +48,8 @@ class MessageServiceTest {
         conversations = new MemoryConversations();
         messages = new MemoryMessages(conversations);
         groups = new StandaloneGroupMembers();
-        service = new MessageService(conversations, messages, new MemoryReactions(), new ConversationMembers(groups), events);
+        service = new MessageService(conversations, messages, new MemoryReactions(), new MemoryReadMarkers(messages),
+            new ConversationMembers(groups), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         // Identity owns the group; messaging only opens the conversation with the group's id.
         groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
@@ -358,6 +364,68 @@ class MessageServiceTest {
         assertEquals(Set.of(ALICE, BOB), service.conversation(GROUP, ALICE).memberIds());
         assertEquals(1, service.messages(GROUP, ALICE, null, null, null).messages().size());
         assertEquals(before.getMessageId(), service.messages(GROUP, ALICE, null, null, null).messages().get(0).getMessageId());
+    }
+
+    @Test
+    void unreadCountsMessagesFromOthersAfterTheMarker() {
+        for (int i = 1; i <= 3; i++) {
+            text(DIRECT, ALICE, "m" + i);
+        }
+
+        assertEquals(new ReadState(0, 3), service.conversation(DIRECT, BOB).read());
+        // Sending marks your own conversation read up to your message.
+        assertEquals(new ReadState(3, 0), service.conversation(DIRECT, ALICE).read());
+
+        assertEquals(new ReadState(2, 1), service.markRead(DIRECT, BOB, 2L));
+        assertEquals(new ReadState(2, 1), service.markRead(DIRECT, BOB, 1L));
+        assertEquals(new ReadState(3, 0), service.markRead(DIRECT, BOB, 999L));
+
+        text(DIRECT, BOB, "reply");
+        assertEquals(new ReadState(4, 0), service.conversation(DIRECT, BOB).read());
+        assertEquals(new ReadState(3, 1), service.conversation(DIRECT, ALICE).read());
+    }
+
+    @Test
+    void readUpdatesGoOutOnlyWhenTheMarkerMoves() {
+        text(DIRECT, ALICE, "one");
+        text(DIRECT, ALICE, "two");
+        events.reads.clear();
+
+        service.markRead(DIRECT, BOB, 1L);
+        service.markRead(DIRECT, BOB, 1L);
+        service.markRead(DIRECT, BOB, 0L);
+        service.markRead(DIRECT, BOB, 2L);
+
+        assertEquals(List.of(DIRECT + " " + BOB + " 1", DIRECT + " " + BOB + " 2"), events.reads);
+    }
+
+    @Test
+    void deletedMessagesAreNotUnread() {
+        Message gone = text(DIRECT, ALICE, "oops").getMessage();
+        text(DIRECT, ALICE, "kept");
+
+        service.delete(DIRECT, gone.getMessageId(), ALICE);
+
+        assertEquals(1, service.conversation(DIRECT, BOB).read().unreadCount());
+    }
+
+    @Test
+    void conversationListCarriesTheCallersUnreadCounts() {
+        text(DIRECT, ALICE, "1-1");
+        text(GROUP, CAROL, "g1");
+        text(GROUP, CAROL, "g2");
+
+        Map<String, ReadState> bob = service.conversations(BOB, null, null).conversations().stream()
+            .collect(Collectors.toMap(row -> row.conversation().getConversationId(), ConversationSummary::read));
+
+        assertEquals(Map.of(DIRECT, new ReadState(0, 1), GROUP, new ReadState(0, 2)), bob);
+    }
+
+    @Test
+    void onlyMembersCanMarkReadAndSeqMustNotBeNegative() {
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.markRead(DIRECT, CAROL, 1L));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.markRead(DIRECT, BOB, -1L));
+        assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.markRead(DIRECT, BOB, null));
     }
 
     private MessageService.Sent text(String conversationId, String senderId, String text) {

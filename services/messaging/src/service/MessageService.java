@@ -4,6 +4,7 @@ import conversation.Conversation;
 import conversation.ConversationCursor;
 import conversation.ConversationSummary;
 import conversation.ConversationType;
+import conversation.ReadState;
 import event.EventPublisher;
 import member.ConversationMembers;
 import message.ContentValidator;
@@ -15,6 +16,7 @@ import reaction.MessageReaction;
 import storage.ConversationRepository;
 import storage.MessageRepository;
 import storage.ReactionRepository;
+import storage.ReadMarkerRepository;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -37,6 +39,7 @@ public final class MessageService {
     private final ConversationRepository conversations;
     private final MessageRepository messages;
     private final ReactionRepository reactions;
+    private final ReadMarkerRepository readMarkers;
     private final ConversationMembers members;
     private final EventPublisher events;
 
@@ -44,11 +47,13 @@ public final class MessageService {
         ConversationRepository conversations,
         MessageRepository messages,
         ReactionRepository reactions,
+        ReadMarkerRepository readMarkers,
         ConversationMembers members,
         EventPublisher events) {
         this.conversations = conversations;
         this.messages = messages;
         this.reactions = reactions;
+        this.readMarkers = readMarkers;
         this.members = members;
         this.events = events;
     }
@@ -61,7 +66,7 @@ public final class MessageService {
         Conversation opened = type == ConversationType.GROUP
             ? openGroup(conversationId, memberIds)
             : openDirectWithMembers(conversationId, type, memberIds);
-        return summary(opened);
+        return summary(opened, null);
     }
 
     private Conversation openDirectWithMembers(String conversationId, ConversationType type, List<String> memberIds) {
@@ -113,18 +118,18 @@ public final class MessageService {
         String key = Conversation.directKey(Set.of(user, other));
         Conversation existing = conversations.findDirect(key);
         if (existing != null) {
-            return new Opened(summary(existing), false);
+            return new Opened(summary(existing, user), false);
         }
         Conversation created = new Conversation(UUID.randomUUID().toString(), ConversationType.DIRECT, Set.of(user, other), 0, now());
         if (conversations.insert(created)) {
-            return new Opened(new ConversationSummary(created, created.getMemberIds(), null), true);
+            return new Opened(new ConversationSummary(created, created.getMemberIds(), null, new ReadState(0, 0)), true);
         }
         // The other user opened it between our lookup and our insert.
         Conversation winner = conversations.findDirect(key);
         if (winner == null) {
             throw new IllegalStateException("Direct conversation was neither inserted nor found: " + key);
         }
-        return new Opened(summary(winner), false);
+        return new Opened(summary(winner, user), false);
     }
 
     /**
@@ -136,17 +141,38 @@ public final class MessageService {
         List<Conversation> rows = conversations.findForMember(user, members.groupIdsOf(user), cursor(cursor), size + 1);
         boolean hasMore = rows.size() > size;
         List<Conversation> page = hasMore ? rows.subList(0, size) : rows;
-        Map<String, Message> latest = messages.findLatest(page.stream().map(Conversation::getConversationId).toList());
+        List<String> ids = page.stream().map(Conversation::getConversationId).toList();
+        Map<String, Message> latest = messages.findLatest(ids);
+        Map<String, ReadState> read = readMarkers.readStates(user, ids);
         List<ConversationSummary> summaries = page.stream()
-            .map(conversation -> new ConversationSummary(
-                conversation, members.memberIds(conversation), latest.get(conversation.getConversationId())))
+            .map(conversation -> new ConversationSummary(conversation, members.memberIds(conversation),
+                latest.get(conversation.getConversationId()), read.get(conversation.getConversationId())))
             .toList();
         String next = hasMore ? ConversationCursor.after(page.get(page.size() - 1)).encode() : null;
         return new ConversationPage(summaries, next);
     }
 
     public ConversationSummary conversation(String conversationId, String userId) {
-        return summary(memberConversation(conversationId, user(userId)));
+        String user = user(userId);
+        return summary(memberConversation(conversationId, user), user);
+    }
+
+    /**
+     * Marks the conversation read up to seq for the caller, on all of their devices. The marker never moves back,
+     * and a seq past the newest message counts as the newest message. Returns the caller's read state after it.
+     */
+    public ReadState markRead(String conversationId, String userId, Long seq) {
+        if (seq == null || seq < 0) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "seq must be 0 or more");
+        }
+        String user = user(userId);
+        Conversation conversation = memberConversation(conversationId, user);
+        String id = conversation.getConversationId();
+        ReadMarkerRepository.Advance marker = readMarkers.advance(id, user, Math.min(seq, conversation.getLastSeq()), now());
+        if (marker.moved()) {
+            events.publishReadUpdated(id, user, marker.lastReadSeq());
+        }
+        return readMarkers.readStates(user, List.of(id)).get(id);
     }
 
     /**
@@ -313,6 +339,11 @@ public final class MessageService {
             return new Sent(messages.findBySenderAndClientMsgId(senderId, clientMsgId), false);
         }
         events.publishMessageCreated(message);
+        // Writing in a conversation means having read it up to your own message.
+        ReadMarkerRepository.Advance own = readMarkers.advance(message.getConversationId(), senderId, message.getSeq(), now);
+        if (own.moved()) {
+            events.publishReadUpdated(message.getConversationId(), senderId, own.lastReadSeq());
+        }
         return new Sent(message, true);
     }
 
@@ -349,9 +380,14 @@ public final class MessageService {
         return message;
     }
 
-    private ConversationSummary summary(Conversation conversation) {
-        Map<String, Message> latest = messages.findLatest(List.of(conversation.getConversationId()));
-        return new ConversationSummary(conversation, members.memberIds(conversation), latest.get(conversation.getConversationId()));
+    /**
+     * userId is the caller, for the read state; null leaves the read state out.
+     */
+    private ConversationSummary summary(Conversation conversation, String userId) {
+        String id = conversation.getConversationId();
+        Map<String, Message> latest = messages.findLatest(List.of(id));
+        ReadState read = userId == null ? null : readMarkers.readStates(userId, List.of(id)).get(id);
+        return new ConversationSummary(conversation, members.memberIds(conversation), latest.get(id), read);
     }
 
     private static int limit(Integer limit, int fallback, int max) {

@@ -7,6 +7,7 @@ import service.MessageService;
 import storage.MemoryConversations;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
+import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
@@ -145,6 +146,31 @@ class RealtimeIntegrationTest {
     }
 
     @Test
+    void readingOnOneDeviceTellsTheUsersOtherDevicesButNotOtherMembers() throws Exception {
+        String messageId = JsonPath.read(post("/conversations/" + conversationId + "/messages", aliceId,
+            "{\"type\":\"TEXT\",\"body\":\"hi\",\"clientMsgId\":\"" + UUID.randomUUID() + "\"}").getBody(), "$.messageId");
+        BlockingQueue<String> bobMobile = connect(bobId);
+        BlockingQueue<String> alice = connect(aliceId);
+        awaitSockets(bobId, 1);
+        awaitSockets(aliceId, 1);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.add(CurrentUser.HEADER, bobId);
+        ResponseEntity<String> read = http.exchange("/conversations/" + conversationId + "/read", HttpMethod.PUT,
+            new HttpEntity<>("{\"seq\":1}", headers), String.class);
+        assertEquals(200, read.getStatusCode().value());
+        assertEquals(0, (int) JsonPath.read(read.getBody(), "$.unreadCount"));
+
+        String frame = next(bobMobile);
+        assertEquals("messaging.read.updated", JsonPath.read(frame, "$.type"));
+        assertEquals(conversationId, JsonPath.read(frame, "$.payload.conversationId"));
+        assertEquals(1, (int) JsonPath.read(frame, "$.payload.lastReadSeq"));
+        assertNull(alice.poll(300, TimeUnit.MILLISECONDS));
+        assertNotNull(messageId);
+    }
+
+    @Test
     void upgradeWithoutUserIsRefused() {
         ExecutionException refused = assertThrows(ExecutionException.class, () -> new StandardWebSocketClient()
             .execute(new TextWebSocketHandler(), new WebSocketHttpHeaders(), URI.create("ws://localhost:" + port + "/ws"))
@@ -222,6 +248,11 @@ class RealtimeIntegrationTest {
         @Bean
         MemoryMessages messages(MemoryConversations conversations) {
             return new MemoryMessages(conversations);
+        }
+
+        @Bean
+        MemoryReadMarkers readMarkers(MemoryMessages messages) {
+            return new MemoryReadMarkers(messages);
         }
 
         @Bean

@@ -5,7 +5,9 @@ import api.ConversationResponse;
 import api.ForwardMessageRequest;
 import api.MessagePageResponse;
 import api.MessageResponse;
+import api.MarkReadRequest;
 import api.OpenDirectRequest;
+import api.ReadStateResponse;
 import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
@@ -71,6 +73,17 @@ public final class MessageController {
         @UserId String userId,
         @PathVariable String conversationId) {
         return new ConversationResponse(messages.conversation(conversationId, userId));
+    }
+
+    /**
+     * Marks the conversation read up to seq on all of the caller's devices.
+     */
+    @PutMapping("/conversations/{conversationId}/read")
+    public ReadStateResponse markRead(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody MarkReadRequest request) {
+        return new ReadStateResponse(conversationId, messages.markRead(conversationId, userId, request.getSeq()));
     }
 
     /**

@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Wraps each change in the shared envelope, logs it for the event bus, and fans it out to every socket of
@@ -32,6 +33,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     static final String MESSAGE_DELETED = "messaging.message.deleted";
     static final String REACTION_ADDED = "messaging.reaction.added";
     static final String REACTION_REMOVED = "messaging.reaction.removed";
+    static final String READ_UPDATED = "messaging.read.updated";
 
     private static final Logger log = LoggerFactory.getLogger(EnvelopeEventPublisher.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -67,14 +69,30 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         emit(conversationId, REACTION_REMOVED, new ReactionPayload(messageId, conversationId, userId, code));
     }
 
+    @Override
+    public void publishReadUpdated(String conversationId, String userId, long lastReadSeq) {
+        String envelope = envelope(READ_UPDATED, new ReadUpdatedPayload(conversationId, userId, lastReadSeq));
+        log.info(envelope);
+        push(READ_UPDATED, conversationId, () -> List.of(userId), envelope);
+    }
+
     private void emit(String conversationId, String type, Object payload) {
         String envelope = envelope(type, payload);
         log.info(envelope);
-        // The change is already stored. A failed push must not fail the request: clients catch up by seq.
-        try {
+        push(type, conversationId, () -> {
             Conversation conversation = conversations.findById(conversationId);
-            if (conversation != null) {
-                realtime.publish(new RealtimeFrame(List.copyOf(members.memberIds(conversation)), envelope));
+            return conversation == null ? List.of() : List.copyOf(members.memberIds(conversation));
+        }, envelope);
+    }
+
+    /**
+     * The change is already stored. A failed push must not fail the request: clients catch up by seq.
+     */
+    private void push(String type, String conversationId, Supplier<List<String>> recipients, String envelope) {
+        try {
+            List<String> to = recipients.get();
+            if (!to.isEmpty()) {
+                realtime.publish(new RealtimeFrame(to, envelope));
             }
         } catch (RuntimeException ex) {
             log.warn("Could not push {} for conversation {}", type, conversationId, ex);

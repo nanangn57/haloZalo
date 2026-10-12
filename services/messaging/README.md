@@ -20,7 +20,7 @@ services/messaging/
     storage/          interface lưu, và implementation Postgres
     event/            đóng phong bì event, ghi log, đẩy sang realtime
     realtime/         WebSocket /ws, socket theo user, heartbeat, gửi trong process
-    service/          hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, lịch sử, catch-up
+    service/          hội thoại, gửi, trả lời, chuyển tiếp, xoá, reaction, lịch sử, catch-up, đã đọc
     http/             nhận HTTP, biết ai đang gọi, đổi lỗi thành status
   test/               cùng các package trên
 ```
@@ -108,6 +108,7 @@ Bảng tạo bởi `resources/db/migration`. Flyway chạy lúc khởi động, 
 | `direct_members` | `(conversation_id, user_id)` | hai người của một hội thoại DIRECT; index `user_id` cho danh sách hội thoại |
 | `messages` | `id` | unique `(sender_id, client_msg_id)`, unique `(conversation_id, seq)`; `content` và `metadata` là JSONB; `reply_to`, `forwarded_from` là khoá ngoại tới `messages` |
 | `message_reactions` | `id` | unique `(message_id, user_id, code)`; `message_id` là khoá ngoại tới `messages` |
+| `read_markers` | `(conversation_id, user_id)` | `last_read_seq`: `seq` cao nhất user đã đọc trong hội thoại |
 
 Gửi tin là một transaction: tăng `last_seq`, ghi `last_message_at`, rồi `INSERT` tin. `UPDATE` khoá dòng hội thoại, nên tin trong một hội thoại nhận `seq` lần lượt, bắt đầu từ 1. Trùng `clientMsgId` thì rollback cả transaction, nên `seq` không bao giờ có lỗ. Test đã chạy 100 lần gửi song song và 10 lần retry song song trên Postgres thật.
 
@@ -127,11 +128,24 @@ Body có thể thêm `replyTo`: id một tin trong cùng hội thoại, sai thì
 
 `GET /conversations/{conversationId}` trả một hội thoại, chỉ cho thành viên.
 
-Mỗi hội thoại có `conversationId`, `type`, `memberIds`, `lastSeq`, `createdAt`, và khi đã có tin thì `lastMessageAt`, `lastMessage` (shape `Message`). Với GROUP, `memberIds` là thành viên identity trả về lúc đó. Tin cuối đã xoá thì hiện như ô trống. Chưa có số tin chưa đọc: cần mốc đã đọc của tuần 5.
+Mỗi hội thoại có `conversationId`, `type`, `memberIds`, `lastSeq`, `createdAt`, `lastReadSeq`, `unreadCount`, và khi đã có tin thì `lastMessageAt`, `lastMessage` (shape `Message`). Với GROUP, `memberIds` là thành viên identity trả về lúc đó. Tin cuối đã xoá thì hiện như ô trống. `lastReadSeq` và `unreadCount` là của người gọi, xem mục Đã đọc.
 
 Tin tới một hội thoại mà client chưa biết (người kia vừa mở rồi gửi) thì client gọi `GET /conversations/{conversationId}` để lấy thông tin. Không có event riêng khi mở hội thoại.
 
 `POST /internal/conversations` không có trong OpenAPI public. DIRECT: `{ conversationId?, type: "DIRECT", memberIds: [a, b] }`. GROUP: `{ conversationId: <id nhóm>, type: "GROUP" }`, không gửi `memberIds` vì thành viên thuộc identity; gửi thì 400. Trả 201, trùng id hoặc trùng cặp thì 409. Khi identity tạo nhóm, app gọi việc này trong process.
+
+### Đã đọc
+
+Mốc đã đọc giữ theo user và hội thoại, không nằm trên tin, theo decisions.md. Mọi thiết bị của một user dùng chung một mốc.
+
+`PUT /conversations/{conversationId}/read` nhận `{ seq }`: user đã thấy tới tin có `seq` đó. Trả `{ conversationId, lastReadSeq, unreadCount }`, 200. Chỉ thành viên gọi được. `seq` thiếu hoặc âm thì 400.
+
+- Mốc chỉ tiến, không lùi: thiết bị cũ gửi `seq` nhỏ hơn thì mốc giữ nguyên, vẫn trả 200. Hai thiết bị gửi cùng lúc thì mốc dừng ở `seq` lớn nhất.
+- `seq` lớn hơn tin mới nhất thì tính bằng tin mới nhất.
+- Gửi tin cũng là đã đọc tới tin của mình.
+- Mốc tiến thì phát `messaging.read.updated` tới các thiết bị của chính user đó, không tới thành viên khác. Thiết bị kia nhận event là tắt unread, không cần hỏi lại.
+
+`unreadCount` là số tin của người khác có `seq` lớn hơn mốc, không tính tin đã xoá. Có trong `GET /conversations` (mọi hội thoại của trang, một query), `GET /conversations/{conversationId}` và `POST /conversations/direct`.
 
 ### Tin trong hội thoại
 
@@ -164,6 +178,7 @@ Mọi event dùng phong bì trong `doc/contract/events.md`. Event phát trong pr
 | `messaging.message.deleted` | Tin bị xoá lần đầu | `{ messageId, conversationId, deletedAt }`, không có nội dung |
 | `messaging.reaction.added` | Thêm reaction mới | `{ messageId, conversationId, userId, code }` |
 | `messaging.reaction.removed` | Bỏ reaction đang có | `{ messageId, conversationId, userId, code }` |
+| `messaging.read.updated` | Mốc đã đọc của user tiến lên. Chỉ gửi tới thiết bị của user đó | `{ conversationId, userId, lastReadSeq }` |
 
 ## WebSocket
 
@@ -173,7 +188,7 @@ Mọi event dùng phong bì trong `doc/contract/events.md`. Event phát trong pr
 
 Đường đi của một event:
 
-1. Transaction ghi Postgres commit xong, `EnvelopeEventPublisher` đóng phong bì và hỏi `ConversationMembers` ai thuộc hội thoại. Với GROUP là thành viên identity lúc đó.
+1. Transaction ghi Postgres commit xong, `EnvelopeEventPublisher` đóng phong bì và hỏi `ConversationMembers` ai thuộc hội thoại. Với GROUP là thành viên identity lúc đó. `messaging.read.updated` chỉ có một người nhận: chính user đã đọc.
 2. Gửi thẳng cho socket của những người đó, vì mọi socket nằm trong cùng process.
 
 Người gửi cũng là thành viên, nên thiết bị khác của người gửi nhận được tin. Thiết bị vừa gửi cũng nhận lại, client bỏ trùng theo `messageId` hoặc `clientMsgId`.

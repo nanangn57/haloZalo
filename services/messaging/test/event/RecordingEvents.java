@@ -10,6 +10,7 @@ public final class RecordingEvents implements EventPublisher {
     public final List<Message> created = new ArrayList<>();
     public final List<Message> deleted = new ArrayList<>();
     public final List<String> reactions = new ArrayList<>();
+    public final List<String> reads = new ArrayList<>();
 
     @Override
     public void publishMessageCreated(Message message) {
@@ -29,5 +30,10 @@ public final class RecordingEvents implements EventPublisher {
     @Override
     public void publishReactionRemoved(String conversationId, String messageId, String userId, String code) {
         reactions.add("removed " + conversationId + " " + messageId + " " + userId + " " + code);
+    }
+
+    @Override
+    public void publishReadUpdated(String conversationId, String userId, long lastReadSeq) {
+        reads.add(conversationId + " " + userId + " " + lastReadSeq);
     }
 }

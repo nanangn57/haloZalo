@@ -3,6 +3,7 @@ package storage;
 import conversation.Conversation;
 import conversation.ConversationCursor;
 import conversation.ConversationType;
+import conversation.ReadState;
 import message.Message;
 import message.MessageContent;
 import message.MessageMetadata;
@@ -62,6 +63,7 @@ class PostgresRepositoriesTest {
     private static PostgresConversationRepository conversations;
     private static PostgresMessageRepository messages;
     private static PostgresReactionRepository reactions;
+    private static PostgresReadMarkerRepository readMarkers;
 
     private String conversationId;
 
@@ -81,6 +83,7 @@ class PostgresRepositoriesTest {
         conversations = new PostgresConversationRepository(jdbc, transaction);
         messages = new PostgresMessageRepository(jdbc, transaction);
         reactions = new PostgresReactionRepository(jdbc);
+        readMarkers = new PostgresReadMarkerRepository(jdbc);
     }
 
     @AfterAll
@@ -90,7 +93,7 @@ class PostgresRepositoriesTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE message_reactions, messages, direct_members, conversations");
+        jdbc.execute("TRUNCATE read_markers, message_reactions, messages, direct_members, conversations");
         conversationId = UUID.randomUUID().toString();
         assertTrue(conversations.insert(new Conversation(conversationId, ConversationType.DIRECT, Set.of(ALICE, BOB), 0, NOW)));
     }
@@ -263,6 +266,46 @@ class PostgresRepositoriesTest {
         assertEquals(List.of(4L, 5L), seqs(messages.findBeforeSeq(conversationId, Long.MAX_VALUE, 2)));
         assertEquals(List.of(2L, 3L), seqs(messages.findBeforeSeq(conversationId, 4, 2)));
         assertEquals(List.of(1L), seqs(messages.findBeforeSeq(conversationId, 2, 2)));
+    }
+
+    @Test
+    void readMarkerOnlyMovesForward() {
+        assertEquals(new ReadMarkerRepository.Advance(0, false), readMarkers.advance(conversationId, BOB, 0, NOW));
+        assertEquals(new ReadMarkerRepository.Advance(2, true), readMarkers.advance(conversationId, BOB, 2, NOW));
+        assertEquals(new ReadMarkerRepository.Advance(2, false), readMarkers.advance(conversationId, BOB, 1, NOW));
+        assertEquals(new ReadMarkerRepository.Advance(2, false), readMarkers.advance(conversationId, BOB, 2, NOW));
+        assertEquals(new ReadMarkerRepository.Advance(5, true), readMarkers.advance(conversationId, BOB, 5, NOW));
+        assertEquals(new ReadMarkerRepository.Advance(0, false), readMarkers.advance(conversationId, ALICE, 0, NOW));
+    }
+
+    @Test
+    void unreadCountsOtherPeoplesMessagesAfterTheMarkerAndSkipsDeletedOnes() {
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("m1")));
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("m2")));
+        Message third = messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("m3")));
+        messages.append(draft(BOB, UUID.randomUUID().toString(), new MessageContent.Text("m4")));
+        messages.markDeleted(third.softDeleted(NOW));
+        String unknown = UUID.randomUUID().toString();
+
+        assertEquals(Map.of(conversationId, new ReadState(0, 2)), readMarkers.readStates(BOB, List.of(conversationId, unknown)));
+        readMarkers.advance(conversationId, BOB, 1, NOW);
+        assertEquals(new ReadState(1, 1), readMarkers.readStates(BOB, List.of(conversationId)).get(conversationId));
+        assertEquals(new ReadState(0, 1), readMarkers.readStates(ALICE, List.of(conversationId)).get(conversationId));
+        assertEquals(Map.of(), readMarkers.readStates(BOB, List.of()));
+    }
+
+    @Test
+    void parallelReadsFromSeveralDevicesEndAtTheHighestSeq() throws Exception {
+        List<Callable<ReadMarkerRepository.Advance>> reads = new ArrayList<>();
+        List<Long> seqs = new ArrayList<>(LongStream.rangeClosed(1, 20).boxed().toList());
+        Collections.shuffle(seqs);
+        for (long seq : seqs) {
+            reads.add(() -> readMarkers.advance(conversationId, BOB, seq, NOW));
+        }
+
+        runAll(reads);
+
+        assertEquals(20, readMarkers.advance(conversationId, BOB, 0, NOW).lastReadSeq());
     }
 
     private Message draftIn(String conversation, Instant at) {

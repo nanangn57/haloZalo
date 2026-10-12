@@ -101,6 +101,20 @@ class EnvelopeEventPublisherTest {
     }
 
     @Test
+    void readUpdatesGoOnlyToTheReadersOwnDevices() {
+        List<RealtimeFrame> pushed = new ArrayList<>();
+
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add)
+            .publishReadUpdated(MESSAGE.getConversationId(), "bob", 7);
+
+        assertEquals(1, pushed.size());
+        assertEquals(List.of("bob"), pushed.get(0).recipients());
+        assertEquals("messaging.read.updated", JsonPath.read(pushed.get(0).envelope(), "$.type"));
+        assertEquals(Map.of("conversationId", MESSAGE.getConversationId(), "userId", "bob", "lastReadSeq", 7),
+            JsonPath.read(pushed.get(0).envelope(), "$.payload"));
+    }
+
+    @Test
     void aFailedPushDoesNotFailTheChangeThatIsAlreadyStored() {
         EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> {
             throw new IllegalStateException("socket send failed");
