@@ -1,5 +1,7 @@
 package realtime;
 
+import http.CurrentUser;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
@@ -15,16 +17,18 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 public class RealtimeConfig implements WebSocketConfigurer {
     private final RealtimeSessions sessions;
     private final RealtimeProperties properties;
+    private final CurrentUser currentUser;
 
-    public RealtimeConfig(RealtimeSessions sessions, RealtimeProperties properties) {
+    public RealtimeConfig(RealtimeSessions sessions, RealtimeProperties properties, CurrentUser currentUser) {
         this.sessions = sessions;
         this.properties = properties;
+        this.currentUser = currentUser;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(new RealtimeHandler(sessions), "/ws")
-            .addInterceptors(new UserHandshakeInterceptor())
+            .addInterceptors(new UserHandshakeInterceptor(currentUser))
             .setAllowedOriginPatterns(properties.allowedOrigins().toArray(String[]::new));
     }
 

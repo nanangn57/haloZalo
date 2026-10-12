@@ -2,6 +2,7 @@ package event;
 
 import api.MessageResponse;
 import conversation.Conversation;
+import member.ConversationMembers;
 import message.Message;
 import reaction.MessageReaction;
 import realtime.RealtimeBus;
@@ -23,6 +24,7 @@ import java.util.UUID;
 /**
  * Wraps each change in the shared envelope, logs it for the event bus, and fans it out to every socket of
  * every conversation member. The sender is a member too, so the sender's other devices get it as well.
+ * Group members are read from identity at the moment of sending, so someone removed from a group gets nothing.
  */
 @Component
 public final class EnvelopeEventPublisher implements EventPublisher {
@@ -35,10 +37,12 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final ConversationRepository conversations;
+    private final ConversationMembers members;
     private final RealtimeBus realtime;
 
-    public EnvelopeEventPublisher(ConversationRepository conversations, RealtimeBus realtime) {
+    public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
         this.conversations = conversations;
+        this.members = members;
         this.realtime = realtime;
     }
 
@@ -70,7 +74,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         try {
             Conversation conversation = conversations.findById(conversationId);
             if (conversation != null) {
-                realtime.publish(new RealtimeFrame(List.copyOf(conversation.getMemberIds()), envelope));
+                realtime.publish(new RealtimeFrame(List.copyOf(members.memberIds(conversation)), envelope));
             }
         } catch (RuntimeException ex) {
             log.warn("Could not push {} for conversation {}", type, conversationId, ex);

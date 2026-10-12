@@ -3,6 +3,10 @@ package conversation;
 import java.time.Instant;
 import java.util.Set;
 
+/**
+ * memberIds holds the two people of a DIRECT conversation. It is empty for GROUP: group members belong to identity,
+ * see member.ConversationMembers.
+ */
 public final class Conversation {
     private final String conversationId;
     private final ConversationType type;
@@ -48,6 +52,9 @@ public final class Conversation {
         return lastMessageAt != null ? lastMessageAt : createdAt;
     }
 
+    /**
+     * DIRECT only. Use member.ConversationMembers to ask about any conversation.
+     */
     public boolean hasMember(String userId) {
         return memberIds.contains(userId);
     }

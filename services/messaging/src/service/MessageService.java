@@ -5,6 +5,7 @@ import conversation.ConversationCursor;
 import conversation.ConversationSummary;
 import conversation.ConversationType;
 import event.EventPublisher;
+import member.ConversationMembers;
 import message.ContentValidator;
 import message.Message;
 import message.MessageContent;
@@ -36,20 +37,34 @@ public final class MessageService {
     private final ConversationRepository conversations;
     private final MessageRepository messages;
     private final ReactionRepository reactions;
+    private final ConversationMembers members;
     private final EventPublisher events;
 
     public MessageService(
         ConversationRepository conversations,
         MessageRepository messages,
         ReactionRepository reactions,
+        ConversationMembers members,
         EventPublisher events) {
         this.conversations = conversations;
         this.messages = messages;
         this.reactions = reactions;
+        this.members = members;
         this.events = events;
     }
 
-    public Conversation openConversation(String conversationId, ConversationType type, List<String> memberIds) {
+    /**
+     * DIRECT: stores the two members. GROUP: the id is the identity group's id, and members are never given here
+     * because identity owns them.
+     */
+    public ConversationSummary openConversation(String conversationId, ConversationType type, List<String> memberIds) {
+        Conversation opened = type == ConversationType.GROUP
+            ? openGroup(conversationId, memberIds)
+            : openDirectWithMembers(conversationId, type, memberIds);
+        return summary(opened);
+    }
+
+    private Conversation openDirectWithMembers(String conversationId, ConversationType type, List<String> memberIds) {
         String id = conversationId == null ? UUID.randomUUID().toString() : uuid(conversationId, "conversationId");
         if (type == null || memberIds == null) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Conversation type and members are required");
@@ -61,13 +76,24 @@ public final class MessageService {
         if (members.size() != memberIds.size()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Members must be distinct");
         }
-        if (type == ConversationType.DIRECT && members.size() != 2) {
+        if (members.size() != 2) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A direct conversation has exactly 2 members");
         }
-        if (type == ConversationType.GROUP && members.size() < 3) {
-            throw new Rejected(Rejected.Reason.VALIDATION, "A group conversation has at least 3 members");
-        }
         Conversation conversation = new Conversation(id, type, members, 0, now());
+        if (!conversations.insert(conversation)) {
+            throw new Rejected(Rejected.Reason.CONFLICT, "Conversation already exists");
+        }
+        return conversation;
+    }
+
+    private Conversation openGroup(String groupId, List<String> memberIds) {
+        if (groupId == null) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "A group conversation uses the group's id as conversationId");
+        }
+        if (memberIds != null && !memberIds.isEmpty()) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Group members come from identity, not from this request");
+        }
+        Conversation conversation = new Conversation(uuid(groupId, "conversationId"), ConversationType.GROUP, Set.of(), 0, now());
         if (!conversations.insert(conversation)) {
             throw new Rejected(Rejected.Reason.CONFLICT, "Conversation already exists");
         }
@@ -91,7 +117,7 @@ public final class MessageService {
         }
         Conversation created = new Conversation(UUID.randomUUID().toString(), ConversationType.DIRECT, Set.of(user, other), 0, now());
         if (conversations.insert(created)) {
-            return new Opened(new ConversationSummary(created, null), true);
+            return new Opened(new ConversationSummary(created, created.getMemberIds(), null), true);
         }
         // The other user opened it between our lookup and our insert.
         Conversation winner = conversations.findDirect(key);
@@ -107,12 +133,13 @@ public final class MessageService {
     public ConversationPage conversations(String userId, String cursor, Integer limit) {
         String user = user(userId);
         int size = limit(limit, CONVERSATIONS_DEFAULT_LIMIT, CONVERSATIONS_MAX_LIMIT);
-        List<Conversation> rows = conversations.findForMember(user, cursor(cursor), size + 1);
+        List<Conversation> rows = conversations.findForMember(user, members.groupIdsOf(user), cursor(cursor), size + 1);
         boolean hasMore = rows.size() > size;
         List<Conversation> page = hasMore ? rows.subList(0, size) : rows;
         Map<String, Message> latest = messages.findLatest(page.stream().map(Conversation::getConversationId).toList());
         List<ConversationSummary> summaries = page.stream()
-            .map(conversation -> new ConversationSummary(conversation, latest.get(conversation.getConversationId())))
+            .map(conversation -> new ConversationSummary(
+                conversation, members.memberIds(conversation), latest.get(conversation.getConversationId())))
             .toList();
         String next = hasMore ? ConversationCursor.after(page.get(page.size() - 1)).encode() : null;
         return new ConversationPage(summaries, next);
@@ -295,7 +322,7 @@ public final class MessageService {
     private Conversation memberConversation(String conversationId, String userId) {
         Conversation conversation = conversations.findById(uuid(conversationId, "conversationId"));
         // Unknown and foreign conversations look the same, so ids cannot be probed.
-        if (conversation == null || !conversation.hasMember(userId)) {
+        if (conversation == null || !members.isMember(conversation, userId)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, NOT_MEMBER);
         }
         return conversation;
@@ -324,7 +351,7 @@ public final class MessageService {
 
     private ConversationSummary summary(Conversation conversation) {
         Map<String, Message> latest = messages.findLatest(List.of(conversation.getConversationId()));
-        return new ConversationSummary(conversation, latest.get(conversation.getConversationId()));
+        return new ConversationSummary(conversation, members.memberIds(conversation), latest.get(conversation.getConversationId()));
     }
 
     private static int limit(Integer limit, int fallback, int max) {

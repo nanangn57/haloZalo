@@ -1,22 +1,32 @@
--- Messaging schema. Flyway applies each file once, in version order. Never edit an applied file: add V2, V3...
--- Users live in Identity, so user ids are plain UUIDs here with no foreign key to another service.
+-- Messaging tables, in schema messaging of the shared halozalo database. Flyway applies each file once, in version
+-- order, and keeps its history in messaging.flyway_schema_history. Never edit an applied file: add V2, V3...
+-- No foreign keys into other schemas: user ids and group ids belong to identity and are plain UUIDs here.
 
 CREATE TABLE conversations (
-    id          UUID        PRIMARY KEY,
-    type        TEXT        NOT NULL CHECK (type IN ('DIRECT', 'GROUP')),
+    -- For GROUP, the id of the group in identity.
+    id              UUID        PRIMARY KEY,
+    type            TEXT        NOT NULL CHECK (type IN ('DIRECT', 'GROUP')),
     -- seq of the newest message. Bumped in the same transaction that inserts the message.
-    last_seq    BIGINT      NOT NULL DEFAULT 0 CHECK (last_seq >= 0),
-    created_at  TIMESTAMPTZ NOT NULL
+    last_seq        BIGINT      NOT NULL DEFAULT 0 CHECK (last_seq >= 0),
+    created_at      TIMESTAMPTZ NOT NULL,
+    -- created_at of the newest message, for the conversation list. Set together with last_seq.
+    last_message_at TIMESTAMPTZ,
+    -- "<smaller user id>:<larger user id>" for DIRECT, NULL for GROUP. See Conversation.directKey.
+    direct_key      TEXT,
+    CONSTRAINT conversations_direct_key UNIQUE (direct_key),
+    CONSTRAINT conversations_direct_has_key CHECK ((type = 'DIRECT') = (direct_key IS NOT NULL))
 );
 
-CREATE TABLE conversation_members (
+-- The two people of a DIRECT conversation. Messaging owns 1-1 conversations, so it keeps them.
+-- Group members are never stored here: they live in identity and are asked through MembershipLookup.
+CREATE TABLE direct_members (
     conversation_id UUID NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
     user_id         UUID NOT NULL,
     PRIMARY KEY (conversation_id, user_id)
 );
 
--- "Conversations of this user", for the conversation list.
-CREATE INDEX conversation_members_user ON conversation_members (user_id);
+-- "DIRECT conversations of this user", for the conversation list.
+CREATE INDEX direct_members_user ON direct_members (user_id);
 
 CREATE TABLE messages (
     id              UUID        PRIMARY KEY,
@@ -36,7 +46,7 @@ CREATE TABLE messages (
     deleted_at      TIMESTAMPTZ,
     -- Same sender, same clientMsgId: the retry gets the stored message back.
     CONSTRAINT messages_sender_client_msg UNIQUE (sender_id, client_msg_id),
-    -- One message per seq in a conversation. Also serves catch-up: WHERE conversation_id = ? AND seq > ?.
+    -- One message per seq in a conversation. Also serves history and catch-up by seq.
     CONSTRAINT messages_conversation_seq UNIQUE (conversation_id, seq),
     CONSTRAINT messages_deleted_has_time CHECK ((status = 'DELETED') = (deleted_at IS NOT NULL))
 );

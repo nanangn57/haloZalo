@@ -2,6 +2,8 @@ package service;
 
 import conversation.ConversationType;
 import event.RecordingEvents;
+import member.ConversationMembers;
+import member.StandaloneGroupMembers;
 import message.Message;
 import message.MessageContent;
 import message.MessageStatus;
@@ -30,6 +32,7 @@ class MessageServiceTest {
     private static final String GROUP = "cccccccc-0000-4000-8000-000000000002";
 
     private MemoryConversations conversations;
+    private StandaloneGroupMembers groups;
     private MemoryMessages messages;
     private RecordingEvents events;
     private MessageService service;
@@ -39,17 +42,24 @@ class MessageServiceTest {
         events = new RecordingEvents();
         conversations = new MemoryConversations();
         messages = new MemoryMessages(conversations);
-        service = new MessageService(conversations, messages, new MemoryReactions(), events);
+        groups = new StandaloneGroupMembers();
+        service = new MessageService(conversations, messages, new MemoryReactions(), new ConversationMembers(groups), events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
-        service.openConversation(GROUP, ConversationType.GROUP, List.of(ALICE, BOB, CAROL));
+        // Identity owns the group; messaging only opens the conversation with the group's id.
+        groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
+        service.openConversation(GROUP, ConversationType.GROUP, null);
     }
 
     @Test
-    void directNeedsTwoMembersAndGroupNeedsThree() {
+    void directNeedsTwoMembersAndGroupTakesItsMembersFromIdentity() {
         assertReason(MessageService.Rejected.Reason.VALIDATION,
             () -> service.openConversation(null, ConversationType.DIRECT, List.of(ALICE, BOB, CAROL)));
         assertReason(MessageService.Rejected.Reason.VALIDATION,
-            () -> service.openConversation(null, ConversationType.GROUP, List.of(ALICE, BOB)));
+            () -> service.openConversation(UUID.randomUUID().toString(), ConversationType.GROUP, List.of(ALICE, BOB, CAROL)));
+        assertReason(MessageService.Rejected.Reason.VALIDATION,
+            () -> service.openConversation(null, ConversationType.GROUP, null));
+        assertReason(MessageService.Rejected.Reason.CONFLICT,
+            () -> service.openConversation(GROUP, ConversationType.GROUP, null));
         assertReason(MessageService.Rejected.Reason.VALIDATION,
             () -> service.openConversation(null, ConversationType.DIRECT, List.of(ALICE, ALICE)));
         assertReason(MessageService.Rejected.Reason.CONFLICT,
@@ -334,6 +344,20 @@ class MessageServiceTest {
     void historyAndCatchUpCannotBeMixed() {
         assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, BOB, 1L, 5L, null));
         assertReason(MessageService.Rejected.Reason.VALIDATION, () -> service.messages(DIRECT, BOB, null, 0L, null));
+    }
+
+    @Test
+    void someoneRemovedFromTheGroupInIdentityLosesAccessAtOnce() {
+        Message before = text(GROUP, CAROL, "still here").getMessage();
+
+        groups.replace(GROUP, Set.of(ALICE, BOB));
+
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> text(GROUP, CAROL, "gone"));
+        assertReason(MessageService.Rejected.Reason.FORBIDDEN, () -> service.messages(GROUP, CAROL, null, null, null));
+        assertEquals(List.of(), service.conversations(CAROL, null, null).conversations());
+        assertEquals(Set.of(ALICE, BOB), service.conversation(GROUP, ALICE).memberIds());
+        assertEquals(1, service.messages(GROUP, ALICE, null, null, null).messages().size());
+        assertEquals(before.getMessageId(), service.messages(GROUP, ALICE, null, null, null).messages().get(0).getMessageId());
     }
 
     private MessageService.Sent text(String conversationId, String senderId, String text) {

@@ -1,9 +1,10 @@
-# Messaging with its own PostgreSQL and Redis, for local development.
+# Messaging with its own PostgreSQL, for local development. Set up like infra/docker-compose.yml:
+# database halozalo, user halozalo; messaging uses schema messaging, created by Flyway on start.
 #   docker compose up --build        start everything on http://localhost:8082 and ws://localhost:8082/ws
 #   docker compose down              stop; Postgres data stays in the postgres-data volume
 #   docker compose down -v           stop and delete the data
-# Uses the same ports as ./local-deps.sh, so run one or the other, not both.
-# Requests need the X-User-Id header, which the gateway adds in the real system.
+# Uses port 5432 like infra/docker-compose.yml and ./local-deps.sh: run one of them at a time.
+# Requests need the X-User-Id header until the app's session filter exists.
 
 name: halozalo-messaging
 
@@ -14,21 +15,14 @@ services:
     ports:
       - "8082:8082"
     environment:
-      # Inside the compose network the databases are reached by service name, not localhost.
-      # Set these in your shell to point at a cloud Postgres or Redis instead.
-      POSTGRES_URL: ${POSTGRES_URL:-jdbc:postgresql://postgres:5432/messaging}
-      POSTGRES_USER: ${POSTGRES_USER:-messaging}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messaging}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_USERNAME: ${REDIS_USERNAME:-}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_SSL_ENABLED: ${REDIS_SSL_ENABLED:-false}
-      MESSAGING_REALTIME_BUS: ${MESSAGING_REALTIME_BUS:-redis}
+      # Inside the compose network the database is reached by service name, not localhost.
+      # Set these in your shell to point at a cloud PostgreSQL instead.
+      POSTGRES_URL: ${POSTGRES_URL:-jdbc:postgresql://postgres:5432/halozalo}
+      POSTGRES_USER: ${POSTGRES_USER:-halozalo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halozalo}
+      MESSAGING_USER_HEADER_ENABLED: ${MESSAGING_USER_HEADER_ENABLED:-true}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       # The JRE image has no curl, so ask /actuator/health with bash. UP means the app and Postgres are fine.
@@ -42,29 +36,18 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16
     environment:
-      POSTGRES_DB: messaging
-      POSTGRES_USER: ${POSTGRES_USER:-messaging}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-messaging}
+      POSTGRES_DB: halozalo
+      POSTGRES_USER: ${POSTGRES_USER:-halozalo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halozalo}
+      TZ: UTC
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d messaging"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-
-  redis:
-    # Pub/sub only: nothing to persist, so no volume.
-    image: redis:8-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d halozalo"]
       interval: 5s
       timeout: 3s
       retries: 10

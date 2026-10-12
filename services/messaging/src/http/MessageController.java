@@ -9,7 +9,6 @@ import api.OpenDirectRequest;
 import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
-import conversation.ConversationSummary;
 import conversation.ConversationType;
 import message.MessageContent;
 import service.MessageService;
@@ -23,17 +22,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public final class MessageController {
-    /**
-     * The gateway checks the session with Identity and forwards the user id in this header.
-     */
-    public static final String USER_HEADER = "X-User-Id";
-
     private final MessageService messages;
 
     public MessageController(MessageService messages) {
@@ -42,7 +35,7 @@ public final class MessageController {
 
     @PostMapping("/conversations/{conversationId}/messages")
     public ResponseEntity<MessageResponse> send(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestBody SendMessageRequest request) {
         MessageContent content = request.toContent();
@@ -59,7 +52,7 @@ public final class MessageController {
      */
     @PostMapping("/conversations/direct")
     public ResponseEntity<ConversationResponse> openDirect(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @RequestBody OpenDirectRequest request) {
         MessageService.Opened opened = messages.openDirect(userId, request.getUserId());
         return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation()));
@@ -67,7 +60,7 @@ public final class MessageController {
 
     @GetMapping("/conversations")
     public ConversationListResponse conversations(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @RequestParam(required = false) String cursor,
         @RequestParam(required = false) Integer limit) {
         return new ConversationListResponse(messages.conversations(userId, cursor, limit));
@@ -75,7 +68,7 @@ public final class MessageController {
 
     @GetMapping("/conversations/{conversationId}")
     public ConversationResponse conversation(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId) {
         return new ConversationResponse(messages.conversation(conversationId, userId));
     }
@@ -86,7 +79,7 @@ public final class MessageController {
      */
     @GetMapping("/conversations/{conversationId}/messages")
     public MessagePageResponse messages(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestParam(required = false) Long afterSeq,
         @RequestParam(required = false) Long beforeSeq,
@@ -96,7 +89,7 @@ public final class MessageController {
 
     @PostMapping("/conversations/{conversationId}/forwards")
     public ResponseEntity<MessageResponse> forward(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @RequestBody ForwardMessageRequest request) {
         return sentResponse(messages.forward(conversationId, userId, request.getClientMsgId(), request.getMessageId()));
@@ -104,7 +97,7 @@ public final class MessageController {
 
     @DeleteMapping("/conversations/{conversationId}/messages/{messageId}")
     public ResponseEntity<Void> delete(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId) {
         messages.delete(conversationId, messageId, userId);
@@ -113,7 +106,7 @@ public final class MessageController {
 
     @PutMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
     public ResponseEntity<Void> react(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId,
         @PathVariable String code) {
@@ -123,7 +116,7 @@ public final class MessageController {
 
     @DeleteMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
     public ResponseEntity<Void> unreact(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId,
         @PathVariable String code) {
@@ -133,7 +126,7 @@ public final class MessageController {
 
     @GetMapping("/conversations/{conversationId}/messages/{messageId}/reactions")
     public ReactionsResponse reactions(
-        @RequestHeader(value = USER_HEADER, required = false) String userId,
+        @UserId String userId,
         @PathVariable String conversationId,
         @PathVariable String messageId) {
         return new ReactionsResponse(messages.reactions(conversationId, messageId, userId));
@@ -145,8 +138,8 @@ public final class MessageController {
             .filter(value -> value.name().equals(request.getType()))
             .findFirst()
             .orElse(null);
-        return ResponseEntity.status(201).body(new ConversationResponse(new ConversationSummary(
-            messages.openConversation(request.getConversationId(), type, request.getMemberIds()), null)));
+        return ResponseEntity.status(201).body(new ConversationResponse(
+            messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
     }
 
     private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {

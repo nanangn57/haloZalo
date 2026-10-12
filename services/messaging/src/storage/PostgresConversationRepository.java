@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,7 +61,7 @@ public final class PostgresConversationRepository implements ConversationReposit
             List<Object[]> members = conversation.getMemberIds().stream()
                 .map(member -> new Object[] {Sql.uuid(conversation.getConversationId()), Sql.uuid(member)})
                 .toList();
-            jdbc.batchUpdate("INSERT INTO conversation_members (conversation_id, user_id) VALUES (?, ?)", members);
+            jdbc.batchUpdate("INSERT INTO direct_members (conversation_id, user_id) VALUES (?, ?)", members);
             return true;
         });
         return Boolean.TRUE.equals(inserted);
@@ -79,9 +80,16 @@ public final class PostgresConversationRepository implements ConversationReposit
     }
 
     @Override
-    public List<Conversation> findForMember(String userId, ConversationCursor after, int limit) {
+    public List<Conversation> findForMember(String userId, Collection<String> groupIds, ConversationCursor after, int limit) {
         List<Object> args = new ArrayList<>();
+        String mine = "(c.type = 'DIRECT' AND EXISTS "
+            + "(SELECT 1 FROM direct_members d WHERE d.conversation_id = c.id AND d.user_id = ?))";
         args.add(Sql.uuid(userId));
+        if (!groupIds.isEmpty()) {
+            mine = "(" + mine + " OR (c.type = 'GROUP' AND c.id IN ("
+                + String.join(", ", Collections.nCopies(groupIds.size(), "?")) + ")))";
+            groupIds.forEach(groupId -> args.add(Sql.uuid(groupId)));
+        }
         String page = "";
         if (after != null) {
             // Row comparison: strictly after the cursor in (activity DESC, id DESC) order.
@@ -91,9 +99,7 @@ public final class PostgresConversationRepository implements ConversationReposit
         }
         args.add(limit);
         List<Conversation> rows = jdbc.query(
-            "SELECT " + COLUMNS + " FROM conversations c "
-                + "JOIN conversation_members m ON m.conversation_id = c.id "
-                + "WHERE m.user_id = ?" + page
+            "SELECT " + COLUMNS + " FROM conversations c WHERE " + mine + page
                 + " ORDER BY " + ACTIVITY + " DESC, c.id DESC LIMIT ?",
             CONVERSATION, args.toArray());
         return withMembers(rows);
@@ -105,7 +111,7 @@ public final class PostgresConversationRepository implements ConversationReposit
     }
 
     /**
-     * Loads the members of all given conversations in one query.
+     * Loads the members of all given DIRECT conversations in one query. GROUP conversations have none stored.
      */
     private List<Conversation> withMembers(List<Conversation> rows) {
         if (rows.isEmpty()) {
@@ -115,7 +121,7 @@ public final class PostgresConversationRepository implements ConversationReposit
         Object[] ids = rows.stream().map(row -> Sql.uuid(row.getConversationId())).toArray();
         Map<String, Set<String>> members = new HashMap<>();
         jdbc.query(
-            "SELECT conversation_id::text, user_id::text FROM conversation_members WHERE conversation_id IN (" + placeholders + ")",
+            "SELECT conversation_id::text, user_id::text FROM direct_members WHERE conversation_id IN (" + placeholders + ")",
             (resultSet) -> {
                 members.computeIfAbsent(resultSet.getString(1), key -> new HashSet<>()).add(resultSet.getString(2));
             },

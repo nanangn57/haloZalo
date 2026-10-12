@@ -44,12 +44,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The real SQL against a real PostgreSQL, schema created by the Flyway migrations. Skipped without Docker.
+ * The real SQL against a real PostgreSQL, set up like the app: database halozalo, tables in schema messaging,
+ * created by the Flyway migrations. Skipped without Docker.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class PostgresRepositoriesTest {
     @Container
-    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine");
+    private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+        .withDatabaseName("halozalo");
 
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     private static final String ALICE = UUID.randomUUID().toString();
@@ -70,7 +72,10 @@ class PostgresRepositoriesTest {
         dataSource.setUsername(POSTGRES.getUsername());
         dataSource.setPassword(POSTGRES.getPassword());
         dataSource.setMaximumPoolSize(10);
-        Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+        // Same as application.yml: unqualified names mean schema messaging.
+        dataSource.setConnectionInitSql("SET search_path TO messaging");
+        Flyway.configure().dataSource(dataSource).schemas("messaging").defaultSchema("messaging")
+            .locations("classpath:db/migration").load().migrate();
         jdbc = new JdbcTemplate(dataSource);
         TransactionTemplate transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
         conversations = new PostgresConversationRepository(jdbc, transaction);
@@ -85,7 +90,7 @@ class PostgresRepositoriesTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE message_reactions, messages, conversation_members, conversations");
+        jdbc.execute("TRUNCATE message_reactions, messages, direct_members, conversations");
         conversationId = UUID.randomUUID().toString();
         assertTrue(conversations.insert(new Conversation(conversationId, ConversationType.DIRECT, Set.of(ALICE, BOB), 0, NOW)));
     }
@@ -225,21 +230,23 @@ class PostgresRepositoriesTest {
     void conversationListIsNewestActivityFirstAndPagesWithTheCursor() {
         String quiet = UUID.randomUUID().toString();
         String busy = UUID.randomUUID().toString();
-        conversations.insert(new Conversation(quiet, ConversationType.GROUP, Set.of(ALICE, BOB, UUID.randomUUID().toString()), 0, NOW.plusSeconds(10)));
-        conversations.insert(new Conversation(busy, ConversationType.GROUP, Set.of(ALICE, UUID.randomUUID().toString(), UUID.randomUUID().toString()), 0, NOW));
+        // Group members belong to identity: the rows store none, and the caller passes the user's group ids.
+        conversations.insert(new Conversation(quiet, ConversationType.GROUP, Set.of(), 0, NOW.plusSeconds(10)));
+        conversations.insert(new Conversation(busy, ConversationType.GROUP, Set.of(), 0, NOW));
         messages.append(draftIn(busy, NOW.plusSeconds(20)));
         Message newest = messages.append(draftIn(busy, NOW.plusSeconds(30)));
 
-        List<Conversation> all = conversations.findForMember(ALICE, null, 10);
-        List<Conversation> firstPage = conversations.findForMember(ALICE, null, 2);
-        List<Conversation> rest = conversations.findForMember(ALICE, ConversationCursor.after(firstPage.get(1)), 2);
+        List<Conversation> all = conversations.findForMember(ALICE, Set.of(quiet, busy), null, 10);
+        List<Conversation> firstPage = conversations.findForMember(ALICE, Set.of(quiet, busy), null, 2);
+        List<Conversation> rest = conversations.findForMember(ALICE, Set.of(quiet, busy), ConversationCursor.after(firstPage.get(1)), 2);
 
         assertEquals(List.of(busy, quiet, conversationId), all.stream().map(Conversation::getConversationId).toList());
         assertEquals(NOW.plusSeconds(30), all.get(0).getLastMessageAt());
         assertEquals(2L, all.get(0).getLastSeq());
-        assertEquals(3, all.get(0).getMemberIds().size());
+        assertEquals(Set.of(), all.get(0).getMemberIds());
+        assertEquals(Set.of(ALICE, BOB), all.get(2).getMemberIds());
         assertEquals(List.of(conversationId), rest.stream().map(Conversation::getConversationId).toList());
-        assertEquals(List.of(quiet), conversations.findForMember(BOB, null, 10).stream()
+        assertEquals(List.of(quiet), conversations.findForMember(BOB, Set.of(quiet), null, 10).stream()
             .map(Conversation::getConversationId).filter(id -> !id.equals(conversationId)).toList());
 
         Map<String, Message> latest = messages.findLatest(List.of(busy, quiet, conversationId));

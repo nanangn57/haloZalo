@@ -1,7 +1,7 @@
 package app;
 
 import conversation.ConversationType;
-import http.MessageController;
+import http.CurrentUser;
 import realtime.RealtimeSessions;
 import service.MessageService;
 import storage.MemoryConversations;
@@ -15,8 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
-import org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
@@ -58,7 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
     classes = RealtimeIntegrationTest.TestApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = "messaging.realtime.bus=local")
+    properties = "messaging.user-header-enabled=true")
 class RealtimeIntegrationTest {
     // New users for every test: the app is shared, and a pair of users has only one DIRECT conversation.
     private final String aliceId = UUID.randomUUID().toString();
@@ -169,7 +167,7 @@ class RealtimeIntegrationTest {
     private BlockingQueue<String> connect(String userId) throws Exception {
         BlockingQueue<String> frames = new LinkedBlockingQueue<>();
         WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         WebSocketSession session = new StandardWebSocketClient().execute(new TextWebSocketHandler() {
             @Override
             protected void handleTextMessage(WebSocketSession session, TextMessage message) {
@@ -197,13 +195,13 @@ class RealtimeIntegrationTest {
     private ResponseEntity<String> post(String path, String userId, String body) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         return http.postForEntity(path, new HttpEntity<>(body, headers), String.class);
     }
 
     private void exchange(HttpMethod method, String path, String userId) {
         HttpHeaders headers = new HttpHeaders();
-        headers.add(MessageController.USER_HEADER, userId);
+        headers.add(CurrentUser.HEADER, userId);
         ResponseEntity<String> response = http.exchange(path, method, new HttpEntity<>(headers), String.class);
         assertEquals(204, response.getStatusCode().value());
     }
@@ -211,12 +209,10 @@ class RealtimeIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration(exclude = {
         DataSourceAutoConfiguration.class,
-        FlywayAutoConfiguration.class,
-        RedisAutoConfiguration.class,
-        RedisRepositoriesAutoConfiguration.class
+        FlywayAutoConfiguration.class
     })
     @ConfigurationPropertiesScan("realtime")
-    @ComponentScan({"api", "event", "http", "realtime", "service"})
+    @ComponentScan({"api", "event", "http", "member", "realtime", "service"})
     static class TestApplication {
         @Bean
         MemoryConversations conversations() {

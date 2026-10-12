@@ -1,6 +1,9 @@
 package http;
 
 import event.RecordingEvents;
+import member.ConversationMembers;
+import member.StandaloneGroupController;
+import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -37,10 +40,12 @@ class MessageControllerTest {
     @BeforeEach
     void setUp() throws Exception {
         MemoryConversations conversations = new MemoryConversations();
-        MessageService service = new MessageService(
-            conversations, new MemoryMessages(conversations), new MemoryReactions(), new RecordingEvents());
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
+        StandaloneGroupMembers groups = new StandaloneGroupMembers();
+        MessageService service = new MessageService(conversations, new MemoryMessages(conversations),
+            new MemoryReactions(), new ConversationMembers(groups), new RecordingEvents());
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service), new StandaloneGroupController(groups))
             .setControllerAdvice(new MessageExceptionHandler())
+            .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -48,11 +53,15 @@ class MessageControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.type").value("DIRECT"))
             .andExpect(jsonPath("$.memberIds.length()").value(2));
+        mvc.perform(put("/internal/groups/" + GROUP + "/members")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"memberIds\":[\"" + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
+            .andExpect(status().isNoContent());
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\",\"memberIds\":[\""
-                    + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
-            .andExpect(status().isCreated());
+                .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.memberIds.length()").value(3));
     }
 
     @Test
@@ -242,17 +251,17 @@ class MessageControllerTest {
 
     private ResultActions react(String conversationId, String messageId, String code, String userId) throws Exception {
         return mvc.perform(put(reactionPath(conversationId, messageId) + "/" + code)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions unreact(String conversationId, String messageId, String code, String userId) throws Exception {
         return mvc.perform(delete(reactionPath(conversationId, messageId) + "/" + code)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions reactions(String conversationId, String messageId, String userId) throws Exception {
         return mvc.perform(get(reactionPath(conversationId, messageId))
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private static String reactionPath(String conversationId, String messageId) {
@@ -317,7 +326,7 @@ class MessageControllerTest {
         String dave = "aaaaaaaa-0000-4000-8000-000000000004";
 
         MvcResult created = mvc.perform(post("/conversations/direct")
-                .header(MessageController.USER_HEADER, CAROL)
+                .header(CurrentUser.HEADER, CAROL)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":\"" + dave + "\"}"))
             .andExpect(status().isCreated())
@@ -330,14 +339,14 @@ class MessageControllerTest {
         String id = JsonPath.read(created.getResponse().getContentAsString(), "$.conversationId");
 
         mvc.perform(post("/conversations/direct")
-                .header(MessageController.USER_HEADER, dave)
+                .header(CurrentUser.HEADER, dave)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":\"" + CAROL + "\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.conversationId").value(id));
 
         mvc.perform(post("/conversations/direct")
-                .header(MessageController.USER_HEADER, CAROL)
+                .header(CurrentUser.HEADER, CAROL)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":\"" + CAROL + "\"}"))
             .andExpect(status().isBadRequest());
@@ -351,7 +360,7 @@ class MessageControllerTest {
     void conversationListAndDetailShowTheLastMessage() throws Exception {
         sendText(DIRECT, BOB, "latest");
 
-        mvc.perform(get("/conversations").header(MessageController.USER_HEADER, ALICE))
+        mvc.perform(get("/conversations").header(CurrentUser.HEADER, ALICE))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.conversations.length()").value(2))
             .andExpect(jsonPath("$.conversations[0].conversationId").value(DIRECT))
@@ -363,16 +372,16 @@ class MessageControllerTest {
             .andExpect(jsonPath("$.conversations[1].lastMessage").doesNotExist())
             .andExpect(jsonPath("$.nextCursor").doesNotExist());
 
-        mvc.perform(get("/conversations?limit=1").header(MessageController.USER_HEADER, ALICE))
+        mvc.perform(get("/conversations?limit=1").header(CurrentUser.HEADER, ALICE))
             .andExpect(jsonPath("$.conversations.length()").value(1))
             .andExpect(jsonPath("$.nextCursor").isNotEmpty());
 
-        mvc.perform(get("/conversations/" + DIRECT).header(MessageController.USER_HEADER, BOB))
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, BOB))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.lastMessage.body").value("latest"));
-        mvc.perform(get("/conversations/" + DIRECT).header(MessageController.USER_HEADER, CAROL))
+        mvc.perform(get("/conversations/" + DIRECT).header(CurrentUser.HEADER, CAROL))
             .andExpect(status().isForbidden());
-        mvc.perform(get("/conversations?cursor=nope").header(MessageController.USER_HEADER, ALICE))
+        mvc.perform(get("/conversations?cursor=nope").header(CurrentUser.HEADER, ALICE))
             .andExpect(status().isBadRequest());
     }
 
@@ -396,7 +405,7 @@ class MessageControllerTest {
 
     private ResultActions catchUp(String conversationId, String userId, String query) throws Exception {
         return mvc.perform(get("/conversations/" + conversationId + "/messages" + query)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private ResultActions send(String userId, String body) throws Exception {
@@ -405,7 +414,7 @@ class MessageControllerTest {
 
     private ResultActions send(String conversationId, String userId, String body) throws Exception {
         return mvc.perform(post("/conversations/" + conversationId + "/messages")
-            .header(MessageController.USER_HEADER, userId)
+            .header(CurrentUser.HEADER, userId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
     }
@@ -419,14 +428,14 @@ class MessageControllerTest {
 
     private ResultActions forward(String conversationId, String userId, String body) throws Exception {
         return mvc.perform(post("/conversations/" + conversationId + "/forwards")
-            .header(MessageController.USER_HEADER, userId)
+            .header(CurrentUser.HEADER, userId)
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
     }
 
     private ResultActions deleteMessage(String conversationId, String messageId, String userId) throws Exception {
         return mvc.perform(delete("/conversations/" + conversationId + "/messages/" + messageId)
-            .header(MessageController.USER_HEADER, userId));
+            .header(CurrentUser.HEADER, userId));
     }
 
     private static String messageId(MvcResult result) throws Exception {

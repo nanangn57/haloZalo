@@ -23,7 +23,7 @@ public final class ConversationResponse {
         Conversation conversation = summary.conversation();
         this.conversationId = conversation.getConversationId();
         this.type = conversation.getType().name();
-        this.memberIds = conversation.getMemberIds().stream().sorted().toList();
+        this.memberIds = summary.memberIds().stream().sorted().toList();
         this.lastSeq = conversation.getLastSeq();
         this.createdAt = conversation.getCreatedAt().toString();
         this.lastMessageAt = conversation.getLastMessageAt() == null ? null : conversation.getLastMessageAt().toString();

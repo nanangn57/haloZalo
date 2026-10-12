@@ -5,6 +5,7 @@ import conversation.ConversationCursor;
 import conversation.ConversationType;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -40,9 +41,11 @@ public final class MemoryConversations implements ConversationRepository {
     }
 
     @Override
-    public List<Conversation> findForMember(String userId, ConversationCursor after, int limit) {
+    public List<Conversation> findForMember(String userId, Collection<String> groupIds, ConversationCursor after, int limit) {
         return rows.values().stream()
-            .filter(row -> row.hasMember(userId))
+            .filter(row -> row.getType() == ConversationType.DIRECT
+                ? row.hasMember(userId)
+                : groupIds.contains(row.getConversationId()))
             .filter(row -> after == null || NEWEST_FIRST.compare(row, cursorRow(after)) > 0)
             .sorted(NEWEST_FIRST)
             .limit(limit)
