@@ -131,7 +131,14 @@ public final class AuthService {
     }
 
     public Account currentAccount(String sessionId) {
-        Account account = accounts.findById(currentUserId(sessionId));
+        return accountFor(currentUserId(sessionId));
+    }
+
+    public Account accountFor(String userId) {
+        if (userId == null || userId.isBlank()) {
+            throw new Rejected(Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");
+        }
+        Account account = accounts.findById(userId);
         if (account == null) {
             throw new Rejected(Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");
         }

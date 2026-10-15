@@ -13,15 +13,13 @@ import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public final class AuthController {
-    private static final String BEARER = "Bearer ";
-
     private final AuthService auth;
 
     public AuthController(AuthService auth) {
@@ -45,23 +43,12 @@ public final class AuthController {
     }
 
     @GetMapping("/me")
-    public Map<String, String> me(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        Account account = auth.currentAccount(sessionId(authorization));
+    public Map<String, String> me(@RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId) {
+        Account account = auth.accountFor(userId);
         Map<String, String> user = new LinkedHashMap<>();
         user.put("userId", account.getUserId());
         user.put("username", account.getUsername());
         user.put("email", account.getEmail());
         return user;
-    }
-
-    private static String sessionId(String authorization) {
-        if (authorization == null || !authorization.startsWith(BEARER)) {
-            throw new AuthService.Rejected(AuthService.Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");
-        }
-        String sessionId = authorization.substring(BEARER.length()).trim();
-        if (sessionId.isEmpty()) {
-            throw new AuthService.Rejected(AuthService.Rejected.Reason.UNAUTHENTICATED, "Missing or invalid access token");
-        }
-        return sessionId;
     }
 }

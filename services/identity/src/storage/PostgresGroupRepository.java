@@ -9,6 +9,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,8 +23,8 @@ public final class PostgresGroupRepository implements GroupRespository {
     @Override
     public void save(Group group) {
         String sql = "INSERT INTO identity.groups (group_id, name, description, created_at, owner_id) VALUES (?, ?, ?, ?, ?)";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        Connection connection = DataSourceUtils.getConnection(dataSource);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, group.getGroupId());
             statement.setString(2, group.getGroupName());
             statement.setString(3, group.getGroupDescription());
@@ -32,6 +33,8 @@ public final class PostgresGroupRepository implements GroupRespository {
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save group", ex);
+        } finally {
+            DataSourceUtils.releaseConnection(connection, dataSource);
         }
     }
 
