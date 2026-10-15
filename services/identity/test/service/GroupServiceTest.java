@@ -12,6 +12,7 @@ import group.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import storage.AccountRepository;
+import storage.DuplicateKeyException;
 import storage.GroupRespository;
 import storage.MembershipRepository;
 
@@ -147,6 +148,43 @@ class GroupServiceTest {
     }
 
     @Test
+    void duplicateInsertConflicts() {
+        String groupId = service.create(ownerId, new CreateGroupRequest("nhom")).getGroupId();
+        GroupService racing = new GroupService(
+            groups,
+            new SaveRejectsDuplicate(memberships),
+            accounts,
+            new OwnerMemberPolicyRegistry(),
+            new ImmediateTransactions()
+        );
+
+        GroupService.Rejected rejected = assertThrows(GroupService.Rejected.class,
+            () -> racing.addMember(ownerId, groupId, new AddMemberRequest(memberId)));
+
+        assertEquals(GroupService.Rejected.Reason.CONFLICT, rejected.getReason());
+    }
+
+    @Test
+    void upperCaseIdsMatchTheStoredGroup() {
+        GroupResponse created = service.create(ownerId.toUpperCase(), new CreateGroupRequest("nhom"));
+        String groupId = created.getGroupId();
+
+        MembershipResponse added = service.addMember(
+            ownerId.toUpperCase(),
+            groupId.toUpperCase(),
+            new AddMemberRequest(memberId.toUpperCase())
+        );
+
+        assertEquals(ownerId, created.getOwnerId());
+        assertEquals(groupId, added.getGroupId());
+        assertEquals(memberId, added.getUserId());
+        assertEquals(Role.MEMBER, service.list(memberId.toUpperCase()).getGroups().get(0).getRole());
+
+        service.removeMember(memberId.toUpperCase(), groupId.toUpperCase(), memberId.toUpperCase());
+        assertNull(memberships.find(groupId, memberId));
+    }
+
+    @Test
     void listIncludesOwnerAndMember() {
         String groupId = service.create(ownerId, new CreateGroupRequest("nhom")).getGroupId();
         service.addMember(ownerId, groupId, new AddMemberRequest(memberId));
@@ -191,6 +229,34 @@ class GroupServiceTest {
 
         int size() {
             return rows.size();
+        }
+    }
+
+    private static final class SaveRejectsDuplicate implements MembershipRepository {
+        private final MembershipRepository delegate;
+
+        private SaveRejectsDuplicate(MembershipRepository delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void save(Membership membership) {
+            throw new DuplicateKeyException("Membership already exists", new IllegalStateException("duplicate"));
+        }
+
+        @Override
+        public void delete(String groupId, String userId) {
+            delegate.delete(groupId, userId);
+        }
+
+        @Override
+        public Membership find(String groupId, String userId) {
+            return delegate.find(groupId, userId);
+        }
+
+        @Override
+        public List<Membership> listByUser(String userId) {
+            return delegate.listByUser(userId);
         }
     }
 

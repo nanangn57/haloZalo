@@ -35,6 +35,9 @@ public final class PostgresMembershipRepository implements MembershipRepository 
             statement.setString(4, membership.getRole().name());
             statement.executeUpdate();
         } catch (SQLException ex) {
+            if ("23505".equals(ex.getSQLState())) {
+                throw new DuplicateKeyException("Membership already exists", ex);
+            }
             throw new IllegalStateException("Could not save membership", ex);
         } finally {
             DataSourceUtils.releaseConnection(connection, dataSource);
