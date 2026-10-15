@@ -19,13 +19,14 @@ services/identity/
     account/          dữ liệu tài khoản, gồm hash mật khẩu
     verification/     dữ liệu bản chờ xác minh email
     session/          dữ liệu session
+    group/            dữ liệu nhóm, quyền theo role
     auth/             JSON request và response
     password/         hash và so khớp bcrypt
     mail/             gửi mail xác minh
     storage/          interface lưu, và implementation PostgreSQL
     event/            phát event đăng nhập trong process
-    service/          đăng ký, xác minh email, đăng nhập, kiểm tra session
-    http/             nhận HTTP public, đổi lỗi thành status
+    service/          đăng ký, xác minh email, đăng nhập, kiểm tra session, nhóm
+    http/             nhận HTTP public, filter session, đổi lỗi thành status
   test/               cùng các package trên, mỗi nhóm một test
 ```
 
@@ -33,7 +34,9 @@ services/identity/
 
 `POST /auth/register` trả 202 với `email`. Chưa tạo tài khoản và chưa cấp token. Mail chứa link `GET /auth/verify?token=`, hết hạn sau 120 giây. Bấm link trong hạn thì trả `userId`, `username`, `email` và xóa bản chờ. Hết hạn hoặc token lạ thì 400. `POST /auth/login` chỉ thành công sau khi đã verify, trả 200 với `accessToken`, `tokenType`, `expiresIn`, và `user`. Không trả hash mật khẩu.
 
-`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. Kiểm tra session cho module khác là lời gọi `AuthService.currentUserId` trong process, không có endpoint HTTP nội bộ.
+`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. `SessionFilter` bỏ qua đăng ký, xác minh email, và đăng nhập. Path còn lại gọi `AuthService.currentUserId` và gắn `userId` vào request. Kiểm tra session cho module khác là lời gọi đó trong process, không có endpoint HTTP nội bộ.
+
+`POST /groups` body `{ name }` trả 201 với `groupId`, `name`, `ownerId`, `role`. Người tạo là owner. `GET /groups` trả các nhóm của user hiện tại. `POST /groups/{groupId}/members` body `{ userId }` trả 201, role `MEMBER`. `DELETE /groups/{groupId}/members/{userId}` trả 204: owner xoá người khác, thành viên tự rời. Owner không tự rời.
 
 Lỗi: `VALIDATION_ERROR` 400, `CONFLICT` 409, `UNAUTHENTICATED` 401.
 

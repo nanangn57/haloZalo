@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
 @SpringBootApplication(scanBasePackages = {
-    "account", "app", "auth", "event", "http", "mail", "password", "service", "session", "storage"
+    "account", "app", "auth", "event", "group", "http", "mail", "password", "service", "session", "storage"
 })
 public class IdentityApplication {
     public static void main(String[] args) {

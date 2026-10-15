@@ -13,6 +13,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -26,8 +27,8 @@ public final class PostgresMembershipRepository implements MembershipRepository 
     @Override
     public void save(Membership membership) {
         String sql = "INSERT INTO identity.memberships (group_id, user_id, joined_at, role) VALUES (?, ?, ?, ?)";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        Connection connection = DataSourceUtils.getConnection(dataSource);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, membership.getGroupId());
             statement.setString(2, membership.getUserId());
             statement.setObject(3, OffsetDateTime.ofInstant(membership.getJoinedAt(), ZoneOffset.UTC));
@@ -35,6 +36,8 @@ public final class PostgresMembershipRepository implements MembershipRepository 
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save membership", ex);
+        } finally {
+            DataSourceUtils.releaseConnection(connection, dataSource);
         }
     }
     @Override

@@ -16,6 +16,7 @@ import storage.SessionRepository;
 import storage.VerificationRepository;
 import verification.EmailVerification;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 
 import java.time.Clock;
@@ -45,6 +46,7 @@ class AuthControllerTest {
             "http://localhost:8080"
         );
         mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth))
+            .addFilters(new SessionFilter(auth, new ObjectMapper()))
             .setControllerAdvice(new AuthExceptionHandler())
             .build();
     }
@@ -158,7 +160,16 @@ class AuthControllerTest {
 
     @Test
     void sessionCheckIsNotAnHttpEndpoint() throws Exception {
-        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer token"))
+        registerNgocAnh();
+        verifyNgocAnh();
+        MvcResult loggedIn = mvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+        String token = JsonPath.read(loggedIn.getResponse().getContentAsString(), "$.accessToken");
+
+        mvc.perform(get("/internal/sessions/current").header("Authorization", "Bearer " + token))
             .andExpect(status().isNotFound());
     }
 
