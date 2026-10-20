@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import UserItem from '../components/user/UserItem'
 import type { User } from '../types/user'
+import type { Message } from '../types/message'
 import NavBar from '../components/nav/NavBar'
 import ChatHeader from '../components/chat/ChatHeader'
-
+import ChatMessages from '../components/chat/ChatMessages'
+import MesToolbar from '../components/chat/MesToolBar'
+import UserInfoPanel from '../components/user/UserPanel'
 
 function ChatPage() {
   const currentUser: User = {
@@ -39,6 +43,41 @@ function ChatPage() {
     lastSeen: 0,
     unread: 3,
   }
+  const initialMessages: Message[] = [
+    {
+      id: "m1",
+      conversationId: "c1",
+      senderId: "2",
+      content: "Hi Khanh! How are you?",
+      sentAt: Math.floor(Date.now() / 1000) - 300,
+    },
+    {
+      id: "m2",
+      conversationId: "c1",
+      senderId: "1",
+      content: "I'm good, thanks! How about you?",
+      sentAt: Math.floor(Date.now() / 1000) - 240,
+    },
+    {
+      id: "m3",
+      conversationId: "c1",
+      senderId: "2",
+      content: "I'm doing well. Are you working on the chat UI?",
+      sentAt: Math.floor(Date.now() / 1000) - 120,
+    },
+    {
+      id: "m4",
+      conversationId: "c1",
+      senderId: "1",
+      content: "Yes! I'm testing the message layout now.",
+      sentAt: Math.floor(Date.now() / 1000) - 60,
+    },
+  ];
+
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [newMessage, setNewMessage] = useState("");
+  const currentUserId = String(currentUser.id);
+  const [showUserInfo, setShowUserInfo] = useState(false)
 
   return (
     <div className="d-flex w-100 vh-100">
@@ -64,12 +103,65 @@ function ChatPage() {
       </div>
       
       <div className="d-flex flex-column flex-grow-1">
-        <div className="d-flex align-items-center px-3 py-2 border-bottom">
-          <ChatHeader user={HeaderUser}/>
+        <div className="flex-shrink-0 border-bottom">
+          <ChatHeader 
+          user={HeaderUser}
+          onInfoClick={() => setShowUserInfo(true)}
+          />
         </div>
 
+        <div className="flex-grow-1 d-flex flex-column">
+            <ChatMessages
+              messages={messages}
+              currentUserId={currentUserId}
+            />
+        </div>
+
+        <form 
+        className="border-top flex-shrink-0"
+        onSubmit={(event) => {
+          event.preventDefault();
+
+          const content = newMessage.trim();
+          if (!content) return;
+
+          const newMessageItem: Message = {
+            id: crypto.randomUUID(),
+            conversationId: "c1",
+            senderId: currentUserId,
+            content,
+            sentAt: Math.floor(Date.now() / 1000),
+          };
+
+          setMessages((previous) => [...previous, newMessageItem]);
+          setNewMessage("");
+        }}
+        >
+          <MesToolbar />
+
+          <div className="d-flex align-items-center gap-2 p-2">
+            <input
+            type="text"
+            className="form-control"
+            placeholder="Type a message..."
+            value={newMessage}
+            onChange={(event) => setNewMessage(event.target.value)}
+            />
+
+            <button className="btn btn-primary flex-shrink-0" type="submit">
+              <i className="bi bi-send fs-4"></i>
+            </button>
+          </div>
+        </form>
       </div>
-       
+      
+      {showUserInfo && (
+        <UserInfoPanel
+          user={HeaderUser}
+          onClose={() => setShowUserInfo(false)}
+        />
+      )}
+
 
     </div>
   )

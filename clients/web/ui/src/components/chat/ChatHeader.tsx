@@ -3,10 +3,11 @@ import type { User } from '../../types/user'
 
 interface ChatHeaderProps {
   user: User
+  onInfoClick: () => void 
 }
 
 function ChatHeader({
-  user
+  user, onInfoClick
 }: ChatHeaderProps) {
     return(
         <div className="d-flex align-items-center w-100">
@@ -24,11 +25,16 @@ function ChatHeader({
             </div>
 
             <div className="ms-auto d-flex align-items-center gap-3">
-                <button className="btn app-button flex-shrink-0">
+                <button 
+                    className="btn app-button flex-shrink-0"
+                >
                     <i class="bi bi-search fs-4"></i>
                 </button>
 
-                <button className="btn app-button flex-shrink-0">
+                <button 
+                className="btn app-button flex-shrink-0"
+                onClick={onInfoClick}
+                >
                     <i class="bi bi-layout-sidebar fs-4"></i>
                 </button>
             </div>
