@@ -6,6 +6,8 @@ Người giữ: P1 Ngọc Anh.
 
 Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào database `halozalo`. Pool đặt `search_path` là schema `identity`.
 
+Web chạy Vite (thường `http://localhost:5173`) gọi API từ origin khác. `CorsConfig` cho phép origin khớp `identity.cors.allowed-origin-patterns` và trả preflight `OPTIONS` trước `SessionFilter`. Response 401 vẫn có `Access-Control-Allow-Origin`, nên trình duyệt đọc được lỗi thay vì báo CORS. Request không gửi `Origin` (curl, mobile) không đi qua nhánh này.
+
 Chạy bằng Docker, gồm PostgreSQL riêng: `docker compose up --build` trong thư mục này. App ở `http://localhost:8080`. `docker compose down` giữ dữ liệu. `docker compose down -v` xóa dữ liệu. Trong container, JDBC trỏ vào service `postgres`. Link xác minh vẫn là `http://localhost:8080` vì người dùng mở trên máy mình. Mail ghi ra log, lấy link bằng `docker compose logs -f identity`. Cổng 5432 trên máy thuộc `infra/docker-compose.yml`, nên Postgres của compose này mở ở `127.0.0.1:5433`. Image chạy bằng user không phải root.
 
 ```
