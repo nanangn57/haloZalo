@@ -5,4 +5,5 @@ export interface LoginFormProps {
   onUsernameChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  isLoading: boolean
 }

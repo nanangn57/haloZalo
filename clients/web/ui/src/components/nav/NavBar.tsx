@@ -1,5 +1,5 @@
 import type { User } from '../../types/user'
-import { NavLink } from "react-router-dom";
+// import { NavLink } from "react-router-dom";
 
 interface UserItemProps {
   currentUser: User
@@ -20,7 +20,7 @@ function NavBar({currentUser}: UserItemProps) {
             
             <div className="d-flex flex-column align-items-center gap-3">
                 <button className="btn app-button">
-                    <i class="bi bi-chat fs-4"></i>
+                    <i className="bi bi-chat fs-4"></i>
                 </button>
 
                 <button className="btn app-button">
@@ -31,11 +31,11 @@ function NavBar({currentUser}: UserItemProps) {
 
             <div className="d-flex flex-column align-items-center gap-3 mt-auto">
                 <button className="btn app-button">
-                    <i class="bi bi-bar-chart fs-4"></i>
+                    <i className="bi bi-bar-chart fs-4"></i>
                 </button>
 
                 <button className="btn app-button">
-                    <i class="bi bi-gear fs-4"></i>
+                    <i className="bi bi-gear fs-4"></i>
                 </button>
 
             </div>

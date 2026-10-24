@@ -1,8 +1,8 @@
-import React from 'react'
+// import React from 'react'
 
 const Button = () => {
     return (
-        <button className ='btn btn-primary'>Button</div>
+        <button className ='btn btn-primary'>Button</button>
     )
 }
 

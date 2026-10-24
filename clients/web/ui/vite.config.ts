@@ -9,5 +9,8 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
+    fs: {
+      allow: ['/app','/workspace/clients'],
+    },
   },
 })

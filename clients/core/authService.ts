@@ -1,31 +1,66 @@
-import { apiRequest } from '../api/client';
+import type { LoginRequest, LoginResponse } from './types/auth.ts'
 
-export interface LoginRequest {
-  login: string;
-  password: string;
-}
+const API_BASE_URL = "http://localhost:8080"
 
-export interface AuthUser {
-  userId: string;
-  username: string;
-  email: string;
-}
-
-export interface TokenResponse {
-  accessToken: string;
-  tokenType: string;
-  expiresIn: number;
-  user: AuthUser;
-}
-
-export function login(
+export async function loginApi(
   credentials: LoginRequest,
-): Promise<TokenResponse> {
-  return apiRequest<TokenResponse>('/auth/login', {
+): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(credentials),
-  });
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.error?.message ?? 'Đăng nhập thất bại',
+    ) as Error & { code?: string; status?: number }
+
+    error.code = data?.error?.code
+    error.status = response.status
+
+    throw error
+  }
+
+  return data as LoginResponse
+}
+
+export interface RegisterRequest {
+  username: string
+  email: string
+  password: string
+}
+
+export interface RegisterAccepted {
+  email: string
+}
+
+export async function registerApi(
+  credentials: RegisterRequest,
+): Promise<RegisterAccepted> {
+  const response = await fetch(`${API_BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(credentials),
+  })
+
+  const data = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.error?.message ?? 'Đăng ký thất bại',
+    ) as Error & { code?: string; status?: number }
+
+    error.code = data?.error?.code
+    error.status = response.status
+    throw error
+  }
+
+  return data as RegisterAccepted
 }

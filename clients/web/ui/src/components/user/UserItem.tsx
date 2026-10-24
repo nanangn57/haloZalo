@@ -3,13 +3,23 @@ import { lastSeenConvert } from '../../utils/lastSeenConvert'
 
 interface UserItemProps {
   user: User
+  active: boolean
+  onClick: (user: User) => void
 }
 
 function UserItem({
-  user
+  user,
+  active,
+  onClick,
 }: UserItemProps) {
     return(
-    <li className="list-group-item d-flex align-items-center">
+    <li
+    className={`list-group-item d-flex align-items-center ${
+        active ? 'active' : ''
+    }`}
+    onClick={() => onClick(user)}
+    role="button"
+    >
         <div>
             {/* Avatar */}
             <img

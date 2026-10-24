@@ -8,7 +8,7 @@ import type { User } from "../types/user";
 function ContactPage() {
     const friends: User[] = [
             {
-              id: 1,
+              id: "1",
               name: 'Thành',
               avatar: 'https://i.pravatar.cc/150?img=20',
               online: false,
@@ -16,7 +16,7 @@ function ContactPage() {
               unread: 0,
             },
             {
-              id: 2,
+              id: "2",
               name: 'Ngọc Anh',
               avatar: 'https://i.pravatar.cc/150?img=10',
               online: true,
@@ -30,7 +30,7 @@ function ContactPage() {
         icon: "bi bi-person fs-4"
     }
     const currentUser: User = {
-        id: 1,
+        id: "1",
         name: 'Khanh',
         avatar: 'https://i.pravatar.cc/150?img=10',
         online: true,

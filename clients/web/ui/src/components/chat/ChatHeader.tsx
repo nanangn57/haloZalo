@@ -28,14 +28,14 @@ function ChatHeader({
                 <button 
                     className="btn app-button flex-shrink-0"
                 >
-                    <i class="bi bi-search fs-4"></i>
+                    <i className="bi bi-search fs-4"></i>
                 </button>
 
                 <button 
                 className="btn app-button flex-shrink-0"
                 onClick={onInfoClick}
                 >
-                    <i class="bi bi-layout-sidebar fs-4"></i>
+                    <i className="bi bi-layout-sidebar fs-4"></i>
                 </button>
             </div>
             

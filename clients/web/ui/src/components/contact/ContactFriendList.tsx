@@ -12,7 +12,7 @@ function ContactFriendlist({
     <li className="list-group-item p-0 border-0">
         <div className="contact-row">
             
-            <button type="button" class="btn app-button flex-grow-1 d-flex align-items-center text-start">
+            <button type="button" className="btn app-button flex-grow-1 d-flex align-items-center text-start">
                 <img
                     src={user.avatar}
                     alt={user.name}
@@ -27,7 +27,7 @@ function ContactFriendlist({
             </button>
 
             <button className="btn app-button flex-shrink-0">
-                <i class="bi bi-three-dots fs-4"></i>
+                <i className="bi bi-three-dots fs-4"></i>
             </button>
 
         </div>

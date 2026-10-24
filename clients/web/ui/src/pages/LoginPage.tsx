@@ -1,32 +1,68 @@
-import LoginForm from '../components/auth/LoginForm'
+import { useState } from 'react'
+import type { FormEvent } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import type { FormEvent } from "react";
+import LoginForm from '../components/auth/LoginForm'
+import { loginApi } from '../../core/authService'
+import { saveAuth } from '../../core/authSession'
 
 function LoginPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  // Dữ liệu người dùng nhập vào form
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
 
-  const handleLogin = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Trạng thái lỗi và loading
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
 
-    const dummyEmail = "admin@gmail.com";
-    const dummyPassword = "123456";
-    
-    if (
-      email === dummyEmail &&
-      password === dummyPassword
-    ) {
-      navigate("/contacts");
-      return;
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError('')
+
+    // API quy định password từ 8 đến 72 ký tự
+    if (password.length < 8 || password.length > 72) {
+      setError('Password must be between 8 and 72 characters')
+      return
     }
 
-    setError("Invalid username or password");
-  };
+    try {
+      setIsLoading(true)
+
+      // API nhận login là username hoặc email
+      const auth = await loginApi({
+        login: email.trim(),
+        password,
+      })
+
+      // Kiểm tra API có trả về access token không
+      console.log('Login response:', {
+        hasAccessToken: Boolean(auth.accessToken),
+        tokenType: auth.tokenType,
+        expiresIn: auth.expiresIn,
+        user: auth.user,
+      })
+
+      if (!auth.accessToken) {
+        throw new Error('Login response does not contain an access token')
+      }
+
+      // Chỉ lưu phiên đăng nhập sau khi API thành công
+      saveAuth(auth)
+
+      // Chuyển trang sau khi đăng nhập thành công
+      navigate('/contacts')
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to log in. Please try again.'
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
     <div className="container">
@@ -44,9 +80,10 @@ function LoginPage() {
                 email={email}
                 password={password}
                 error={error}
-                onEmailChange={setEmail}
+                onUsernameChange={setEmail}
                 onPasswordChange={setPassword}
                 onSubmit={handleLogin}
+                isLoading={isLoading}
               />
 
               <div className="text-center mt-3">
@@ -54,12 +91,12 @@ function LoginPage() {
                   Don't have an account?
                 </span>{' '}
 
-                <a
-                  href="#"
-                  className="text-decoration-none"
+                <Link
+                  to="/register"
+                  className="text-decoration-none fw-semibold"
                 >
                   Register
-                </a>
+                </Link>
               </div>
 
             </div>

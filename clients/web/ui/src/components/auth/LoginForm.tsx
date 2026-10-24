@@ -4,9 +4,10 @@ function LoginForm({
   email,
   password,
   error,
-  onEmailChange,
+  onUsernameChange,
   onPasswordChange,
   onSubmit,
+  isLoading,
 }: LoginFormProps) {
   return (
     <form onSubmit={onSubmit}>
@@ -25,7 +26,7 @@ function LoginForm({
           className="form-control input-placeholder"
           placeholder="Enter your email"
           value={email}
-          onChange={(event) => onEmailChange(event.target.value)}
+          onChange={(event) => onUsernameChange(event.target.value)}
         />
       </div>
 
@@ -66,6 +67,7 @@ function LoginForm({
       <button
         type="submit"
         className="btn btn-primary w-100"
+        disabled={isLoading}
       >
         Login
       </button>

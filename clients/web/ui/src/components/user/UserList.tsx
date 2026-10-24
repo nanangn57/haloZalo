@@ -3,7 +3,7 @@ import UserItem from './UserItem';
 
 interface UserListProps {
   users: User[];
-  selectedUserId?: number;
+  selectedUserId?: string;
   onUserSelect: (user: User) => void;
 }
 

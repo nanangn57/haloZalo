@@ -10,7 +10,7 @@ import UserInfoPanel from '../components/user/UserPanel'
 
 function ChatPage() {
   const currentUser: User = {
-    id: 1,
+    id: "1",
     name: 'Khanh',
     avatar: 'https://i.pravatar.cc/150?img=1',
     online: true,
@@ -19,7 +19,7 @@ function ChatPage() {
   }
   const users: User[] = [
     {
-      id: 2,
+      id: "2",
       name: 'Alice',
       avatar: 'https://i.pravatar.cc/150?img=20',
       online: false,
@@ -27,7 +27,7 @@ function ChatPage() {
       unread: 0,
     },
     {
-      id: 3,
+      id: "3",
       name: 'Bob',
       avatar: 'https://i.pravatar.cc/150?img=10',
       online: true,
@@ -36,7 +36,7 @@ function ChatPage() {
     },
   ]
   const HeaderUser: User = {
-    id: 4,
+    id: "4",
     name: 'Huy',
     avatar: 'https://i.pravatar.cc/150?img=1',
     online: true,
@@ -78,6 +78,7 @@ function ChatPage() {
   const [newMessage, setNewMessage] = useState("");
   const currentUserId = String(currentUser.id);
   const [showUserInfo, setShowUserInfo] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<User>(users[0])
 
   return (
     <div className="d-flex w-100 vh-100">
@@ -86,18 +87,20 @@ function ChatPage() {
       
       <div className="d-flex flex-column flex-shrink-0 border-end">
           <div className="p-3">
-            <form class="d-flex" role="search">
-              <input class="form-control me-2" type="search" placeholder="Search" aria-label="Search"/>
-              <button class="btn btn-outline-success" type="submit">Search</button>
+            <form className="d-flex" role="search">
+              <input className="form-control me-2" type="search" placeholder="Search" aria-label="Search"/>
+              <button className="btn btn-outline-success" type="submit">Search</button>
             </form>
           </div>
 
           <ul className="list-group flex-grow-1 overflow-auto">
             {users.map((user) => (
               <UserItem
-              key={user.id}
-              user={user}
-            />
+                key={user.id}
+                user={user}
+                active={selectedUser.id === user.id}
+                onClick={(clickedUser) => setSelectedUser(clickedUser)}
+              />
             ))}
           </ul>
       </div>
