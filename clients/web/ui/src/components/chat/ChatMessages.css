@@ -1,0 +1,22 @@
+
+.message-item {
+  max-width: 75%;
+  min-width: 0;
+}
+
+.message-bubble {
+  padding: 10px 14px;
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-mine {
+  background-color: #2563eb;
+  color: white;
+}
+
+.message-other {
+  background-color: #f1f3f5;
+  color: #212529;
+}

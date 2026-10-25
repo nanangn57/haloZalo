@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from './pages/LoginPage'
 import ChatPage from './pages/ChatPage'
 import ContactPage from './pages/ContactPage'
+import RegisterPage from './pages/RegisterPage'
 import './App.css'
 
 
@@ -18,6 +19,7 @@ function App() {
         {/* <Route path="/settings" element={<SettingsPage />} /> */}
 
         <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/register" element={<RegisterPage />} />
       </Routes>
     </BrowserRouter>
   );
