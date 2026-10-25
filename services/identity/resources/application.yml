@@ -3,6 +3,10 @@ server:
 
 identity:
   public-base-url: http://localhost:8080
+  mail:
+    # log ghi link ra logger. smtp gửi qua spring.mail. Bí mật nằm ở .env.local, không ghi ở đây.
+    mode: ${IDENTITY_MAIL_MODE:log}
+    from: ${IDENTITY_MAIL_FROM:noreply@halozalo.local}
   cors:
     # Web (Vite) gọi từ origin khác cổng 8080. Thêm pattern nếu mở web bằng IP máy, ví dụ http://192.168.1.10:*.
     allowed-origin-patterns:
@@ -10,6 +14,12 @@ identity:
       - http://127.0.0.1:*
 
 spring:
+  config:
+    # Local secrets, never committed. Real environment variables win over this file. See .env.example.
+    import: optional:file:./.env.local[.properties]
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
   datasource:
     url: jdbc:postgresql://localhost:5432/halozalo
     username: halozalo
@@ -19,4 +29,4 @@ spring:
   sql:
     init:
       mode: always
-      schema-locations: classpath:schema.sql
+      schema-locations: classpath:schema.sql,classpath:analytics-schema.sql

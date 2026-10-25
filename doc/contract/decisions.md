@@ -35,6 +35,6 @@ Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, 
 
 ## Bản này cố ý chưa có
 
-API tạo hội thoại, tìm user, lịch sử, catch-up, media, reaction, dashboard, refresh token, FCM.
+Upload media, dashboard, refresh token, FCM.
 
-Cho đến khi có API tạo hội thoại, Messaging nhận `conversationId` do client sinh (UUID) để ghi tin. Shape của `Message` không đổi khi API hội thoại được thêm.
+Hội thoại phải được mở trước khi gửi tin. Chat 1-1 mở bằng `POST /conversations/direct`. Hội thoại nhóm dùng `groupId` làm `conversationId`. Client không tự sinh `conversationId` rồi gửi tin khi hội thoại chưa mở.
