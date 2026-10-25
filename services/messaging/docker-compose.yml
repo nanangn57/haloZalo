@@ -10,7 +10,9 @@ name: halozalo-messaging
 
 services:
   messaging:
-    build: .
+    build:
+      context: ..
+      dockerfile: messaging/Dockerfile
     image: halozalo/messaging:local
     ports:
       - "8082:8082"

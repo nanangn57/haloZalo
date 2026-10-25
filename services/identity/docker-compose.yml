@@ -8,7 +8,9 @@ name: halozalo-identity
 
 services:
   identity:
-    build: .
+    build:
+      context: ..
+      dockerfile: identity/Dockerfile
     image: halozalo/identity:local
     ports:
       - "8080:8080"
