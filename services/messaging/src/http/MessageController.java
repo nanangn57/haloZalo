@@ -1,0 +1,161 @@
+package http;
+
+import api.ConversationListResponse;
+import api.ConversationResponse;
+import api.ForwardMessageRequest;
+import api.MessagePageResponse;
+import api.MessageResponse;
+import api.MarkReadRequest;
+import api.OpenDirectRequest;
+import api.ReadStateResponse;
+import api.OpenConversationRequest;
+import api.ReactionsResponse;
+import api.SendMessageRequest;
+import conversation.ConversationType;
+import message.MessageContent;
+import service.MessageService;
+
+import java.util.Arrays;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public final class MessageController {
+    private final MessageService messages;
+
+    public MessageController(MessageService messages) {
+        this.messages = messages;
+    }
+
+    @PostMapping("/conversations/{conversationId}/messages")
+    public ResponseEntity<MessageResponse> send(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody SendMessageRequest request) {
+        MessageContent content = request.toContent();
+        if (content == null) {
+            throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Message type must be TEXT or EMOTION");
+        }
+        MessageService.Sent sent = messages.send(
+            conversationId, userId, request.getClientMsgId(), content, null, request.getReplyTo());
+        return sentResponse(sent);
+    }
+
+    /**
+     * Get-or-create the 1-1 conversation with another user: 201 when created, 200 when it already existed.
+     */
+    @PostMapping("/conversations/direct")
+    public ResponseEntity<ConversationResponse> openDirect(
+        @UserId String userId,
+        @RequestBody OpenDirectRequest request) {
+        MessageService.Opened opened = messages.openDirect(userId, request.getUserId());
+        return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation()));
+    }
+
+    @GetMapping("/conversations")
+    public ConversationListResponse conversations(
+        @UserId String userId,
+        @RequestParam(required = false) String cursor,
+        @RequestParam(required = false) Integer limit) {
+        return new ConversationListResponse(messages.conversations(userId, cursor, limit));
+    }
+
+    @GetMapping("/conversations/{conversationId}")
+    public ConversationResponse conversation(
+        @UserId String userId,
+        @PathVariable String conversationId) {
+        return new ConversationResponse(messages.conversation(conversationId, userId));
+    }
+
+    /**
+     * Marks the conversation read up to seq on all of the caller's devices.
+     */
+    @PutMapping("/conversations/{conversationId}/read")
+    public ReadStateResponse markRead(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody MarkReadRequest request) {
+        return new ReadStateResponse(conversationId, messages.markRead(conversationId, userId, request.getSeq()));
+    }
+
+    /**
+     * History without afterSeq: the newest page, then beforeSeq = the first seq received to scroll back.
+     * Catch-up with afterSeq: call again with the last seq received while hasMore is true.
+     */
+    @GetMapping("/conversations/{conversationId}/messages")
+    public MessagePageResponse messages(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestParam(required = false) Long afterSeq,
+        @RequestParam(required = false) Long beforeSeq,
+        @RequestParam(required = false) Integer limit) {
+        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit));
+    }
+
+    @PostMapping("/conversations/{conversationId}/forwards")
+    public ResponseEntity<MessageResponse> forward(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody ForwardMessageRequest request) {
+        return sentResponse(messages.forward(conversationId, userId, request.getClientMsgId(), request.getMessageId()));
+    }
+
+    @DeleteMapping("/conversations/{conversationId}/messages/{messageId}")
+    public ResponseEntity<Void> delete(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId) {
+        messages.delete(conversationId, messageId, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
+    public ResponseEntity<Void> react(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId,
+        @PathVariable String code) {
+        messages.react(conversationId, messageId, userId, code);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/conversations/{conversationId}/messages/{messageId}/reactions/{code}")
+    public ResponseEntity<Void> unreact(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId,
+        @PathVariable String code) {
+        messages.unreact(conversationId, messageId, userId, code);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages/{messageId}/reactions")
+    public ReactionsResponse reactions(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @PathVariable String messageId) {
+        return new ReactionsResponse(messages.reactions(conversationId, messageId, userId));
+    }
+
+    @PostMapping("/internal/conversations")
+    public ResponseEntity<ConversationResponse> open(@RequestBody OpenConversationRequest request) {
+        ConversationType type = Arrays.stream(ConversationType.values())
+            .filter(value -> value.name().equals(request.getType()))
+            .findFirst()
+            .orElse(null);
+        return ResponseEntity.status(201).body(new ConversationResponse(
+            messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
+    }
+
+    private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {
+        return ResponseEntity.status(sent.isCreated() ? 201 : 200).body(new MessageResponse(sent.getMessage()));
+    }
+}
