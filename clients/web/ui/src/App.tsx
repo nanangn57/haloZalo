@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import ChatPage from './pages/ChatPage'
 import ContactPage from './pages/ContactPage'
 import RegisterPage from './pages/RegisterPage'
+import GroupPage from "./pages/GroupPage";
 import './App.css'
 
 
@@ -20,6 +21,7 @@ function App() {
 
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/groups" element={<GroupPage />} />
       </Routes>
     </BrowserRouter>
   );
