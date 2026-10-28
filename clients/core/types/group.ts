@@ -1,4 +1,3 @@
-
 export type GroupRole = 'OWNER' | 'MEMBER'
 
 export interface Group {

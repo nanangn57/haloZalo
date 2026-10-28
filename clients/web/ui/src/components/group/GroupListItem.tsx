@@ -1,5 +1,5 @@
 
-import type { Group } from '../../types/group'
+import type { Group } from '../../../../../core/types/group'
 
 interface GroupListItemProps {
   group: Group

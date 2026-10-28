@@ -6,13 +6,13 @@ import NavBar from '../components/nav/NavBar'
 import GroupHeader from '../components/group/GroupHeader'
 import GroupListItem from '../components/group/GroupListItem'
 
-import type { Group } from '../types/group'
+import type { Group } from '../../../../core/types/group'
 import type { User } from '../types/user'
 
 import {
   getGroupsApi,
   createGroupApi,
-} from '../../core/groupService'
+} from '../../../../core/groupService'
 
 function GroupPage() {
   const currentUser: User = {

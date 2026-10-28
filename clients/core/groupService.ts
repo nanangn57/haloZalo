@@ -1,13 +1,13 @@
 
 import { getAuth } from './authSession'
-import type { ApiErrorResponse } from '../types/auth'
+import type { ApiErrorResponse } from './types/auth'
 import type {
   Group,
   GroupListResponse,
   CreateGroupRequest,
   AddMemberRequest,
   Membership,
-} from '../types/group'
+} from './types/group'
 
 const API_BASE_URL = 'http://localhost:8080'
 
