@@ -3,8 +3,8 @@ import type { FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 
 import LoginForm from '../components/auth/LoginForm'
-import { loginApi } from '../../core/authService'
-import { saveAuth } from '../../core/authSession'
+import { loginApi } from '../../../../core/authService'
+import { saveAuth } from '../../../../core/authSession'
 
 function LoginPage() {
   const navigate = useNavigate()

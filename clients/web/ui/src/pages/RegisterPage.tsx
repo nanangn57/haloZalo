@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import RegisterForm from '../components/auth/RegisterForm'
-import { registerApi } from '../../core/authService'
+import { registerApi } from '../../../../core/authService'
 
 function RegisterPage() {
   const [username, setUsername] = useState('')

@@ -1,10 +1,5 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-
-const uiDir = path.dirname(fileURLToPath(import.meta.url))
-const coreDir = path.resolve(uiDir, '../../core')
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -15,7 +10,7 @@ export default defineConfig({
       usePolling: true,
     },
     fs: {
-      allow: [uiDir, coreDir, '/app', '/workspace/clients'],
+      allow: ['/app', '/workspace/clients'],
     },
   },
 })

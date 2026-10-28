@@ -81,7 +81,10 @@ function ChatPage() {
   const [selectedUser, setSelectedUser] = useState<User>(users[0])
 
   return (
-    <div className="d-flex w-100 vh-100">
+    <div 
+    className="d-flex w-100 vh-100 overflow-hidden"
+    style={{ minHeight: 0}}
+    >
         
       <NavBar currentUser={currentUser}/>
       
@@ -105,7 +108,10 @@ function ChatPage() {
           </ul>
       </div>
       
-      <div className="d-flex flex-column flex-grow-1">
+      <div 
+      className="d-flex flex-column flex-grow-1 overflow-hidden"
+      style={{minWidth: 0, minHeight: 0}}
+      >
         <div className="flex-shrink-0 border-bottom">
           <ChatHeader 
           user={HeaderUser}
@@ -113,7 +119,10 @@ function ChatPage() {
           />
         </div>
 
-        <div className="flex-grow-1 d-flex flex-column">
+        <div 
+        className="flex-grow-1 d-flex flex-column overflow-hidden"
+        style={{ minHeight: 0}}
+        >
             <ChatMessages
               messages={messages}
               currentUserId={currentUserId}
