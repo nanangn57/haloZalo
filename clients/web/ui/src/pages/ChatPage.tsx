@@ -8,6 +8,37 @@ import ChatMessages from '../components/chat/ChatMessages'
 import MesToolbar from '../components/chat/MesToolBar'
 import UserInfoPanel from '../components/user/UserPanel'
 
+const initialMessages: Message[] = [
+  {
+    id: "m1",
+    conversationId: "c1",
+    senderId: "2",
+    content: "Hi Khanh! How are you?",
+    sentAt: Math.floor(Date.now() / 1000) - 300,
+  },
+  {
+    id: "m2",
+    conversationId: "c1",
+    senderId: "1",
+    content: "I'm good, thanks! How about you?",
+    sentAt: Math.floor(Date.now() / 1000) - 240,
+  },
+  {
+    id: "m3",
+    conversationId: "c1",
+    senderId: "2",
+    content: "I'm doing well. Are you working on the chat UI?",
+    sentAt: Math.floor(Date.now() / 1000) - 120,
+  },
+  {
+    id: "m4",
+    conversationId: "c1",
+    senderId: "1",
+    content: "Yes! I'm testing the message layout now.",
+    sentAt: Math.floor(Date.now() / 1000) - 60,
+  },
+]
+
 function ChatPage() {
   const currentUser: User = {
     id: "1",
@@ -43,37 +74,6 @@ function ChatPage() {
     lastSeen: 0,
     unread: 3,
   }
-  const initialMessages: Message[] = [
-    {
-      id: "m1",
-      conversationId: "c1",
-      senderId: "2",
-      content: "Hi Khanh! How are you?",
-      sentAt: Math.floor(Date.now() / 1000) - 300,
-    },
-    {
-      id: "m2",
-      conversationId: "c1",
-      senderId: "1",
-      content: "I'm good, thanks! How about you?",
-      sentAt: Math.floor(Date.now() / 1000) - 240,
-    },
-    {
-      id: "m3",
-      conversationId: "c1",
-      senderId: "2",
-      content: "I'm doing well. Are you working on the chat UI?",
-      sentAt: Math.floor(Date.now() / 1000) - 120,
-    },
-    {
-      id: "m4",
-      conversationId: "c1",
-      senderId: "1",
-      content: "Yes! I'm testing the message layout now.",
-      sentAt: Math.floor(Date.now() / 1000) - 60,
-    },
-  ];
-
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = useState("");
   const currentUserId = String(currentUser.id);
