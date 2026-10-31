@@ -24,11 +24,11 @@ services:
 
   identity:
     build:
-      context: ${IDENTITY_CONTEXT:-../services/identity}
-      dockerfile: Dockerfile
+      context: ${IDENTITY_CONTEXT:-../services}
+      dockerfile: identity/Dockerfile
     image: halozalo/identity:local
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-identity_db}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-halozalo}
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       IDENTITY_PUBLIC_BASE_URL: https://${DOMAIN}
@@ -49,11 +49,11 @@ services:
 
   messaging:
     build:
-      context: ${MESSAGING_CONTEXT:-../services/messaging}
-      dockerfile: Dockerfile
+      context: ${MESSAGING_CONTEXT:-../services}
+      dockerfile: messaging/Dockerfile
     image: halozalo/messaging:local
     environment:
-      POSTGRES_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-messaging_db}
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-halozalo}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       # Keep false in public deployments. Do not trust a caller-supplied X-User-Id header.
