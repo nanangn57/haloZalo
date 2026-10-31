@@ -1,25 +1,110 @@
+name: halozalo
+
 services:
   postgres:
     image: postgres:16
-    container_name: halozalo-postgres
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_USER: halozalo
-      POSTGRES_PASSWORD: halozalo
-      POSTGRES_DB: halozalo
+      POSTGRES_DB: ${DB_NAME:-halozalo}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in infra/.env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in infra/.env}
       TZ: UTC
     volumes:
-      - halozalo-postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
       - ./postgres/01-schemas.sql:/docker-entrypoint-initdb.d/01-schemas.sql:ro
       - ../services/identity/resources/schema.sql:/docker-entrypoint-initdb.d/02-identity.sql:ro
       - ./postgres/03-dummy.sql:/docker-entrypoint-initdb.d/03-dummy.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U halozalo -d halozalo"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 20s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+    networks: [backend]
+
+  identity:
+    build:
+      context: ${IDENTITY_CONTEXT:-../services/identity}
+      dockerfile: Dockerfile
+    image: halozalo/identity:local
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-identity_db}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      IDENTITY_PUBLIC_BASE_URL: https://${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      # The current Identity app returns 401 from /me without a session; this confirms the HTTP server is responding.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /me HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.[01] 401' <&3"]
+      interval: 10s
+      timeout: 4s
+      start_period: 40s
+      retries: 6
+    restart: unless-stopped
+    networks: [backend]
+
+  messaging:
+    build:
+      context: ${MESSAGING_CONTEXT:-../services/messaging}
+      dockerfile: Dockerfile
+    image: halozalo/messaging:local
+    environment:
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-messaging_db}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      # Keep false in public deployments. Do not trust a caller-supplied X-User-Id header.
+      MESSAGING_USER_HEADER_ENABLED: ${MESSAGING_USER_HEADER_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8082"
+    healthcheck:
+      # TCP readiness check; the PostgreSQL healthcheck is handled separately above.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082"]
+      interval: 10s
+      timeout: 4s
+      start_period: 40s
+      retries: 6
+    restart: unless-stopped
+    networks: [backend]
+
+  nginx:
+    build:
+      context: ..
+      dockerfile: infra/nginx/Dockerfile
+    image: halozalo/edge:local
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/current:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      identity:
+        condition: service_healthy
+      messaging:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [backend]
+
+  # Run on demand for first certificate issuance or renewal; it is not another web server.
+  certbot:
+    image: certbot/certbot:latest
+    profiles: [tools]
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
 
 volumes:
-  halozalo-postgres:
+  postgres-data:
