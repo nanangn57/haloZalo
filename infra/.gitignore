@@ -1,0 +1,6 @@
+.env
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep
+nginx/current/*.conf
