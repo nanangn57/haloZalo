@@ -20,4 +20,4 @@ services/analytics/
   test/
 ```
 
-Identity phụ thuộc jar này và quét package `analytics` trong cùng process. `analytics-schema.sql` nằm trên classpath, identity tạo schema lúc khởi động.
+Identity phụ thuộc jar này và quét package `analytics` trong cùng process để có `GET /stats`. `ActivityRecorder` không phải `@Component`: auto-configuration đăng ký bean đó sau khi `DataSource` đã có. Gắn `@ConditionalOnBean(DataSource.class)` lên `@Component` thì lúc quét component bean chưa tồn tại, identity không khởi động được. `analytics-schema.sql` nằm trên classpath, identity tạo schema lúc khởi động.

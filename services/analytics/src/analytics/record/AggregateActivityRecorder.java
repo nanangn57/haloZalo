@@ -2,13 +2,6 @@ package analytics.record;
 
 import analytics.store.ActivityRepository;
 
-import javax.sql.DataSource;
-
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Component;
-
-@Component
-@ConditionalOnBean(DataSource.class)
 public final class AggregateActivityRecorder implements ActivityRecorder {
     private final ActivityRepository activities;
 
