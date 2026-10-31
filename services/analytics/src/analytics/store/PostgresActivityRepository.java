@@ -10,11 +10,6 @@ import java.time.ZoneOffset;
 
 import javax.sql.DataSource;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Component;
-
-@Component
-@ConditionalOnBean(DataSource.class)
 public final class PostgresActivityRepository implements ActivityRepository {
     static final String INSERT_EVENT =
         "INSERT INTO analytics.recorded_events (event_id, type, occurred_at) VALUES (?, ?, ?) ON CONFLICT (event_id) DO NOTHING";
