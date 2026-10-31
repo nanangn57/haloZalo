@@ -2,8 +2,8 @@
 FROM node:22-alpine AS frontend-build
 WORKDIR /app
 
-COPY web/ ./web/
-COPY core/ ./core/
+COPY clients/web/ ./web/
+COPY clients/core/ ./core/
 
 WORKDIR /app/web/ui
 
