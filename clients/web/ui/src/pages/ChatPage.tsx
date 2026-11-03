@@ -7,6 +7,9 @@ import ChatHeader from '../components/chat/ChatHeader'
 import ChatMessages from '../components/chat/ChatMessages'
 import MesToolbar from '../components/chat/MesToolBar'
 import UserInfoPanel from '../components/user/UserPanel'
+import EmojiPicker, {
+  type EmojiClickData
+} from 'emoji-picker-react'
 
 const initialMessages: Message[] = [
   {
@@ -76,6 +79,7 @@ function ChatPage() {
   }
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [newMessage, setNewMessage] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const currentUserId = String(currentUser.id);
   const [showUserInfo, setShowUserInfo] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User>(users[0])
@@ -129,42 +133,68 @@ function ChatPage() {
             />
         </div>
 
-        <form 
-        className="border-top flex-shrink-0"
-        onSubmit={(event) => {
-          event.preventDefault();
+        <form
+          className="border-top flex-shrink-0 position-relative"
+          onSubmit={(event) => {
+            event.preventDefault();
 
-          const content = newMessage.trim();
-          if (!content) return;
+            const content = newMessage.trim();
+            if (!content) return;
 
-          const newMessageItem: Message = {
-            id: crypto.randomUUID(),
-            conversationId: "c1",
-            senderId: currentUserId,
-            content,
-            sentAt: Math.floor(Date.now() / 1000),
-          };
+            const newMessageItem: Message = {
+              id: crypto.randomUUID(),
+              conversationId: "c1",
+              senderId: currentUserId,
+              content,
+              sentAt: Math.floor(Date.now() / 1000),
+            };
 
-          setMessages((previous) => [...previous, newMessageItem]);
-          setNewMessage("");
-        }}
+            setMessages((previous) => [...previous, newMessageItem]);
+            setNewMessage("");
+            setShowEmojiPicker(false);
+          }}
         >
-          <MesToolbar />
+          <MesToolbar
+            onEmojiClick={() => {
+              setShowEmojiPicker((previous) => !previous);
+            }}
+          />
+
+          {showEmojiPicker && (
+            <div
+              className="position-absolute"
+              style={{
+                bottom: "100%",
+                left: "8px",
+                zIndex: 1050,
+              }}
+            >
+              <EmojiPicker
+                onEmojiClick={(emojiData: EmojiClickData) => {
+                  setNewMessage((previous) => previous + emojiData.emoji);
+                }}
+              />
+            </div>
+          )}
 
           <div className="d-flex align-items-center gap-2 p-2">
             <input
-            type="text"
-            className="form-control"
-            placeholder="Type a message..."
-            value={newMessage}
-            onChange={(event) => setNewMessage(event.target.value)}
+              type="text"
+              className="form-control"
+              placeholder="Type a message..."
+              value={newMessage}
+              onChange={(event) => setNewMessage(event.target.value)}
             />
 
-            <button className="btn btn-primary flex-shrink-0" type="submit">
+            <button
+              className="btn btn-primary flex-shrink-0"
+              type="submit"
+            >
               <i className="bi bi-send fs-4"></i>
             </button>
           </div>
         </form>
+        
       </div>
       
       {showUserInfo && (
