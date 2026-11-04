@@ -27,6 +27,9 @@ messaging:
   # Accept X-User-Id while messaging runs on its own. Must be false in the app, where the session filter sets the
   # user; otherwise any client could claim to be any user. See http.CurrentUser.
   user-header-enabled: ${MESSAGING_USER_HEADER_ENABLED:true}
+  cors:
+    # Browser origins allowed to call the REST API. Comma-separated; patterns like http://localhost:* work.
+    allowed-origins: ${MESSAGING_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   realtime:
     allowed-origins: "*"
     ping-interval: 25s
