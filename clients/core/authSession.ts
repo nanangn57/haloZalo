@@ -1,5 +1,5 @@
 
-import type { LoginResponse } from './types/auth.ts'
+import type { LoginResponse } from './types/auth'
 
 const AUTH_KEY = 'auth'
 
