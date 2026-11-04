@@ -2,16 +2,14 @@ server:
   port: 8080
 
 identity:
-  public-base-url: http://localhost:8080
+  public-base-url: ${IDENTITY_PUBLIC_BASE_URL:http://localhost:8080}
   mail:
     # log ghi link ra logger. smtp gửi qua spring.mail. Bí mật nằm ở .env.local, không ghi ở đây.
     mode: ${IDENTITY_MAIL_MODE:log}
     from: ${IDENTITY_MAIL_FROM:noreply@halozalo.local}
   cors:
     # Web (Vite) gọi từ origin khác cổng 8080. Thêm pattern nếu mở web bằng IP máy, ví dụ http://192.168.1.10:*.
-    allowed-origin-patterns:
-      - http://localhost:*
-      - http://127.0.0.1:*
+    allowed-origin-patterns: ${IDENTITY_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
 
 spring:
   config:
@@ -21,7 +19,7 @@ spring:
     host: ${SPRING_MAIL_HOST:localhost}
     port: ${SPRING_MAIL_PORT:1025}
   datasource:
-    url: jdbc:postgresql://localhost:5432/halozalo
+    url: jdbc:postgresql://postgres:5432/halozalo
     username: halozalo
     password: halozalo
     hikari:

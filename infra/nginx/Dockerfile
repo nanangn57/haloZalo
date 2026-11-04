@@ -7,6 +7,9 @@ COPY clients/core/ ./core/
 
 WORKDIR /app/web/ui
 
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 RUN npm ci
 RUN npm run lint
 RUN npm run build

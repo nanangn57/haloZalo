@@ -27,11 +27,14 @@ services:
       context: ${IDENTITY_CONTEXT:-../services}
       dockerfile: identity/Dockerfile
     image: halozalo/identity:local
+    env_file:
+      - ../services/identity/.env
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-halozalo}
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       IDENTITY_PUBLIC_BASE_URL: https://${DOMAIN}
+      IDENTITY_CORS_ALLOWED_ORIGIN_PATTERNS: https://${DOMAIN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +80,8 @@ services:
     build:
       context: ..
       dockerfile: infra/nginx/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?VITE_API_BASE_URL is required}
     image: halozalo/edge:local
     ports:
       - "80:80"
