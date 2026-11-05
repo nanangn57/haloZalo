@@ -1,12 +1,15 @@
 package identity.service;
 
 import identity.event.EventPublisher;
+import identity.account.Account;
 import identity.group.AddMemberRequest;
 import identity.group.CreateGroupRequest;
 import identity.group.Group;
 import identity.group.GroupAction;
 import identity.group.GroupListResponse;
+import identity.group.GroupMemberResponse;
 import identity.group.GroupResponse;
+import identity.group.MemberListResponse;
 import identity.group.Membership;
 import identity.group.MembershipResponse;
 import identity.group.Role;
@@ -19,6 +22,7 @@ import identity.storage.MembershipRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -79,6 +83,27 @@ public final class GroupService {
             }
         }
         return new GroupListResponse(List.copyOf(responses));
+    }
+
+    public MemberListResponse listMembers(String callerId, String groupId) {
+        String group = canonical(groupId);
+        String caller = canonical(callerId);
+        if (!validUuid(group)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group id");
+        }
+        requireGroup(group);
+        if (memberships.find(group, caller) == null) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
+        }
+        List<Membership> rows = new ArrayList<>(memberships.listByGroup(group));
+        rows.sort(Comparator.comparing(Membership::getJoinedAt).thenComparing(Membership::getUserId));
+        List<GroupMemberResponse> responses = new ArrayList<>();
+        for (Membership membership : rows) {
+            Account account = accounts.findById(membership.getUserId());
+            String username = account == null ? null : account.getUsername();
+            responses.add(new GroupMemberResponse(membership.getUserId(), username, membership.getRole()));
+        }
+        return new MemberListResponse(List.copyOf(responses));
     }
 
     public MembershipResponse addMember(String callerId, String groupId, AddMemberRequest request) {

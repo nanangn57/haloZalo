@@ -30,7 +30,7 @@ Ba schema nằm trên cùng database PostgreSQL `halozalo`. Không có foreign k
 Mỗi lần đăng nhập, Identity thêm một dòng (`sessionId`, `userId`, `expiresAt`) và trả `sessionId` trong `accessToken`. Dòng cũ giữ đến khi hết hạn, để web và mobile cùng đăng nhập.
 
 Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, thì filter trong cùng process gọi `AuthService`. Identity trả `userId` khi còn dòng và còn hạn. Thiếu session, không có dòng, hoặc hết hạn thì app trả 401 và dừng. Hợp lệ thì gắn `userId` rồi vào handler. Không có API HTTP nội bộ để hỏi session.
-- **Thành viên:** Identity giữ nhóm và membership trong schema `identity`. Người tạo nhóm là owner. Owner thêm và xoá thành viên; thành viên tự rời. Owner không tự rời và không bị xoá. Messaging cần biết ai thuộc nhóm thì gọi `MembershipLookup` trong cùng process. Messaging không đọc schema `identity` và không giữ bản sao thành viên.
+- **Thành viên:** Identity giữ nhóm và membership trong schema `identity`. Người tạo nhóm là owner. Owner thêm và xoá thành viên; thành viên tự rời. Owner không tự rời và không bị xoá. Thành viên đang trong nhóm xem danh sách qua `GET /groups/{groupId}/members` (`userId`, `username`, `role`). Người ngoài nhóm nhận 403. UI dùng `userId` đó cho `DELETE /groups/{groupId}/members/{userId}`. Messaging cần biết ai thuộc nhóm thì gọi `MembershipLookup` trong cùng process. Messaging không đọc schema `identity` và không giữ bản sao thành viên.
 - **Release:** AWS. Mỗi tuần một URL public. Deploy bằng một lệnh từ repo: một process và một PostgreSQL. P4 giữ lệnh đó.
 
 ## Bản này cố ý chưa có

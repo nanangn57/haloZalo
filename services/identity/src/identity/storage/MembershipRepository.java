@@ -12,4 +12,6 @@ public interface MembershipRepository {
     Membership find(String groupId, String userId);
 
     List<Membership> listByUser(String userId);
+
+    List<Membership> listByGroup(String groupId);
 }

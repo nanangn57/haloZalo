@@ -4,7 +4,9 @@ import identity.account.Account;
 import identity.group.AddMemberRequest;
 import identity.group.CreateGroupRequest;
 import identity.group.Group;
+import identity.group.GroupMemberResponse;
 import identity.group.GroupResponse;
+import identity.group.MemberListResponse;
 import identity.group.Membership;
 import identity.group.MembershipResponse;
 import identity.event.EventPublisher;
@@ -19,7 +21,9 @@ import identity.storage.MembershipRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.transaction.PlatformTransactionManager;
@@ -207,6 +211,57 @@ class GroupServiceTest {
         assertEquals(Role.MEMBER, service.list(memberId).getGroups().get(0).getRole());
     }
 
+    @Test
+    void memberSeesOwnerAndSelf() {
+        String groupId = service.create(ownerId, new CreateGroupRequest("nhom")).getGroupId();
+        service.addMember(ownerId, groupId, new AddMemberRequest(memberId));
+
+        MemberListResponse listed = service.listMembers(memberId, groupId);
+        Map<String, GroupMemberResponse> byUser = new HashMap<>();
+        for (GroupMemberResponse member : listed.getMembers()) {
+            byUser.put(member.getUserId(), member);
+        }
+
+        assertEquals(2, byUser.size());
+        assertEquals("owner", byUser.get(ownerId).getUsername());
+        assertEquals(Role.OWNER, byUser.get(ownerId).getRole());
+        assertEquals("member", byUser.get(memberId).getUsername());
+        assertEquals(Role.MEMBER, byUser.get(memberId).getRole());
+    }
+
+    @Test
+    void outsiderCannotListMembers() {
+        String groupId = service.create(ownerId, new CreateGroupRequest("nhom")).getGroupId();
+        String stranger = saveAccount("stranger");
+
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.listMembers(stranger, groupId)
+        );
+
+        assertEquals(GroupService.Rejected.Reason.FORBIDDEN, rejected.getReason());
+    }
+
+    @Test
+    void listMembersMissingGroup() {
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.listMembers(ownerId, UUID.randomUUID().toString())
+        );
+
+        assertEquals(GroupService.Rejected.Reason.NOT_FOUND, rejected.getReason());
+    }
+
+    @Test
+    void listMembersRejectsBadGroupId() {
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.listMembers(ownerId, "not-a-uuid")
+        );
+
+        assertEquals(GroupService.Rejected.Reason.VALIDATION, rejected.getReason());
+    }
+
     private String saveAccount(String name) {
         String userId = UUID.randomUUID().toString();
         accounts.save(new Account(userId, name, name + "@example.com", "hash", Instant.now()));
@@ -272,6 +327,11 @@ class GroupServiceTest {
         public List<Membership> listByUser(String userId) {
             return delegate.listByUser(userId);
         }
+
+        @Override
+        public List<Membership> listByGroup(String groupId) {
+            return delegate.listByGroup(groupId);
+        }
     }
 
     private static final class MemoryMemberships implements MembershipRepository {
@@ -298,6 +358,11 @@ class GroupServiceTest {
         @Override
         public List<Membership> listByUser(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
+        }
+
+        @Override
+        public List<Membership> listByGroup(String groupId) {
+            return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
         }
     }
 

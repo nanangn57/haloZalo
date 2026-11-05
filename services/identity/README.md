@@ -41,7 +41,7 @@ services/identity/
 
 `SessionFilter` bỏ qua đăng ký, xác minh email, và đăng nhập. Path còn lại gọi `AuthService.currentUserId` và gắn `userId` vào request. WebSocket `/ws` lấy session từ query `access_token`, không lấy từ header. Request vào một nhóm hoặc một hội thoại đã mở bị 403 khi user không thuộc nhóm hoặc hội thoại đó. `POST /conversations/direct` và danh sách không cần membership sẵn. Kiểm tra session cho module khác là lời gọi `currentUserId` trong process, không có endpoint HTTP nội bộ.
 
-`POST /groups` body `{ name }` trả 201 với `groupId`, `name`, `ownerId`, `role`. Người tạo là owner. `GET /groups` trả các nhóm của user hiện tại. `POST /groups/{groupId}/members` body `{ userId }` trả 201, role `MEMBER`. `DELETE /groups/{groupId}/members/{userId}` trả 204: owner xoá người khác, thành viên tự rời. Owner không tự rời.
+`POST /groups` body `{ name }` trả 201 với `groupId`, `name`, `ownerId`, `role`. Người tạo là owner. `GET /groups` trả các nhóm của user hiện tại. `GET /groups/{groupId}/members` trả `{ members: [{ userId, username, role }] }` cho thành viên của nhóm đó; người ngoài nhóm thì 403. `POST /groups/{groupId}/members` body `{ userId }` trả 201, role `MEMBER`. `DELETE /groups/{groupId}/members/{userId}` trả 204: owner xoá người khác, thành viên tự rời. Owner không tự rời.
 
 Lỗi: `VALIDATION_ERROR` 400, `CONFLICT` 409, `UNAUTHENTICATED` 401.
 

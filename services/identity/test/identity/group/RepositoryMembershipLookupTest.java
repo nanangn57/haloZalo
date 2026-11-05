@@ -55,5 +55,10 @@ class RepositoryMembershipLookupTest {
         public List<Membership> listByUser(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
         }
+
+        @Override
+        public List<Membership> listByGroup(String groupId) {
+            return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
+        }
     }
 }

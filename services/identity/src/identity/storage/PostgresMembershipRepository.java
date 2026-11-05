@@ -89,6 +89,24 @@ public final class PostgresMembershipRepository implements MembershipRepository 
             throw new IllegalStateException("Could not list memberships", ex);
         }
     }
+
+    @Override
+    public List<Membership> listByGroup(String groupId) {
+        String sql = "SELECT group_id, user_id, joined_at, role FROM identity.memberships WHERE group_id = ? ORDER BY joined_at, user_id";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, groupId);
+            try (ResultSet rows = statement.executeQuery()) {
+                List<Membership> memberships = new ArrayList<>();
+                while (rows.next()) {
+                    memberships.add(read(rows));
+                }
+                return memberships;
+            }
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not list group members", ex);
+        }
+    }
     private static Membership read(ResultSet rows) throws SQLException {
         return new Membership(
             rows.getString("group_id"),
