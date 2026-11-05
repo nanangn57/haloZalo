@@ -4,6 +4,7 @@ import identity.group.AddMemberRequest;
 import identity.group.CreateGroupRequest;
 import identity.group.GroupListResponse;
 import identity.group.GroupResponse;
+import identity.group.MemberListResponse;
 import identity.group.MembershipResponse;
 import identity.service.AuthService;
 import identity.service.GroupService;
@@ -36,6 +37,14 @@ public final class GroupController {
     @GetMapping("/groups")
     public GroupListResponse list(@RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId) {
         return groups.list(callerId(userId));
+    }
+
+    @GetMapping("/groups/{groupId}/members")
+    public MemberListResponse listMembers(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable String groupId
+    ) {
+        return groups.listMembers(callerId(userId), groupId);
     }
 
     @PostMapping("/groups/{groupId}/members")

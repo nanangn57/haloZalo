@@ -210,6 +210,32 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
   /groups/{groupId}/members:
+    get:
+      tags: [Groups]
+      operationId: listGroupMembers
+      summary: Danh sách thành viên của một nhóm
+      description: |
+        Chỉ thành viên của nhóm được xem. Mỗi dòng có userId, username và role
+        để UI hiện tên và gọi xoá thành viên. Người ngoài nhóm thì 403.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+      responses:
+        "200":
+          description: Owner và các thành viên, người vào trước đứng trước.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberList"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [Groups]
       operationId: addGroupMember
@@ -870,6 +896,29 @@ components:
         role:
           type: string
           enum: [MEMBER]
+    Member:
+      type: object
+      additionalProperties: false
+      required: [userId, username, role]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+          description: Tên hiện trên UI. Không trả email.
+        role:
+          type: string
+          enum: [OWNER, MEMBER]
+    MemberList:
+      type: object
+      additionalProperties: false
+      required: [members]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
     SendMessageRequest:
       oneOf:
         - $ref: "#/components/schemas/SendTextRequest"

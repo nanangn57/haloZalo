@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -111,6 +113,49 @@ class GroupControllerTest {
     }
 
     @Test
+    void listMembersGivesIdsForTheUi() throws Exception {
+        MvcResult created = mvc.perform(post("/groups")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"nhom\"}"))
+            .andReturn();
+        String groupId = JsonPath.read(created.getResponse().getContentAsString(), "$.groupId");
+        mvc.perform(post("/groups/" + groupId + "/members")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + memberId + "\"}"))
+            .andExpect(status().isCreated());
+
+        mvc.perform(get("/groups/" + groupId + "/members").requestAttr(SessionFilter.USER_ID, memberId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.members", hasSize(2)))
+            .andExpect(jsonPath("$.members[?(@.userId=='" + ownerId + "')].username", hasItem("owner")))
+            .andExpect(jsonPath("$.members[?(@.userId=='" + ownerId + "')].role", hasItem("OWNER")))
+            .andExpect(jsonPath("$.members[?(@.userId=='" + memberId + "')].username", hasItem("member")))
+            .andExpect(jsonPath("$.members[?(@.userId=='" + memberId + "')].role", hasItem("MEMBER")));
+
+        String stranger = saveAccount("stranger");
+        mvc.perform(get("/groups/" + groupId + "/members").requestAttr(SessionFilter.USER_ID, stranger))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void listMembersRejectsBadInput() throws Exception {
+        mvc.perform(get("/groups/" + UUID.randomUUID() + "/members").requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+
+        mvc.perform(get("/groups/not-a-uuid/members").requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+
+        mvc.perform(get("/groups/" + UUID.randomUUID() + "/members"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
     void missingGroupIsNotFound() throws Exception {
         mvc.perform(post("/groups/" + UUID.randomUUID() + "/members")
                 .requestAttr(SessionFilter.USER_ID, ownerId)
@@ -179,6 +224,11 @@ class GroupControllerTest {
         @Override
         public List<Membership> listByUser(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
+        }
+
+        @Override
+        public List<Membership> listByGroup(String groupId) {
+            return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
         }
     }
 
