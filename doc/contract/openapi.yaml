@@ -634,7 +634,7 @@ paths:
     get:
       tags: [Stats]
       operationId: activityStats
-      summary: Số lần đăng nhập, tạo nhóm và tin mới
+      summary: Số lần đăng nhập, tạo nhóm, tin mới và upload media
       description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
       security:
         - bearerAuth: []
@@ -1091,7 +1091,7 @@ components:
     ActivityStats:
       type: object
       additionalProperties: false
-      required: [logins, groupsCreated, messagesCreated]
+      required: [logins, groupsCreated, messagesCreated, mediaUploads]
       properties:
         logins:
           type: integer
@@ -1100,6 +1100,9 @@ components:
           type: integer
           minimum: 0
         messagesCreated:
+          type: integer
+          minimum: 0
+        mediaUploads:
           type: integer
           minimum: 0
     Message:

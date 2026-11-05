@@ -1,5 +1,7 @@
 package identity.access;
 
+import identity.group.MembershipLookup;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -13,7 +15,22 @@ class MembershipRequestAuthorizerTest {
     private final Set<String> groups = new HashSet<>();
     private final Set<String> chats = new HashSet<>();
     private final MembershipRequestAuthorizer authorizer = new MembershipRequestAuthorizer(
-        (groupId, userId) -> groups.contains(groupId + ":" + userId),
+        new MembershipLookup() {
+            @Override
+            public boolean isMember(String groupId, String userId) {
+                return groups.contains(groupId + ":" + userId);
+            }
+
+            @Override
+            public Set<String> memberIds(String groupId) {
+                return Set.of();
+            }
+
+            @Override
+            public Set<String> groupIdsOf(String userId) {
+                return Set.of();
+            }
+        },
         (userId, conversationId) -> chats.contains(conversationId + ":" + userId)
     );
 

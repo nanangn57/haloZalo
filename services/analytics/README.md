@@ -4,9 +4,9 @@ Ghi event, đọc bảng tổng hợp. Schema `analytics` trên cùng database P
 
 Người giữ: P1 Ngọc Anh. Chỉ nhận event trong process, không quét bảng schema `messaging`.
 
-Ba type được đếm: `identity.user.logged_in`, `identity.group.created`, `messaging.message.created`. Cùng `eventId` ghi lại thì tổng không tăng. Envelope khác ba type này bị bỏ qua. `GET /stats` đọc `analytics.totals`, trả `logins`, `groupsCreated`, `messagesCreated`.
+Bốn type được đếm: `identity.user.logged_in`, `identity.group.created`, `messaging.message.created`, `messaging.media.uploaded`. Cùng `eventId` ghi lại thì tổng không tăng. Envelope khác bốn type này bị bỏ qua. `GET /stats` đọc `analytics.totals`, trả `logins`, `groupsCreated`, `messagesCreated`, `mediaUploads`.
 
-Identity gọi `ActivityRecorder.record` sau khi transaction login hoặc tạo nhóm đã commit. Messaging gọi cùng recorder với envelope `messaging.message.created` sau khi transaction ghi tin đã commit. Stats không đọc bảng `messaging`.
+Identity gọi `ActivityRecorder.record` sau khi transaction login hoặc tạo nhóm đã commit. Messaging gọi cùng recorder sau khi transaction nguồn commit, với `messaging.message.created` và `messaging.media.uploaded`. Stats không đọc bảng `messaging`.
 
 ```
 services/analytics/
