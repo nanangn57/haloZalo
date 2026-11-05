@@ -23,15 +23,19 @@ class AggregateActivityRecorderTest {
 
         recorder.record(envelope("login-1", ActivityTypes.LOGGED_IN));
         recorder.record(envelope("group-1", ActivityTypes.GROUP_CREATED));
+        String upload = envelope("upload-1", ActivityTypes.MEDIA_UPLOADED);
         recorder.record(message);
         recorder.record(message);
         recorder.record("not-json");
-        recorder.record(envelope("other-1", "messaging.media.uploaded"));
+        recorder.record(upload);
+        recorder.record(upload);
+        recorder.record(envelope("other-1", "messaging.unknown"));
 
         ActivityStats stats = new StatsService(stored).current();
         assertEquals(1, stats.getLogins());
         assertEquals(1, stats.getGroupsCreated());
         assertEquals(1, stats.getMessagesCreated());
+        assertEquals(1, stats.getMediaUploads());
     }
 
     private static String envelope(String eventId, String type) {

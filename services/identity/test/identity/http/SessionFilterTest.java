@@ -63,7 +63,22 @@ class SessionFilterTest {
             Clock.systemUTC(),
             "http://localhost:8080"
         );
-        MembershipLookup memberships = (groupId, userId) -> groups.contains(groupId);
+        MembershipLookup memberships = new MembershipLookup() {
+            @Override
+            public boolean isMember(String groupId, String userId) {
+                return groups.contains(groupId);
+            }
+
+            @Override
+            public java.util.Set<String> memberIds(String groupId) {
+                return java.util.Set.of();
+            }
+
+            @Override
+            public java.util.Set<String> groupIdsOf(String userId) {
+                return java.util.Set.of();
+            }
+        };
         ConversationAccess conversations = (userId, conversationId) -> chats.contains(conversationId);
         mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth), new ProbeController())
             .addFilters(new SessionFilter(auth, new ObjectMapper(), new MembershipRequestAuthorizer(memberships, conversations)))

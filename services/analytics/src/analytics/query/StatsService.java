@@ -17,7 +17,8 @@ public final class StatsService {
         return new ActivityStats(
             activities.count(ActivityTypes.LOGGED_IN),
             activities.count(ActivityTypes.GROUP_CREATED),
-            activities.count(ActivityTypes.MESSAGE_CREATED)
+            activities.count(ActivityTypes.MESSAGE_CREATED),
+            activities.count(ActivityTypes.MEDIA_UPLOADED)
         );
     }
 }
