@@ -19,6 +19,10 @@ export function getAuth(): LoginResponse | null {
   }
 }
 
+export function getAccessToken(): string | null {
+  return getAuth()?.accessToken ?? null
+}
+
 export function clearAuth(): void {
   sessionStorage.removeItem(AUTH_KEY)
 }

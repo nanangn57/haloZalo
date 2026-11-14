@@ -7,6 +7,7 @@ import type {
   CreateGroupRequest,
   AddMemberRequest,
   Membership,
+  MemberListResponse,
 } from './types/group'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -21,7 +22,7 @@ async function getErrorMessage(
     ?? `Yêu cầu thất bại (${response.status})`
 }
 
-function getAccessToken(): string {
+function requireAccessToken(): string {
   const auth = getAuth()
 
   if (!auth?.accessToken) {
@@ -33,7 +34,7 @@ function getAccessToken(): string {
 
 // 1. Lấy danh sách nhóm của user hiện tại
 export async function getGroupsApi(): Promise<Group[]> {
-  const token = getAccessToken()
+  const token = requireAccessToken()
 
   const response = await fetch(`${API_BASE_URL}/groups`, {
     method: 'GET',
@@ -55,7 +56,7 @@ export async function getGroupsApi(): Promise<Group[]> {
 export async function createGroupApi(
   request: CreateGroupRequest,
 ): Promise<Group> {
-  const token = getAccessToken()
+  const token = requireAccessToken()
 
   const response = await fetch(`${API_BASE_URL}/groups`, {
     method: 'POST',
@@ -78,7 +79,7 @@ export async function addGroupMemberApi(
   groupId: string,
   request: AddMemberRequest,
 ): Promise<Membership> {
-  const token = getAccessToken()
+  const token = requireAccessToken()
 
   const response = await fetch(
     `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members`,
@@ -104,7 +105,7 @@ export async function removeGroupMemberApi(
   groupId: string,
   userId: string,
 ): Promise<void> {
-  const token = getAccessToken()
+  const token = requireAccessToken()
 
   const response = await fetch(
     `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
@@ -119,4 +120,26 @@ export async function removeGroupMemberApi(
   if (!response.ok) {
     throw new Error(await getErrorMessage(response))
   }
+}
+ // 5. Lấy danh sách thành viên nhóm
+ export async function getGroupMembersApi(
+  groupId: string
+): Promise<MemberListResponse> {
+  const token = await requireAccessToken()
+
+  const response = await fetch(
+    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  return response.json()
 }
