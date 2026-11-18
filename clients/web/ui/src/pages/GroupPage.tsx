@@ -83,15 +83,11 @@ function GroupPage() {
   const loadGroups = useCallback(async () => {
     if (!authUser?.userId) return
 
-    setLoading(true)
-    setLoadError('')
-
     try {
       const result = await getGroupsApi()
       setGroups(result)
 
       // Fetch member counts for all groups.
-      // This uses the existing GET /groups/{groupId}/members endpoint.
       await Promise.all(
         result.map((group) => loadMemberCount(group.groupId)),
       )
@@ -99,7 +95,7 @@ function GroupPage() {
       setLoadError(
         err instanceof Error
           ? err.message
-          : 'Không thể tải danh sách nhóm.',
+          : 'Cannot load group member list',
       )
     } finally {
       setLoading(false)
@@ -107,46 +103,128 @@ function GroupPage() {
   }, [authUser?.userId, loadMemberCount])
 
   useEffect(() => {
-    if (authUser?.userId) {
-      void loadGroups()
-    } else {
-      setLoading(false)
+    if (!authUser?.userId) return
+
+    let cancelled = false
+
+    async function fetchGroups() {
+      try {
+        const result = await getGroupsApi()
+
+        if (cancelled) return
+
+        setGroups(result)
+
+        await Promise.all(
+          result.map(async (group) => {
+            try {
+              const memberResult = await getGroupMembersApi(
+                group.groupId,
+              )
+
+              if (cancelled) return
+
+              setMemberCounts((previous) => ({
+                ...previous,
+                [group.groupId]: memberResult.members.length,
+              }))
+            } catch {
+              if (cancelled) return
+
+              setMemberCounts((previous) => ({
+                ...previous,
+                [group.groupId]: null,
+              }))
+            }
+          }),
+        )
+      } catch (err) {
+        if (cancelled) return
+
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : 'Cannot load group member list',
+        )
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
     }
-  }, [authUser?.userId, loadGroups])
+
+    void fetchGroups()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authUser?.userId])
 
   // Load members whenever selected group changes
   const loadGroupMembers = useCallback(async (groupId: string) => {
-    setLoadingMembers(true)
-    setMembersError('')
-
     try {
       const result = await getGroupMembersApi(groupId)
 
       setMembers(result.members)
+      setMembersError('')
+
       setMemberCounts((previous) => ({
         ...previous,
         [groupId]: result.members.length,
       }))
     } catch (err) {
       setMembers([])
+
       setMembersError(
         err instanceof Error
           ? err.message
-          : 'Không thể tải danh sách thành viên.',
+          : 'Cannot load group member list',
       )
     } finally {
       setLoadingMembers(false)
     }
   }, [])
 
+  const selectedGroupId = selectedGroup?.groupId
+
   useEffect(() => {
-    if (selectedGroup) {
-      void loadGroupMembers(selectedGroup.groupId)
-    } else {
-      setMembers([])
-      setMembersError('')
-    }
-  }, [selectedGroup?.groupId, loadGroupMembers])
+    if (!selectedGroupId) return
+
+    let cancelled = false
+
+    getGroupMembersApi(selectedGroupId)
+      .then((result) => {
+        if (cancelled) return
+
+        setMembers(result.members)
+        setMembersError('')
+
+        setMemberCounts((previous) => ({
+          ...previous,
+          [selectedGroupId]: result.members.length,
+        }))
+      })
+      .catch((err) => {
+        if (cancelled) return
+
+        setMembers([])
+
+        setMembersError(
+          err instanceof Error
+            ? err.message
+            : 'Cannot load group member list',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingMembers(false)
+        }
+      })
+
+  return () => {
+    cancelled = true
+  }
+}, [selectedGroupId])
 
   // Filter groups
   const filteredGroups = useMemo(() => {
@@ -166,7 +244,7 @@ function GroupPage() {
     const name = groupName.trim()
 
     if (!name) {
-      setActionError('Vui lòng nhập tên nhóm.')
+      setActionError('Please enter group name')
       return
     }
 
@@ -211,16 +289,23 @@ function GroupPage() {
   function handleSelectGroup(group: Group) {
     if (selectedGroup?.groupId === group.groupId) {
       setSelectedGroup(null)
+      setMembers([])
+      setLoadingMembers(false)
+      setMembersError('')
       return
     }
 
     setSelectedGroup(group)
 
+    // Prepare state before the member-loading Effect runs.
+    setLoadingMembers(true)
+    setMembersError('')
+    setMembers([])
+
     setSearchQuery('')
     setFoundUser(null)
     setMemberError('')
     setMemberSuccess('')
-    setMembers([])
   }
 
   // Navigate to ChatPage
@@ -251,12 +336,12 @@ function GroupPage() {
       const user = await findUserApi(searchQuery.trim())
 
       if (user.userId === authUser?.userId) {
-        setMemberError('Bạn không thể thêm chính mình vào nhóm.')
+        setMemberError('Cannot add yourself to group')
         return
       }
 
       if (members.some((member) => member.userId === user.userId)) {
-        setMemberError('Người dùng này đã là thành viên của nhóm.')
+        setMemberError('Already a group member')
         return
       }
 
@@ -265,7 +350,7 @@ function GroupPage() {
       setMemberError(
         err instanceof Error
           ? err.message
-          : 'Không tìm thấy người dùng.',
+          : 'User not found.',
       )
     } finally {
       setSearching(false)
@@ -287,18 +372,19 @@ function GroupPage() {
       )
 
       setMemberSuccess(
-        `Đã thêm ${foundUser.username} vào nhóm ${selectedGroup.name}.`,
+        `Add ${foundUser.username} into group ${selectedGroup.name}.`,
       )
 
       setFoundUser(null)
       setSearchQuery('')
 
+      setLoadingMembers(true)
       await loadGroupMembers(selectedGroup.groupId)
     } catch (err) {
       setMemberError(
         err instanceof Error
           ? err.message
-          : 'Không thể thêm thành viên.',
+          : 'Cannot add member.',
       )
     } finally {
       setAddingMember(false)
@@ -316,8 +402,8 @@ function GroupPage() {
 
     const confirmed = window.confirm(
       isLeavingSelf
-        ? `Bạn có chắc muốn rời nhóm "${selectedGroup.name}" không?`
-        : 'Bạn có chắc muốn xoá thành viên này khỏi nhóm không?',
+        ? `Are you sure to leave "${selectedGroup.name}"?`
+        : 'Are you sure you want to remove this user?',
     )
 
     if (!confirmed) return
@@ -330,32 +416,46 @@ function GroupPage() {
       await removeGroupMemberApi(selectedGroup.groupId, userId)
 
       if (isLeavingSelf) {
-        setSuccessMessage(`Bạn đã rời nhóm "${selectedGroup.name}".`)
+        setSuccessMessage(`You've left "${selectedGroup.name}".`)
+
         setSelectedGroup(null)
         setMembers([])
+        setLoadingMembers(false)
+        setMembersError('')
+
+        setLoading(true)
+        setLoadError('')
         await loadGroups()
       } else {
-        setMemberSuccess('Đã xoá thành viên khỏi nhóm.')
+        setMemberSuccess('User deleted from group.')
+
+        setLoadingMembers(true)
         await loadGroupMembers(selectedGroup.groupId)
       }
     } catch (err) {
       setMemberError(
         err instanceof Error
           ? err.message
-          : 'Không thể thực hiện thao tác.',
+          : 'Error',
       )
     } finally {
       setRemovingUserId(null)
     }
   }
 
+  function handleRefreshGroups() {
+    setLoading(true)
+    setLoadError('')
+    void loadGroups()
+  }
+
   // No authenticated session
   if (!authUser?.userId) {
     return (
       <div className="container vh-100 d-flex flex-column justify-content-center align-items-center">
-        <h4>Vui lòng đăng nhập</h4>
+        <h4>Please login</h4>
         <p className="text-secondary">
-          Bạn cần đăng nhập để sử dụng chức năng nhóm.
+          You need to login to use Group function
         </p>
       </div>
     )
@@ -390,7 +490,13 @@ function GroupPage() {
             <button
               type="button"
               className="btn btn-outline-secondary btn-sm"
-              onClick={() => setSelectedGroup(null)}
+              onClick={() => {
+                setSelectedGroup(null)
+                setMembers([])
+                setLoadingMembers(false)
+                setMembersError('')
+              }
+              }
             >
               Close
             </button>
@@ -412,9 +518,11 @@ function GroupPage() {
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-danger ms-2"
-                  onClick={() =>
+                  onClick={() => {
+                    setLoadingMembers(true)
+                    setMembersError('')
                     void loadGroupMembers(selectedGroup.groupId)
-                  }
+                  }}
                 >
                   Retry
                 </button>
@@ -652,7 +760,7 @@ function GroupPage() {
         <button
           type="button"
           className="btn btn-outline-secondary"
-          onClick={() => void loadGroups()}
+          onClick={handleRefreshGroups}
           disabled={loading}
           title="Refresh groups"
         >
@@ -677,7 +785,7 @@ function GroupPage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => void loadGroups()}
+            onClick={handleRefreshGroups}
           >
             Try again
           </button>

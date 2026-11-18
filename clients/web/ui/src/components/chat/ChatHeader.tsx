@@ -4,7 +4,7 @@ interface ChatHeaderProps {
   subtitle?: string
   avatar?: string
   type?: 'GROUP' | 'DIRECT'
-  showInfoButton?: boolean
+  // showInfoButton?: boolean
   onInfoClick?: () => void
 }
 
@@ -13,8 +13,8 @@ function ChatHeader({
   subtitle,
   avatar,
   type = 'DIRECT',
-  showInfoButton = true,
-  onInfoClick,
+  // showInfoButton = true,
+  // onInfoClick,
 }: ChatHeaderProps) {
   return (
     <div className="d-flex align-items-center w-100 gap-2">

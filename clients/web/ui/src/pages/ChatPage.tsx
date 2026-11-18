@@ -28,7 +28,7 @@ import {
   createGroupConversationApi,
 } from '@core/messageService'
 import { getGroupMembersApi } from '@core/groupService'
-import { socketClient } from '@core/socketClient'
+// import { socketClient } from '@core/socketClient'
 
 import EmojiPicker, {
   type EmojiClickData,
@@ -44,11 +44,11 @@ interface ChatNavigationState {
   title: string
 }
 
-type SocketStatus =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'error'
+// type SocketStatus =
+//   | 'disconnected'
+//   | 'connecting'
+//   | 'connected'
+//   | 'error'
 
 // ======================================================
 // CHAT PAGE
@@ -132,7 +132,7 @@ function ChatPage() {
     useState(false)
 
   // User information panel
-  const [showUserInfo, setShowUserInfo] = useState(false)
+  // const [showUserInfo, setShowUserInfo] = useState(false)
 
   // User search
   const [searchQuery, setSearchQuery] = useState('')
@@ -158,8 +158,8 @@ function ChatPage() {
     useState<Record<string, AuthUser>>({})
 
   // WebSocket
-  const [socketStatus, setSocketStatus] =
-    useState<SocketStatus>('disconnected')
+  // const [socketStatus, setSocketStatus] =
+  //   useState<SocketStatus>('disconnected')
 
   const [socketEvents, setSocketEvents] =
     useState<MessagingEvent[]>([])
@@ -299,44 +299,36 @@ function ChatPage() {
   // 6. INITIALIZE CONVERSATION AND LOAD MESSAGE HISTORY
   // --------------------------------------------------
 
+  
+  const conversationId = selectedConversation?.conversationId
+  const conversationType = selectedConversation?.type
+
   useEffect(() => {
-    if (!selectedConversation) {
-      setMessages([])
-      setIsLoadingMessages(false)
-      setMessageLoadError(null)
+    if (!conversationId || !conversationType) {
       return
     }
+    const currentConversationId: string = conversationId
+    const currentConversationType = conversationType
 
     let isMounted = true
-
-    const conversationId =
-      selectedConversation.conversationId
-
-    const conversationType =
-      selectedConversation.type
-
-    // Clear messages from the previous conversation.
-    setMessages([])
-    setIsLoadingMessages(true)
-    setMessageLoadError(null)
 
     async function initializeAndLoadMessages() {
       try {
         // STEP 1: Initialize GROUP conversation.
         // DIRECT conversations do not need this step.
-        if (conversationType === 'GROUP') {
-          await createGroupConversationApi(conversationId)
+        if (currentConversationType === 'GROUP') {
+          await createGroupConversationApi(currentConversationId)
         }
 
         if (!isMounted) return
 
-        // STEP 2: Load message history only after
-        // the conversation has been initialized.
-        const result = await getMessagesApi(conversationId)
+        // STEP 2: Load message history.
+        const result = await getMessagesApi(currentConversationId)
 
         if (!isMounted) return
 
         setMessages(result.messages)
+        setMessageLoadError(null)
       } catch (err) {
         console.error(
           'Cannot initialize conversation or load messages:',
@@ -364,97 +356,95 @@ function ChatPage() {
     return () => {
       isMounted = false
     }
-  }, [
-    selectedConversation?.conversationId,
-    selectedConversation?.type,
-  ])
+  }, [conversationId, conversationType])
+
 
 
   // --------------------------------------------------
   // 7. WEBSOCKET CONNECTION
   // --------------------------------------------------
 
-  useEffect(() => {
-    const unsubscribeEvent = socketClient.subscribe((event) => {
-      console.log('Received WebSocket event:', event)
+  // useEffect(() => {
+  //   const unsubscribeEvent = socketClient.subscribe((event) => {
+  //     console.log('Received WebSocket event:', event)
 
-      setSocketEvents((previous) => [
-        event,
-        ...previous,
-      ])
+  //     setSocketEvents((previous) => [
+  //       event,
+  //       ...previous,
+  //     ])
 
-      if (event.type !== 'messaging.message.created') {
-        return
-      }
+  //     if (event.type !== 'messaging.message.created') {
+  //       return
+  //     }
 
-      const payload = event.payload as {
-        messageId: string
-        conversationId: string
-        seq: number
-        senderId: string
-        type: 'TEXT' | 'EMOTION'
-        body: string
-        clientMsgId: string
-        createdAt: string
-      }
+  //     const payload = event.payload as {
+  //       messageId: string
+  //       conversationId: string
+  //       seq: number
+  //       senderId: string
+  //       type: 'TEXT' | 'EMOTION'
+  //       body: string
+  //       clientMsgId: string
+  //       createdAt: string
+  //     }
 
-      if (
-        !payload.messageId ||
-        !payload.conversationId ||
-        !payload.clientMsgId
-      ) {
-        return
-      }
+  //     if (
+  //       !payload.messageId ||
+  //       !payload.conversationId ||
+  //       !payload.clientMsgId
+  //     ) {
+  //       return
+  //     }
 
-      const createdAt = Date.parse(payload.createdAt)
+  //     const createdAt = Date.parse(payload.createdAt)
 
-      const incomingMessage: Message = {
-        id: payload.messageId,
-        messageId: payload.messageId,
-        conversationId: payload.conversationId,
-        senderId: payload.senderId,
-        type: payload.type,
-        content: payload.body,
-        seq: payload.seq,
-        clientMsgId: payload.clientMsgId,
-        sentAt: Number.isFinite(createdAt)
-          ? Math.floor(createdAt / 1000)
-          : Math.floor(Date.now() / 1000),
-        status: 'sent',
-      }
+  //     const incomingMessage: Message = {
+  //       id: payload.messageId,
+  //       messageId: payload.messageId,
+  //       conversationId: payload.conversationId,
+  //       senderId: payload.senderId,
+  //       type: payload.type,
+  //       content: payload.body,
+  //       seq: payload.seq,
+  //       clientMsgId: payload.clientMsgId,
+  //       sentAt: Number.isFinite(createdAt)
+  //         ? Math.floor(createdAt / 1000)
+  //         : Math.floor(Date.now() / 1000),
+  //       status: 'sent',
+  //     }
 
-      setMessages((previous) => {
-        const existingIndex = previous.findIndex(
-          (message) =>
-            message.messageId === incomingMessage.messageId ||
-            message.clientMsgId === incomingMessage.clientMsgId,
-        )
+  //     setMessages((previous) => {
+  //       const existingIndex = previous.findIndex(
+  //         (message) =>
+  //           message.messageId === incomingMessage.messageId ||
+  //           message.clientMsgId === incomingMessage.clientMsgId,
+  //       )
 
-        if (existingIndex >= 0) {
-          return previous.map((message, index) =>
-            index === existingIndex
-              ? incomingMessage
-              : message,
-          )
-        }
+  //       if (existingIndex >= 0) {
+  //         return previous.map((message, index) =>
+  //           index === existingIndex
+  //             ? incomingMessage
+  //             : message,
+  //         )
+  //       }
 
-        return [...previous, incomingMessage]
-      })
-    })
+  //       return [...previous, incomingMessage]
+  //     })
+  //   })
 
-    const unsubscribeStatus = socketClient.subscribeStatus(
-      (status) => {
-        setSocketStatus(status)
-      },
-    )
+  //   const unsubscribeStatus = socketClient.subscribeStatus(
+  //     (status) => {
+  //       setSocketStatus(status)
+  //     },
+  //   )
 
-    socketClient.connect()
+  //   socketClient.connect()
 
-    return () => {
-      unsubscribeEvent()
-      unsubscribeStatus()
-    }
-  }, [])
+  //   return () => {
+  //     unsubscribeEvent()
+  //     unsubscribeStatus()
+  //   }
+  // }, [])
 
   // --------------------------------------------------
   // 8. DERIVED DATA FOR COMPONENTS
@@ -554,7 +544,7 @@ function ChatPage() {
     conversation: Conversation,
   ) {
     setSelectedConversation(conversation)
-    setShowUserInfo(false)
+    // setShowUserInfo(false)
     setShowEmojiPicker(false)
     setNewMessage('')
   }
@@ -731,7 +721,7 @@ function ChatPage() {
       setSearchResult(null)
       setSearchUserError(null)
 
-      setShowUserInfo(false)
+      // setShowUserInfo(false)
       setShowEmojiPicker(false)
     } catch (err) {
       setCreateConversationError(
@@ -915,15 +905,15 @@ function ChatPage() {
             subtitle={chatSubtitle}
             type={selectedConversation?.type ?? 'DIRECT'}
             avatar={headerUser?.avatar}
-            onInfoClick={() => {
-              if (headerUser) {
-                setShowUserInfo((previous) => !previous)
-              }
-            }}
+            // onInfoClick={() => {
+            //   if (headerUser) {
+            //     setShowUserInfo((previous) => !previous)
+            //   }
+            // }}
           />
 
           {/* WebSocket connection status */}
-          <div className="d-flex align-items-center gap-2 px-3 py-2 border-bottom bg-light">
+          {/* <div className="d-flex align-items-center gap-2 px-3 py-2 border-bottom bg-light">
             <span
               className={`rounded-circle ${
                 socketStatus === 'connected'
@@ -942,7 +932,7 @@ function ChatPage() {
             <small className="text-muted">
               WebSocket: {socketStatus}
             </small>
-          </div>
+          </div> */}
         </div>
 
         {/* Message list */}

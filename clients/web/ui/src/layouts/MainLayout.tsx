@@ -1,11 +1,15 @@
 
-import { Outlet } from 'react-router-dom'
+import type { ReactNode } from 'react'
 
 import NavBar from '../components/nav/NavBar'
 import type { User } from '../types/user'
 import { getAuth } from '@core/authSession'
 
-function MainLayout() {
+interface MainLayoutProps {
+  children: ReactNode
+}
+
+function MainLayout({ children }: MainLayoutProps) {
   const authUser = getAuth()?.user
 
   const currentUser: User = {
@@ -22,7 +26,7 @@ function MainLayout() {
       <NavBar currentUser={currentUser} />
 
       <div className="flex-grow-1 overflow-hidden" style={{ minWidth: 0 }}>
-        <Outlet />
+        {children}
       </div>
     </div>
   )
