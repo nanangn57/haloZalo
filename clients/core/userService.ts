@@ -2,7 +2,7 @@
 import type { AuthUser, ApiErrorResponse } from './types/auth'
 import { getAuth } from './authSession'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
 
 export async function findUserApi(
   query: string,

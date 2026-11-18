@@ -19,6 +19,34 @@ export function getAuth(): LoginResponse | null {
   }
 }
 
+export function getAccessToken(): string | null {
+  return getAuth()?.accessToken ?? null
+}
+
+export function getUserId(): string | null {
+  return getAuth()?.user?.userId ?? null
+}
+
 export function clearAuth(): void {
   sessionStorage.removeItem(AUTH_KEY)
+}
+
+export function requireAccessToken(): string {
+  const token = getAccessToken()
+
+  if (!token) {
+    throw new Error('Bạn cần đăng nhập để thực hiện thao tác này.')
+  }
+
+  return token
+}
+
+export function requireUserId(): string {
+  const userId = getUserId()
+
+  if (!userId) {
+    throw new Error('Không tìm thấy userId. Vui lòng đăng nhập lại.')
+  }
+
+  return userId
 }
