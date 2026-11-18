@@ -10,7 +10,7 @@ export function getApiHeaders(
 ): HeadersInit {
   const headers: Record<string, string> = {}
 
-  switch (connectionConfig.httpAuthMode) {
+  switch (connectionConfig.messageHttpAuthMode) {
     case 'TOKEN':
       headers.Authorization = `Bearer ${requireAccessToken()}`
       break
@@ -18,6 +18,21 @@ export function getApiHeaders(
     case 'USER_ID':
       headers['X-User-Id'] = requireUserId()
       break
+  }
+
+  if (includeJsonContentType) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  return headers
+}
+
+// Headers dành riêng cho Identity Service.
+export function getIdentityApiHeaders(
+  includeJsonContentType = false,
+): HeadersInit {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${requireAccessToken()}`,
   }
 
   if (includeJsonContentType) {

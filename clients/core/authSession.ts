@@ -50,3 +50,7 @@ export function requireUserId(): string {
 
   return userId
 }
+
+export function logout(): void {
+  sessionStorage.removeItem('auth')
+}

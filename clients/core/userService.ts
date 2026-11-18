@@ -1,6 +1,7 @@
 
 import type { AuthUser, ApiErrorResponse } from './types/auth'
 import { getAuth } from './authSession'
+import { getIdentityApiHeaders } from './apiClient';
 
 const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
 
@@ -41,4 +42,17 @@ export async function findUserApi(
   }
 
   return data as AuthUser
+}
+
+export async function getMyProfileApi(): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE_URL}/me`, {
+    method: 'GET',
+    headers: getIdentityApiHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Cannot load profile: ${response.status}`)
+  }
+
+  return response.json()
 }
