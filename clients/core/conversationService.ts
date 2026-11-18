@@ -1,4 +1,5 @@
-import { getAuth } from './authSession'
+
+import { getApiHeaders } from './apiClient'
 import type { ApiErrorResponse } from './types/auth'
 import type {
   Conversation,
@@ -6,20 +7,8 @@ import type {
   CreateDirectConversationRequest,
 } from './types/conversation'
 
-const API_BASE_URL = 'http://localhost:8082'
+const API_MESSAGE_BASE_URL = 'http://localhost:8082'
 
-// Lấy access token từ session
-function getAccessToken(): string {
-  const auth = getAuth()
-
-  if (!auth?.accessToken) {
-    throw new Error('Bạn cần đăng nhập để thực hiện thao tác này.')
-  }
-
-  return auth.accessToken
-}
-
-// Xử lý lỗi từ API
 async function getErrorMessage(
   response: Response,
 ): Promise<string> {
@@ -37,8 +26,6 @@ export async function getConversationsApi(
   cursor?: string,
   limit = 50,
 ): Promise<ConversationListResponse> {
-  const token = getAccessToken()
-
   const params = new URLSearchParams({
     limit: String(limit),
   })
@@ -48,12 +35,10 @@ export async function getConversationsApi(
   }
 
   const response = await fetch(
-    `${API_BASE_URL}/conversations?${params.toString()}`,
+    `${API_MESSAGE_BASE_URL}/conversations?${params.toString()}`,
     {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: getApiHeaders(),
     },
   )
 
@@ -68,16 +53,11 @@ export async function getConversationsApi(
 export async function createDirectConversationApi(
   request: CreateDirectConversationRequest,
 ): Promise<Conversation> {
-  const token = getAccessToken()
-
   const response = await fetch(
-    `${API_BASE_URL}/conversations/direct`,
+    `${API_MESSAGE_BASE_URL}/conversations/direct`,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers: getApiHeaders(true),
       body: JSON.stringify(request),
     },
   )

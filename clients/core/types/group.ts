@@ -24,3 +24,13 @@ export interface Membership {
   userId: string
   role: 'MEMBER'
 }
+
+export interface Member {
+  userId: string
+  username: string
+  role: GroupRole
+}
+
+export interface MemberListResponse {
+  members: Member[]
+}
