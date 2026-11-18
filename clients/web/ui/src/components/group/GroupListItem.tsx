@@ -1,4 +1,3 @@
-```tsx
 import type { Group } from '@core/types/group'
 
 interface GroupListItemProps {
@@ -66,4 +65,3 @@ function GroupListItem({
 }
 
 export default GroupListItem
-```

@@ -173,3 +173,32 @@ export async function getMessagesApi(
     hasMore: data.hasMore,
   }
 }
+
+export async function createGroupConversationApi(
+  groupId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_MESSAGE_BASE_URL}/internal/conversations`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        conversationId: groupId,
+        type: 'GROUP',
+      }),
+    }
+  )
+
+  // Conversation đã tồn tại thì vẫn có thể tiếp tục mở chat.
+  if (response.status === 409) {
+    return
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Cannot initialize group conversation: ${response.status}`
+    )
+  }
+}
