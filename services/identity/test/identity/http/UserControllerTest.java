@@ -1,6 +1,7 @@
 package identity.http;
 
 import identity.account.Account;
+import identity.account.Profile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,9 +9,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import identity.service.AuthService;
+import identity.service.ProfileService;
 import identity.service.UserSearchService;
 import identity.session.Session;
 import identity.storage.AccountRepository;
+import identity.storage.ProfileRepository;
 import identity.storage.SessionRepository;
 import identity.storage.VerificationRepository;
 import identity.verification.EmailVerification;
@@ -47,7 +50,7 @@ class UserControllerTest {
             Clock.systemUTC(),
             "http://localhost:8080"
         );
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth), new UserController(new UserSearchService(accounts)))
+        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth, new ProfileService(accounts, emptyProfiles())), new UserController(new UserSearchService(accounts)))
             .addFilters(new SessionFilter(auth, new ObjectMapper(), (userId, path) -> { }))
             .setControllerAdvice(new AuthExceptionHandler(), new UserExceptionHandler())
             .build();
@@ -109,6 +112,19 @@ class UserControllerTest {
         public void send(String to, String subject, String text) {
             this.body = text;
         }
+    }
+
+    private static ProfileRepository emptyProfiles() {
+        return new ProfileRepository() {
+            @Override
+            public Profile find(String userId) {
+                return null;
+            }
+
+            @Override
+            public void save(Profile profile) {
+            }
+        };
     }
 
     private static final class MemoryAccounts implements AccountRepository {

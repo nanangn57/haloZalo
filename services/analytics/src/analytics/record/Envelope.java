@@ -12,11 +12,13 @@ final class Envelope {
     private final String eventId;
     private final String type;
     private final Instant occurredAt;
+    private final JsonNode payload;
 
-    private Envelope(String eventId, String type, Instant occurredAt) {
+    private Envelope(String eventId, String type, Instant occurredAt, JsonNode payload) {
         this.eventId = eventId;
         this.type = type;
         this.occurredAt = occurredAt;
+        this.payload = payload;
     }
 
     static Envelope parse(String json) {
@@ -31,7 +33,7 @@ final class Envelope {
             if (eventId == null || type == null || occurredAt == null) {
                 return null;
             }
-            return new Envelope(eventId, type, Instant.parse(occurredAt));
+            return new Envelope(eventId, type, Instant.parse(occurredAt), node.get("payload"));
         } catch (JsonProcessingException | RuntimeException ex) {
             return null;
         }
@@ -47,6 +49,13 @@ final class Envelope {
 
     Instant occurredAt() {
         return occurredAt;
+    }
+
+    String field(String name) {
+        if (payload == null || !payload.isObject()) {
+            return null;
+        }
+        return text(payload, name);
     }
 
     private static String text(JsonNode node, String field) {

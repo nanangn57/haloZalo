@@ -46,5 +46,24 @@ CREATE TABLE IF NOT EXISTS identity.memberships (
     user_id VARCHAR(36) NOT NULL,
     joined_at TIMESTAMPTZ(6) NOT NULL,
     role VARCHAR(16) NOT NULL,
-    PRIMARY KEY (group_id, user_id)
+    CONSTRAINT memberships_primary PRIMARY KEY (group_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS identity.profiles (
+    user_id VARCHAR(36) NOT NULL,
+    display_name VARCHAR(64),
+    avatar VARCHAR(2048),
+    PRIMARY KEY (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS identity.friend_requests (
+    from_user_id VARCHAR(36) NOT NULL,
+    to_user_id VARCHAR(36) NOT NULL,
+    PRIMARY KEY (from_user_id, to_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS identity.friendships (
+    user_id VARCHAR(36) NOT NULL,
+    friend_id VARCHAR(36) NOT NULL,
+    PRIMARY KEY (user_id, friend_id)
 );

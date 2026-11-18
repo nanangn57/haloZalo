@@ -107,6 +107,21 @@ public final class PostgresMembershipRepository implements MembershipRepository 
             throw new IllegalStateException("Could not list group members", ex);
         }
     }
+
+    @Override
+    public void updateRole(String groupId, String userId, Role role) {
+        String sql = "UPDATE identity.memberships SET role = ? WHERE group_id = ? AND user_id = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, role.name());
+            statement.setString(2, groupId);
+            statement.setString(3, userId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not update membership role", ex);
+        }
+    }
+
     private static Membership read(ResultSet rows) throws SQLException {
         return new Membership(
             rows.getString("group_id"),

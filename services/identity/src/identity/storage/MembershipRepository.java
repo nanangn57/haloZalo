@@ -1,6 +1,7 @@
 package identity.storage;
 
 import identity.group.Membership;
+import identity.group.Role;
 import java.util.List;
 
 public interface MembershipRepository {
@@ -14,4 +15,6 @@ public interface MembershipRepository {
     List<Membership> listByUser(String userId);
 
     List<Membership> listByGroup(String groupId);
+
+    void updateRole(String groupId, String userId, Role role);
 }

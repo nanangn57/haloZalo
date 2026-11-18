@@ -80,5 +80,15 @@ class RepositoryMembershipLookupTest {
         public List<Membership> listByGroup(String groupId) {
             return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
         }
+
+        @Override
+        public void updateRole(String groupId, String userId, Role role) {
+            Membership current = find(groupId, userId);
+            if (current == null) {
+                return;
+            }
+            delete(groupId, userId);
+            save(new Membership(groupId, userId, current.getJoinedAt(), role));
+        }
     }
 }

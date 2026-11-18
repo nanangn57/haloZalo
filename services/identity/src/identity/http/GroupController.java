@@ -6,6 +6,7 @@ import identity.group.GroupListResponse;
 import identity.group.GroupResponse;
 import identity.group.MemberListResponse;
 import identity.group.MembershipResponse;
+import identity.group.SetRoleRequest;
 import identity.service.AuthService;
 import identity.service.GroupService;
 
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 
 @RestController
 public final class GroupController {
@@ -64,6 +66,16 @@ public final class GroupController {
     ) {
         groups.removeMember(callerId(userId), groupId, targetUserId);
         return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/groups/{groupId}/members/{userId}/role")
+    public MembershipResponse assignRole(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable String groupId,
+        @PathVariable("userId") String targetUserId,
+        @RequestBody SetRoleRequest request
+    ) {
+        return groups.assignRole(callerId(userId), groupId, targetUserId, request == null ? null : request.getRole());
     }
 
     private static String callerId(String userId) {

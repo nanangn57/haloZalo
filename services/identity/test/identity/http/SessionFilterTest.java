@@ -3,6 +3,7 @@ package identity.http;
 import identity.access.ConversationAccess;
 import identity.access.MembershipRequestAuthorizer;
 import identity.account.Account;
+import identity.account.Profile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import identity.group.MembershipLookup;
 import com.jayway.jsonpath.JsonPath;
@@ -15,6 +16,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import identity.password.BcryptPasswordHasher;
 import identity.service.AuthService;
+import identity.service.ProfileService;
+import identity.storage.ProfileRepository;
 import identity.session.Session;
 import identity.storage.AccountRepository;
 import identity.storage.SessionRepository;
@@ -80,7 +83,7 @@ class SessionFilterTest {
             }
         };
         ConversationAccess conversations = (userId, conversationId) -> chats.contains(conversationId);
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth), new ProbeController())
+        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth, new ProfileService(new MemoryAccounts(), emptyProfiles())), new ProbeController())
             .addFilters(new SessionFilter(auth, new ObjectMapper(), new MembershipRequestAuthorizer(memberships, conversations)))
             .setControllerAdvice(new AuthExceptionHandler())
             .build();
@@ -238,6 +241,19 @@ class SessionFilterTest {
         String lastBody() {
             return body;
         }
+    }
+
+    private static ProfileRepository emptyProfiles() {
+        return new ProfileRepository() {
+            @Override
+            public Profile find(String userId) {
+                return null;
+            }
+
+            @Override
+            public void save(Profile profile) {
+            }
+        };
     }
 
     private static final class MemoryAccounts implements AccountRepository {

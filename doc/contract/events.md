@@ -48,7 +48,9 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `messaging.read.updated` | Mốc đã đọc của một user tiến lên | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "lastReadSeq": 1 }` |
 | `messaging.media.uploaded` | Upload media đã commit | messaging | `{ "senderId": "<uuid>", "conversationId": "<uuid>", "type": "IMAGE" }` |
 
-`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics chỉ đếm envelope, không đọc payload.
+`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics đếm envelope upload, không dùng payload của upload.
+
+Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, và `conversationId` trong payload của login, tạo nhóm, và tin mới để ghi bảng tổng hợp của chính schema `analytics`. Không đọc bảng schema `messaging`.
 
 `code` của reaction nằm trong bộ `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 

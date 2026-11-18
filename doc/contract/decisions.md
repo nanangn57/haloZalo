@@ -30,11 +30,13 @@ Ba schema nằm trên cùng database PostgreSQL `halozalo`. Không có foreign k
 Mỗi lần đăng nhập, Identity thêm một dòng (`sessionId`, `userId`, `expiresAt`) và trả `sessionId` trong `accessToken`. Dòng cũ giữ đến khi hết hạn, để web và mobile cùng đăng nhập.
 
 Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, thì filter trong cùng process gọi `AuthService`. Identity trả `userId` khi còn dòng và còn hạn. Thiếu session, không có dòng, hoặc hết hạn thì app trả 401 và dừng. Hợp lệ thì gắn `userId` rồi vào handler. Không có API HTTP nội bộ để hỏi session.
-- **Thành viên:** Identity giữ nhóm và membership trong schema `identity`. Người tạo nhóm là owner. Owner thêm và xoá thành viên; thành viên tự rời. Owner không tự rời và không bị xoá. Thành viên đang trong nhóm xem danh sách qua `GET /groups/{groupId}/members` (`userId`, `username`, `role`). Người ngoài nhóm nhận 403. UI dùng `userId` đó cho `DELETE /groups/{groupId}/members/{userId}`. Messaging cần biết ai thuộc nhóm thì gọi `MembershipLookup` trong cùng process. Messaging không đọc schema `identity` và không giữ bản sao thành viên.
+- **Thành viên:** Identity giữ nhóm và membership trong schema `identity`. Người tạo nhóm là owner. Owner thêm và xoá thành viên, và gán hoặc gỡ role `ADMIN`. Admin thêm và xoá member, không xoá được owner. Thành viên tự rời. Owner không tự rời và không bị xoá. Thành viên đang trong nhóm xem danh sách qua `GET /groups/{groupId}/members` (`userId`, `username`, `role`). Người ngoài nhóm nhận 403. UI dùng `userId` đó cho `DELETE /groups/{groupId}/members/{userId}`. Messaging cần biết ai thuộc nhóm thì gọi `MembershipLookup` trong cùng process. Messaging không đọc schema `identity` và không giữ bản sao thành viên.
+- **Profile và bạn bè:** `GET /me` và `PATCH /me` đọc và sửa tên hiển thị cùng avatar tuỳ chọn. Lời mời bạn đi qua `POST /friends/requests`, chấp nhận qua `POST /friends/requests/{userId}/accept`, danh sách qua `GET /friends`.
+- **Dashboard:** `GET /stats/dashboard` và `GET /me/activity` đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
 - **Release:** AWS. Mỗi tuần một URL public. Deploy bằng một lệnh từ repo: một process và một PostgreSQL. P4 giữ lệnh đó.
 
 ## Bản này cố ý chưa có
 
-Upload media, dashboard, refresh token, FCM.
+Upload media, refresh token, FCM.
 
 Hội thoại phải được mở trước khi gửi tin. Chat 1-1 mở bằng `POST /conversations/direct`. Hội thoại nhóm dùng `groupId` làm `conversationId`. Client không tự sinh `conversationId` rồi gửi tin khi hội thoại chưa mở.

@@ -5,6 +5,7 @@ import com.jayway.jsonpath.JsonPath;
 import identity.group.Group;
 import identity.group.Membership;
 import identity.group.OwnerMemberPolicyRegistry;
+import identity.group.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -229,6 +230,10 @@ class GroupControllerTest {
         @Override
         public List<Membership> listByGroup(String groupId) {
             return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
+        }
+
+        @Override
+        public void updateRole(String groupId, String userId, Role role) {
         }
     }
 

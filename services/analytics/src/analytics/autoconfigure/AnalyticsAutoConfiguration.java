@@ -4,9 +4,12 @@ import javax.sql.DataSource;
 
 import analytics.record.ActivityRecorder;
 import analytics.record.AggregateActivityRecorder;
+import analytics.query.DashboardQuery;
+import analytics.store.ActivityBreakdown;
 import analytics.store.ActivityRepository;
 import analytics.store.AnalyticsSchema;
 import analytics.store.PostgresActivityRepository;
+import analytics.store.PostgresDashboardQuery;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -31,7 +34,15 @@ public class AnalyticsAutoConfiguration {
 
     @Bean
     ActivityRecorder activityRecorder(ActivityRepository activities) {
-        return new AggregateActivityRecorder(activities);
+        ActivityBreakdown breakdown = activities instanceof ActivityBreakdown noted
+            ? noted
+            : ActivityBreakdown.NONE;
+        return new AggregateActivityRecorder(activities, breakdown);
+    }
+
+    @Bean
+    DashboardQuery dashboardQuery(DataSource dataSource) {
+        return new PostgresDashboardQuery(dataSource);
     }
 
     @Bean

@@ -10,7 +10,7 @@ import identity.group.MemberListResponse;
 import identity.group.Membership;
 import identity.group.MembershipResponse;
 import identity.event.EventPublisher;
-import identity.group.OwnerMemberPolicyRegistry;
+import identity.group.GroupRolePolicyRegistry;
 import identity.group.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +51,7 @@ class GroupServiceTest {
         memberships = new MemoryMemberships();
         accounts = new MemoryAccounts();
         events = new MemoryEvents();
-        service = new GroupService(groups, memberships, accounts, new OwnerMemberPolicyRegistry(), new ImmediateTransactions(), events);
+        service = new GroupService(groups, memberships, accounts, new GroupRolePolicyRegistry(), new ImmediateTransactions(), events);
         ownerId = saveAccount("owner");
         memberId = saveAccount("member");
     }
@@ -171,7 +171,7 @@ class GroupServiceTest {
             groups,
             new SaveRejectsDuplicate(memberships),
             accounts,
-            new OwnerMemberPolicyRegistry(),
+            new GroupRolePolicyRegistry(),
             new ImmediateTransactions(),
             events
         );
@@ -262,6 +262,67 @@ class GroupServiceTest {
         assertEquals(GroupService.Rejected.Reason.VALIDATION, rejected.getReason());
     }
 
+    @Test
+    void ownerAssignsAndRemovesAdmin() {
+        GroupResponse group = service.create(ownerId, new CreateGroupRequest("nhom"));
+        service.addMember(ownerId, group.getGroupId(), new AddMemberRequest(memberId));
+
+        MembershipResponse admin = service.assignRole(ownerId, group.getGroupId(), memberId, "ADMIN");
+        assertEquals(Role.ADMIN, admin.getRole());
+        assertEquals(Role.ADMIN, memberships.find(group.getGroupId(), memberId).getRole());
+
+        MembershipResponse member = service.assignRole(ownerId, group.getGroupId(), memberId, "MEMBER");
+        assertEquals(Role.MEMBER, member.getRole());
+
+        GroupService.Rejected ownRole = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.assignRole(ownerId, group.getGroupId(), ownerId, "MEMBER")
+        );
+        assertEquals(GroupService.Rejected.Reason.FORBIDDEN, ownRole.getReason());
+
+        GroupService.Rejected badRole = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.assignRole(ownerId, group.getGroupId(), memberId, "OWNER")
+        );
+        assertEquals(GroupService.Rejected.Reason.VALIDATION, badRole.getReason());
+
+        GroupService.Rejected missing = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.assignRole(ownerId, group.getGroupId(), UUID.randomUUID().toString(), "ADMIN")
+        );
+        assertEquals(GroupService.Rejected.Reason.NOT_FOUND, missing.getReason());
+    }
+
+    @Test
+    void adminAddsMemberButCannotRemoveOwner() {
+        String extra = saveAccount("extra");
+        GroupResponse group = service.create(ownerId, new CreateGroupRequest("nhom"));
+        service.addMember(ownerId, group.getGroupId(), new AddMemberRequest(memberId));
+        service.assignRole(ownerId, group.getGroupId(), memberId, "ADMIN");
+
+        service.addMember(memberId, group.getGroupId(), new AddMemberRequest(extra));
+        assertEquals(Role.MEMBER, memberships.find(group.getGroupId(), extra).getRole());
+
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.removeMember(memberId, group.getGroupId(), ownerId)
+        );
+        assertEquals(GroupService.Rejected.Reason.FORBIDDEN, rejected.getReason());
+        assertEquals(Role.OWNER, memberships.find(group.getGroupId(), ownerId).getRole());
+    }
+
+    @Test
+    void memberCannotAssignAdmin() {
+        GroupResponse group = service.create(ownerId, new CreateGroupRequest("nhom"));
+        service.addMember(ownerId, group.getGroupId(), new AddMemberRequest(memberId));
+
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.assignRole(memberId, group.getGroupId(), ownerId, "ADMIN")
+        );
+        assertEquals(GroupService.Rejected.Reason.FORBIDDEN, rejected.getReason());
+    }
+
     private String saveAccount(String name) {
         String userId = UUID.randomUUID().toString();
         accounts.save(new Account(userId, name, name + "@example.com", "hash", Instant.now()));
@@ -332,6 +393,11 @@ class GroupServiceTest {
         public List<Membership> listByGroup(String groupId) {
             return delegate.listByGroup(groupId);
         }
+
+        @Override
+        public void updateRole(String groupId, String userId, Role role) {
+            delegate.updateRole(groupId, userId, role);
+        }
     }
 
     private static final class MemoryMemberships implements MembershipRepository {
@@ -363,6 +429,16 @@ class GroupServiceTest {
         @Override
         public List<Membership> listByGroup(String groupId) {
             return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
+        }
+
+        @Override
+        public void updateRole(String groupId, String userId, Role role) {
+            Membership current = find(groupId, userId);
+            if (current == null) {
+                return;
+            }
+            delete(groupId, userId);
+            save(new Membership(groupId, userId, current.getJoinedAt(), role));
         }
     }
 
