@@ -3,13 +3,14 @@ import { useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 
 import type { Conversation } from '@core/types/conversation'
-import { getConversationsApi } from '@core/conversationService'
+import { getConversationsApi, createDirectConversationApi } from '@core/conversationService'
 import { getAuth } from '@core/authSession'
 
 import ConversationItem from '../components/chat/ConversationItem'
 import type { User } from '../types/user'
-import type { Message } from '../types/message'
+import type { Message } from '@core/types/message'
 
+import { sendMessageApi, getMessagesApi } from '@core/messageService'
 import ChatHeader from '../components/chat/ChatHeader'
 import ChatMessages from '../components/chat/ChatMessages'
 import MesToolbar from '../components/chat/MesToolBar'
@@ -17,6 +18,9 @@ import UserInfoPanel from '../components/user/UserPanel'
 
 import { getGroupMembersApi } from '@core/groupService'
 import type { Member } from '@core/types/group'
+
+import { socketClient } from '@core/socketClient'
+import type { MessagingEvent } from '@core/types/event'
 
 import EmojiPicker, {
   type EmojiClickData,
@@ -28,37 +32,11 @@ interface ChatNavigationState {
   title: string
 }
 
-
-const initialMessages: Message[] = [
-  {
-    id: 'm1',
-    conversationId: 'c1',
-    senderId: '2',
-    content: 'Hi Khanh! How are you?',
-    sentAt: Math.floor(Date.now() / 1000) - 300,
-  },
-  {
-    id: 'm2',
-    conversationId: 'c1',
-    senderId: '1',
-    content: "I'm good, thanks! How about you?",
-    sentAt: Math.floor(Date.now() / 1000) - 240,
-  },
-  {
-    id: 'm3',
-    conversationId: 'c1',
-    senderId: '2',
-    content: "I'm doing well. Are you working on the chat UI?",
-    sentAt: Math.floor(Date.now() / 1000) - 120,
-  },
-  {
-    id: 'm4',
-    conversationId: 'c1',
-    senderId: '1',
-    content: "Yes! I'm testing the message layout now.",
-    sentAt: Math.floor(Date.now() / 1000) - 60,
-  },
-]
+type SocketStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'error'
 
 function ChatPage() {
   const location = useLocation()
@@ -98,7 +76,7 @@ function ChatPage() {
   const currentUserId = String(currentUser.id)
 
   const [messages, setMessages] =
-    useState<Message[]>(initialMessages)
+    useState<Message[]>([])
 
   const [newMessage, setNewMessage] = useState('')
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -116,6 +94,21 @@ function ChatPage() {
   const [groupMembers, setGroupMembers] = useState<Member[]>([])
   const [loadingGroupMembers, setLoadingGroupMembers] = useState(false)
 
+  const [socketStatus, setSocketStatus] =
+  useState<SocketStatus>('disconnected')
+
+  const [socketEvents, setSocketEvents] =
+    useState<MessagingEvent[]>([])
+
+  const [socketError, setSocketError] =
+    useState<string | null>(null)
+
+  const [targetUserId, setTargetUserId] = useState('')
+  const [creatingConversation, setCreatingConversation] = useState(false)
+  const [createConversationError, setCreateConversationError] =
+    useState<string | null>(null)
+  const [createConversationSuccess, setCreateConversationSuccess] =
+    useState<string | null>(null)
   // Load conversations and select the requested conversation.
   useEffect(() => {
   let isMounted = true
@@ -230,6 +223,124 @@ function ChatPage() {
   navigationState?.title,
 ])
 
+// Load message history when conversation changes.
+useEffect(() => {
+  if (!selectedConversation) {
+    setMessages([])
+    return
+  }
+
+  let isMounted = true
+
+  async function loadMessages() {
+    try {
+      const result = await getMessagesApi(
+        selectedConversation!.conversationId,
+      )
+
+      if (isMounted) {
+        setMessages(result.messages)
+      }
+    } catch (err) {
+      console.error('Cannot load messages:', err)
+
+      if (isMounted) {
+        setMessages([])
+      }
+    }
+  }
+
+  void loadMessages()
+
+  return () => {
+    isMounted = false
+  }
+}, [selectedConversation?.conversationId])
+
+// Connect WebSocket and listen for messaging events.
+useEffect(() => {
+  const unsubscribeEvent = socketClient.subscribe((event) => {
+    console.log('Received WebSocket event:', event)
+
+    setSocketEvents((previous) => [
+      event,
+      ...previous,
+    ])
+
+    if (event.type !== 'messaging.message.created') {
+      return
+    }
+
+    const payload = event.payload as {
+      messageId: string
+      conversationId: string
+      seq: number
+      senderId: string
+      type: 'TEXT' | 'EMOTION'
+      body: string
+      clientMsgId: string
+      createdAt: string
+    }
+
+    if (
+      !payload.messageId ||
+      !payload.conversationId ||
+      !payload.clientMsgId
+    ) {
+      return
+    }
+
+    const createdAt = Date.parse(payload.createdAt)
+
+    const incomingMessage: Message = {
+      id: payload.messageId,
+      messageId: payload.messageId,
+      conversationId: payload.conversationId,
+      senderId: payload.senderId,
+      type: payload.type,
+      content: payload.body,
+      seq: payload.seq,
+      clientMsgId: payload.clientMsgId,
+      sentAt: Number.isFinite(createdAt)
+        ? Math.floor(createdAt / 1000)
+        : Math.floor(Date.now() / 1000),
+      status: 'sent',
+    }
+
+    setMessages((previous) => {
+      const existingIndex = previous.findIndex(
+        (message) =>
+          message.messageId === incomingMessage.messageId ||
+          message.clientMsgId === incomingMessage.clientMsgId,
+      )
+
+      if (existingIndex >= 0) {
+        return previous.map((message, index) =>
+          index === existingIndex
+            ? incomingMessage
+            : message,
+        )
+      }
+
+      return [...previous, incomingMessage]
+    })
+  })
+
+  // const unsubscribeStatus = socketClient.subscribeStatus(
+  //   (status) => {
+  //     setSocketStatus(status)
+  //   },
+  // )
+
+  // socketClient.connect()
+
+  // return () => {
+  //   unsubscribeEvent()
+  //   unsubscribeStatus()
+  // }
+}, [])
+
+
   // Display only messages belonging to the selected conversation.
   const visibleMessages = messages.filter(
     (message) =>
@@ -263,61 +374,224 @@ function ChatPage() {
       : ''
 
   // Send a local demo message.
-  function handleSendMessage(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault()
+  async function handleSendMessage(
+  event: React.FormEvent<HTMLFormElement>,
+) {
+  event.preventDefault()
 
-    const content = newMessage.trim()
+  const content = newMessage.trim()
 
-    if (!content || !selectedConversation) return
+  if (!content || !selectedConversation) return
 
-    const newMessageItem: Message = {
-      id: crypto.randomUUID(),
-      conversationId: selectedConversation.conversationId,
-      senderId: currentUserId,
-      content,
-      sentAt: Math.floor(Date.now() / 1000),
-    }
+  const conversationId = selectedConversation.conversationId
+  const clientMsgId = crypto.randomUUID()
 
-    setMessages((previous) => [
-      ...previous,
-      newMessageItem,
-    ])
-
-    setNewMessage('')
-    setShowEmojiPicker(false)
+  // Tạo tin nhắn tạm để hiển thị ngay trên UI
+  const optimisticMessage: Message = {
+    id: clientMsgId,
+    conversationId,
+    senderId: currentUserId,
+    type: 'TEXT',
+    content,
+    clientMsgId,
+    sentAt: Math.floor(Date.now() / 1000),
+    status: 'sending',
   }
+
+  setMessages((previous) => [
+    ...previous,
+    optimisticMessage,
+  ])
+
+  setNewMessage('')
+  setShowEmojiPicker(false)
+
+  try {
+    // Gửi tin nhắn đến backend
+    const savedMessage = await sendMessageApi(
+      conversationId,
+      {
+        type: 'TEXT',
+        body: content,
+        clientMsgId,
+      },
+    )
+
+    // Thay tin nhắn tạm bằng tin nhắn chính thức
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.clientMsgId === clientMsgId
+          ? savedMessage
+          : message,
+      ),
+    )
+  } catch (error) {
+    console.error('Cannot send message:', error)
+
+    // Giữ tin nhắn để người dùng có thể thử lại
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.clientMsgId === clientMsgId
+          ? {
+              ...message,
+              status: 'failed',
+            }
+          : message,
+      ),
+    )
+  }
+}
+
+async function handleCreateDirectConversation(
+  event: React.FormEvent<HTMLFormElement>,
+) {
+  event.preventDefault()
+
+  const userId = targetUserId.trim()
+
+  if (!userId) return
+
+  if (userId === currentUserId) {
+    setCreateConversationError(
+      'You cannot create a conversation with yourself.',
+    )
+    return
+  }
+
+  setCreatingConversation(true)
+  setCreateConversationError(null)
+  setCreateConversationSuccess(null)
+
+  try {
+    const conversation = await createDirectConversationApi({
+      userId,
+    })
+
+    // Thêm conversation vào danh sách nếu chưa tồn tại
+    setConversations((previous) => {
+      const exists = previous.some(
+        (item) =>
+          item.conversationId === conversation.conversationId,
+      )
+
+      if (exists) return previous
+
+      return [conversation, ...previous]
+    })
+
+    // Mở conversation vừa tạo hoặc lấy lại
+    setSelectedConversation(conversation)
+
+    // Reset input
+    setTargetUserId('')
+
+    setCreateConversationSuccess(
+      `Conversation ready: ${conversation.conversationId}`,
+    )
+
+    setShowUserInfo(false)
+  } catch (err) {
+    setCreateConversationError(
+      err instanceof Error
+        ? err.message
+        : 'Cannot create conversation.',
+    )
+  } finally {
+    setCreatingConversation(false)
+  }
+}
 
   return (
     <div
       className="d-flex w-100 h-100 overflow-hidden"
       style={{ minHeight: 0 }}
     >
-      {/* Conversation sidebar */}
-      {!isFromGroupPage && (
-        <div className="d-flex flex-column flex-shrink-0 border-end">
-          <div className="p-3">
-            <form
-              className="d-flex"
-              role="search"
-              onSubmit={(event) => event.preventDefault()}
-            >
-              <input
-                className="form-control me-2"
-                type="search"
-                placeholder="Search"
-                aria-label="Search"
-              />
+      
+{/* Conversation sidebar */}
+{!isFromGroupPage && (
+  <div
+    className="d-flex flex-column flex-shrink-0 border-end"
+    style={{ width: '320px', minWidth: '280px' }}
+  >
+    {/* TEST: Create Direct Conversation */}
+    <div className="p-3 border-bottom bg-light">
+      <div className="d-flex align-items-center justify-content-between mb-2">
+        <strong>Test: New Direct Chat</strong>
+        <span className="badge bg-warning text-dark">
+          DEV
+        </span>
+      </div>
 
-              <button
-                className="btn btn-outline-success"
-                type="submit"
-              >
-                Search
-              </button>
-            </form>
-          </div>
+      <form onSubmit={handleCreateDirectConversation}>
+        <input
+          type="text"
+          className="form-control form-control-sm mb-2"
+          placeholder="Enter target User ID"
+          value={targetUserId}
+          onChange={(event) => {
+            setTargetUserId(event.target.value)
+            setCreateConversationError(null)
+            setCreateConversationSuccess(null)
+          }}
+          disabled={creatingConversation}
+        />
+
+        <button
+          type="submit"
+          className="btn btn-primary btn-sm w-100"
+          disabled={
+            creatingConversation ||
+            !targetUserId.trim()
+          }
+        >
+          {creatingConversation
+            ? 'Creating...'
+            : 'Create / Open Direct Chat'}
+        </button>
+      </form>
+
+      {createConversationError && (
+        <div className="text-danger small mt-2">
+          {createConversationError}
+        </div>
+      )}
+
+      {createConversationSuccess && (
+        <div className="text-success small mt-2">
+          {createConversationSuccess}
+        </div>
+      )}
+
+      <small className="text-muted d-block mt-2">
+        Current user: {currentUserId || 'Not logged in'}
+      </small>
+    </div>
+
+    {/* Search conversations */}
+    <div className="p-3">
+      <form
+        className="d-flex"
+        role="search"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <input
+          className="form-control me-2"
+          type="search"
+          placeholder="Search"
+          aria-label="Search"
+        />
+
+        <button
+          className="btn btn-outline-success"
+          type="submit"
+        >
+          Search
+        </button>
+      </form>
+    </div>
+
+    {/* Giữ nguyên phần danh sách conversations bên dưới */}
+
 
           <ul className="list-group flex-grow-1 overflow-auto">
             {isLoading && (
@@ -371,6 +645,34 @@ function ChatPage() {
             avatar={undefined}
             onInfoClick={() => setShowUserInfo((previous) => !previous)}
           />
+
+          <div className="d-flex align-items-center gap-2 px-3 py-2 border-bottom bg-light">
+            <span
+              className={`rounded-circle ${
+                socketStatus === 'connected'
+                  ? 'bg-success'
+                  : socketStatus === 'error'
+                    ? 'bg-danger'
+                    : 'bg-secondary'
+              }`}
+              style={{
+                width: 9,
+                height: 9,
+                display: 'inline-block',
+              }}
+            />
+
+  <small className="text-muted">
+    WebSocket: {socketStatus}
+  </small>
+
+  {socketError && (
+    <small className="text-danger ms-2">
+      {socketError}
+    </small>
+  )}
+</div>
+
         </div>
 
         <div
@@ -448,6 +750,68 @@ function ChatPage() {
         </form>
       </div>
 
+      {/* WebSocket Debug Panel */}
+      <div
+        className="border-top bg-light p-2"
+        style={{
+          maxHeight: '220px',
+          overflowY: 'auto',
+        }}
+      >
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <strong className="small">
+            WebSocket Debug
+          </strong>
+
+          <div className="d-flex gap-2 align-items-center">
+            <small className="text-muted">
+              {socketEvents.length} events
+            </small>
+
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() => setSocketEvents([])}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {socketEvents.length === 0 ? (
+          <small className="text-muted">
+            Waiting for WebSocket events...
+          </small>
+        ) : (
+          socketEvents.map((event) => (
+            <div
+              key={event.eventId}
+              className="border rounded bg-white p-2 mb-2"
+            >
+              <div className="d-flex justify-content-between">
+                <strong className="small">
+                  {event.type}
+                </strong>
+
+                <small className="text-muted">
+                  {event.producer}
+                </small>
+              </div>
+
+              <pre
+                className="small mb-0 mt-2"
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {JSON.stringify(event.payload, null, 2)}
+              </pre>
+            </div>
+          ))
+        )}
+      </div>
+      
       {/* User information panel */}
       {showUserInfo && (
         <UserInfoPanel

@@ -12,6 +12,7 @@ import RegisterPage from './pages/RegisterPage'
 import ChatPage from './pages/ChatPage'
 import ContactPage from './pages/ContactPage'
 import GroupPage from './pages/GroupPage'
+import DashboardPage from './pages/DashboardPage'
 
 import MainLayout from './layouts/MainLayout'
 import ContactLayout from './layouts/ContactLayout'
@@ -42,6 +43,9 @@ function App() {
 
         {/* Protected routes */}
         <Route element={<ProtectedLayout />}>
+          {/* Dashboard */}
+          <Route path="/dashboard" element={<DashboardPage />} />
+
           {/* Normal chat */}
           <Route path="/chat" element={<ChatPage />} />
 
@@ -66,8 +70,8 @@ function App() {
         </Route>
 
         {/* Default routes */}
-        <Route path="/" element={<Navigate to="/chat" replace />} />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   )

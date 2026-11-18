@@ -51,8 +51,8 @@ function LoginPage() {
       // Chỉ lưu phiên đăng nhập sau khi API thành công
       saveAuth(auth)
 
-      // Chuyển trang sau khi đăng nhập thành công
-      navigate('/contacts')
+      // Chuyển sang ChatPage sau khi đăng nhập thành công
+      navigate('/chat', { replace: true })
     } catch (err: unknown) {
       setError(
         err instanceof Error

@@ -4,8 +4,8 @@ services:
     working_dir: /app/web/ui
     ports:
       - "5173:5173"
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+    env_file:
+      - .env.dev
     volumes:
       - ../web:/app/web
       - ../core:/app/core
