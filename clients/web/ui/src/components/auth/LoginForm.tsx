@@ -57,11 +57,11 @@ function LoginForm({
       )}
 
       {/* Forgot password */}
-      <div className="text-end mb-3">
+      {/* <div className="text-end mb-3">
         <a href="#" className="text-decoration-none">
           Forgot password?
         </a>
-      </div>
+      </div> */}
 
       {/* Login button */}
       <button

@@ -4,29 +4,32 @@ interface ChatHeaderProps {
   subtitle?: string
   avatar?: string
   type?: 'GROUP' | 'DIRECT'
-  onInfoClick: () => void
+  showInfoButton?: boolean
+  onInfoClick?: () => void
 }
 
 function ChatHeader({
   title,
+  subtitle,
   avatar,
   type = 'DIRECT',
+  showInfoButton = true,
   onInfoClick,
 }: ChatHeaderProps) {
   return (
-    <div className="d-flex align-items-center w-100">
+    <div className="d-flex align-items-center w-100 gap-2">
       {avatar ? (
         <img
           src={avatar}
           alt={title}
-          className="rounded-circle me-2"
+          className="rounded-circle flex-shrink-0"
           width="48"
           height="48"
         />
       ) : (
         <div
-          className="rounded-circle me-2 d-flex align-items-center justify-content-center bg-secondary-subtle"
-          style={{ width: '48px', height: '48px', flexShrink: 0 }}
+          className="rounded-circle d-flex align-items-center justify-content-center bg-secondary-subtle flex-shrink-0"
+          style={{ width: 48, height: 48 }}
         >
           <i
             className={`bi ${
@@ -36,28 +39,30 @@ function ChatHeader({
         </div>
       )}
 
-      <div className="fw-semibold text-truncate">
-        {title}
+      <div className="flex-grow-1 overflow-hidden">
+        <div className="fw-semibold text-truncate">
+          {title}
+        </div>
+
+        {subtitle && (
+          <div className="small text-muted text-truncate">
+            {subtitle}
+          </div>
+        )}
       </div>
 
-      <div className="ms-auto d-flex align-items-center gap-3">
-        <button
-          type="button"
-          className="btn app-button flex-shrink-0"
-          aria-label="Search messages"
-        >
-          <i className="bi bi-search fs-4" />
-        </button>
-
-        <button
-          type="button"
-          className="btn app-button flex-shrink-0"
-          onClick={onInfoClick}
-          aria-label="Show conversation information"
-        >
-          <i className="bi bi-layout-sidebar fs-4" />
-        </button>
-      </div>
+      {/* <div className="ms-auto d-flex align-items-center gap-2">
+        {showInfoButton && (
+          <button
+            type="button"
+            className="btn app-button flex-shrink-0"
+            onClick={onInfoClick}
+            aria-label="Show conversation information"
+          >
+            <i className="bi bi-layout-sidebar fs-4" />
+          </button>
+        )}
+      </div> */}
     </div>
   )
 }
