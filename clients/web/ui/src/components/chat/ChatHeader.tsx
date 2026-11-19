@@ -3,6 +3,8 @@ interface ChatHeaderProps {
   title: string
   subtitle?: string
   avatar?: string
+  // Shown in the circle when there is no avatar.
+  initials?: string
   type?: 'GROUP' | 'DIRECT'
   // showInfoButton?: boolean
   onInfoClick?: () => void
@@ -12,6 +14,7 @@ function ChatHeader({
   title,
   subtitle,
   avatar,
+  initials,
   type = 'DIRECT',
   // showInfoButton = true,
   // onInfoClick,
@@ -31,11 +34,15 @@ function ChatHeader({
           className="rounded-circle d-flex align-items-center justify-content-center bg-secondary-subtle flex-shrink-0"
           style={{ width: 48, height: 48 }}
         >
-          <i
-            className={`bi ${
-              type === 'GROUP' ? 'bi-people' : 'bi-person'
-            } fs-4`}
-          />
+          {initials ? (
+            <span className="fw-semibold fs-5">{initials}</span>
+          ) : (
+            <i
+              className={`bi ${
+                type === 'GROUP' ? 'bi-people' : 'bi-person'
+              } fs-4`}
+            />
+          )}
         </div>
       )}
 

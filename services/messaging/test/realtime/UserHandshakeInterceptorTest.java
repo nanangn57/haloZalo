@@ -39,6 +39,20 @@ class UserHandshakeInterceptorTest {
     }
 
     @Test
+    void browserCanPassTheUserAsQueryOnlyWhileTheHeaderIsAccepted() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/ws");
+        request.setParameter(CurrentUser.QUERY, "aaaaaaaa-0000-4000-8000-000000000003");
+        Map<String, Object> attributes = new HashMap<>();
+
+        assertTrue(handshake(request, new MockHttpServletResponse(), attributes, true));
+        assertEquals("aaaaaaaa-0000-4000-8000-000000000003", attributes.get(UserHandshakeInterceptor.USER_ID));
+
+        MockHttpServletResponse refused = new MockHttpServletResponse();
+        assertFalse(handshake(request, refused, new HashMap<>(), false));
+        assertEquals(401, refused.getStatus());
+    }
+
+    @Test
     void theAppFiltersUserWinsAndTheHeaderCanBeTurnedOff() {
         MockHttpServletRequest fromFilter = new MockHttpServletRequest("GET", "/ws");
         fromFilter.setAttribute(CurrentUser.ATTRIBUTE, "AAAAAAAA-0000-4000-8000-000000000002");

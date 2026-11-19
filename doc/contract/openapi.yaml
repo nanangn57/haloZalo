@@ -5,7 +5,7 @@ info:
   description: |
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
-    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, tìm user, nhóm,
+    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, tìm user, tra tên user theo id, nhóm,
     hội thoại, tin TEXT hoặc EMOTION, lịch sử, đã đọc, reaction, và thống kê đã gom.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
@@ -170,6 +170,51 @@ paths:
                 error:
                   code: NOT_FOUND
                   message: User not found
+  /users/lookup:
+    get:
+      tags: [Users]
+      operationId: lookupUsers
+      summary: Lấy tên của nhiều user theo userId, để hiện header chat và danh sách hội thoại
+      description: |
+        Hội thoại chỉ có `memberIds`. Client gom các id chưa có trong cache rồi gọi một lần cho cả trang hội thoại.
+        Trả user theo thứ tự id gửi lên, bỏ id trùng. Id không có tài khoản thì bị bỏ qua, không trả 404,
+        vì một hội thoại cũ có thể còn id của tài khoản không còn.
+        Không trả email: ai đã đăng nhập cũng gọi được với id bất kỳ.
+        Bản này chưa có avatar. Client hiện chữ cái đầu của `username`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Các userId cách nhau bằng dấu phẩy. Từ 1 đến 100 id.
+          style: form
+          explode: false
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              type: string
+              format: uuid
+          example: [11111111-1111-4111-8111-111111111111, 33333333-3333-4333-8333-333333333333]
+      responses:
+        "200":
+          description: Các user tìm thấy. Có thể ít hơn số id gửi lên.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSummaryList"
+              example:
+                users:
+                  - userId: 11111111-1111-4111-8111-111111111111
+                    username: ngoc_anh
+                  - userId: 33333333-3333-4333-8333-333333333333
+                    username: huy
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
   /groups:
     post:
       tags: [Groups]
@@ -839,6 +884,27 @@ components:
           format: email
         displayName:
           type: string
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required: [userId, username]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+        displayName:
+          type: string
+    UserSummaryList:
+      type: object
+      additionalProperties: false
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSummary"
     CreateGroupRequest:
       type: object
       additionalProperties: false

@@ -4,6 +4,8 @@ interface ConversationItemProps {
   conversation: Conversation
   title?: string
   avatar?: string
+  // Shown in the circle when there is no avatar.
+  initials?: string
   active: boolean
   onClick: (conversation: Conversation) => void
 }
@@ -12,6 +14,7 @@ function ConversationItem({
   conversation,
   title,
   avatar,
+  initials,
   active,
   onClick,
 }: ConversationItemProps) {
@@ -45,13 +48,17 @@ function ConversationItem({
           className="rounded-circle me-2 d-flex align-items-center justify-content-center bg-secondary-subtle"
           style={{ width: 48, height: 48, flexShrink: 0 }}
         >
-          <i
-            className={
-              conversation.type === 'GROUP'
-                ? 'bi bi-people fs-4'
-                : 'bi bi-person fs-4'
-            }
-          />
+          {initials ? (
+            <span className="fw-semibold fs-5">{initials}</span>
+          ) : (
+            <i
+              className={
+                conversation.type === 'GROUP'
+                  ? 'bi bi-people fs-4'
+                  : 'bi bi-person fs-4'
+              }
+            />
+          )}
         </div>
       )}
 

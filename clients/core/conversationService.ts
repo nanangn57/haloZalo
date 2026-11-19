@@ -1,5 +1,5 @@
-
 import { getApiHeaders } from './apiClient'
+import { connectionConfig } from './connectionConfig'
 import type { ApiErrorResponse } from './types/auth'
 import type {
   Conversation,
@@ -7,7 +7,7 @@ import type {
   CreateDirectConversationRequest,
 } from './types/conversation'
 
-const API_MESSAGE_BASE_URL = 'http://localhost:8082'
+const API_MESSAGE_BASE_URL = connectionConfig.messageBaseUrl
 
 async function getErrorMessage(
   response: Response,

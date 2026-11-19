@@ -1,6 +1,6 @@
 
 import { useLocation, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Conversation } from '@core/types/conversation'
 import {
@@ -8,7 +8,11 @@ import {
   createDirectConversationApi,
 } from '@core/conversationService'
 import { getAuth } from '@core/authSession'
-import { findUserApi } from '@core/userService'
+import {
+  findUserApi,
+  lookupUsersApi,
+  type UserSummary,
+} from '@core/userService'
 import type { AuthUser } from '@core/types/auth'
 
 import type { User } from '../types/user'
@@ -157,6 +161,14 @@ function ChatPage() {
   const [directUsersByConversationId, setDirectUsersByConversationId] =
     useState<Record<string, AuthUser>>({})
 
+  // Names of conversation members, loaded from identity by userId.
+  // Survives a reload, unlike directUsersByConversationId.
+  const [usersById, setUsersById] =
+    useState<Record<string, UserSummary>>({})
+
+  // Ids already asked for, so an id without an account is not asked again.
+  const requestedUserIds = useRef<Set<string>>(new Set())
+
   // WebSocket
   // const [socketStatus, setSocketStatus] =
   //   useState<SocketStatus>('disconnected')
@@ -295,6 +307,55 @@ function ChatPage() {
     selectedConversation?.type,
   ])
   
+  // --------------------------------------------------
+  // 5b. LOAD MEMBER NAMES FOR DIRECT CONVERSATIONS
+  // --------------------------------------------------
+
+  useEffect(() => {
+    const missing = [
+      ...new Set(
+        conversations
+          .filter((conversation) => conversation.type === 'DIRECT')
+          .flatMap((conversation) => conversation.memberIds)
+          .filter(
+            (userId) =>
+              userId !== currentUserId &&
+              !requestedUserIds.current.has(userId),
+          ),
+      ),
+    ]
+
+    if (missing.length === 0) {
+      return
+    }
+
+    missing.forEach((userId) => requestedUserIds.current.add(userId))
+
+    // The API takes at most 100 ids per call.
+    const batches: string[][] = []
+    for (let i = 0; i < missing.length; i += 100) {
+      batches.push(missing.slice(i, i + 100))
+    }
+
+    void Promise.all(batches.map((ids) => lookupUsersApi(ids)))
+      .then((results) => {
+        setUsersById((previous) => {
+          const next = { ...previous }
+          results.flat().forEach((user) => {
+            next[user.userId] = user
+          })
+          return next
+        })
+      })
+      .catch((err) => {
+        console.error('Cannot load user names:', err)
+        // Allow a later attempt for these ids.
+        missing.forEach((userId) =>
+          requestedUserIds.current.delete(userId),
+        )
+      })
+  }, [conversations, currentUserId])
+
   // --------------------------------------------------
   // 6. INITIALIZE CONVERSATION AND LOAD MESSAGE HISTORY
   // --------------------------------------------------
@@ -457,23 +518,45 @@ function ChatPage() {
       selectedConversation?.conversationId,
   )
 
-  // Resolve DIRECT conversation recipient.
+  // The other member of a DIRECT conversation: the search result opened
+  // in this session, else the name loaded by userId.
+  function getDirectUser(
+    conversation: Conversation,
+  ): UserSummary | null {
+    const fromSearch =
+      directUsersByConversationId[conversation.conversationId]
+
+    if (fromSearch) {
+      return fromSearch
+    }
+
+    const otherId = conversation.memberIds.find(
+      (userId) => userId !== currentUserId,
+    )
+
+    return otherId ? usersById[otherId] ?? null : null
+  }
+
+  function displayName(user: UserSummary): string {
+    return user.displayName || user.username || 'User'
+  }
+
+  // First letter of the name, shown instead of an avatar (no avatar yet).
+  function initialsOf(name: string): string {
+    return name.trim().charAt(0).toUpperCase()
+  }
+
   const selectedDirectUser =
     selectedConversation?.type === 'DIRECT'
-      ? directUsersByConversationId[
-          selectedConversation.conversationId
-        ] ?? null
+      ? getDirectUser(selectedConversation)
       : null
 
-  // Adapt AuthUser to the User type required by UserInfoPanel.
+  // Adapt the user to the User type required by UserInfoPanel.
   const headerUser: User | null = selectedDirectUser
     ? {
         id: selectedDirectUser.userId,
-        name:
-          selectedDirectUser.displayName ||
-          selectedDirectUser.username ||
-          'User',
-        avatar: 'https://i.pravatar.cc/150?img=1',
+        name: displayName(selectedDirectUser),
+        avatar: '',
         online: false,
         lastSeen: 0,
         unread: 0,
@@ -521,18 +604,17 @@ function ChatPage() {
             ? requestedConversationTitle || 'Group conversation'
             : 'Group conversation',
         avatar: undefined,
+        initials: undefined,
       }
     }
 
-    const user =
-      directUsersByConversationId[conversation.conversationId]
+    const user = getDirectUser(conversation)
+    const title = user ? displayName(user) : 'Direct conversation'
 
     return {
-      title:
-        user?.displayName ||
-        user?.username ||
-        'Direct conversation',
+      title,
       avatar: undefined,
+      initials: user ? initialsOf(title) : undefined,
     }
   }
 
@@ -875,6 +957,7 @@ function ChatPage() {
                     conversation={conversation}
                     title={displayInfo.title}
                     avatar={displayInfo.avatar}
+                    initials={displayInfo.initials}
                     active={
                       selectedConversation?.conversationId ===
                       conversation.conversationId
@@ -904,7 +987,10 @@ function ChatPage() {
             title={chatTitle}
             subtitle={chatSubtitle}
             type={selectedConversation?.type ?? 'DIRECT'}
-            avatar={headerUser?.avatar}
+            avatar={headerUser?.avatar || undefined}
+            initials={
+              headerUser ? initialsOf(headerUser.name) : undefined
+            }
             // onInfoClick={() => {
             //   if (headerUser) {
             //     setShowUserInfo((previous) => !previous)
