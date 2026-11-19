@@ -37,7 +37,7 @@ services/identity/
 
 `POST /auth/register` trả 202 với `email`. Chưa tạo tài khoản và chưa cấp token. Mail chứa link `GET /auth/verify?token=`, hết hạn sau 120 giây. Bấm link trong hạn thì trả `userId`, `username`, `email` và xóa bản chờ. Hết hạn hoặc token lạ thì 400. `POST /auth/login` chỉ thành công sau khi đã verify, trả 200 với `accessToken`, `tokenType`, `expiresIn`, và `user`. Không trả hash mật khẩu.
 
-`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. `GET /users?q=` tìm đúng một user theo username, hoặc theo email khi `q` có `@`. Thiếu session thì 401, không trả user. Không có thì 404.
+`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. `GET /users?q=` tìm đúng một user theo username, hoặc theo email khi `q` có `@`. Thiếu session thì 401, không trả user. Không có thì 404. `GET /users/lookup?ids=a,b` trả `{ users: [{ userId, username }] }` theo thứ tự id gửi lên, bỏ id trùng và id không có tài khoản, không trả email. 1 đến 100 UUID, sai thì 400. Client dùng để hiện tên thành viên hội thoại.
 
 `SessionFilter` bỏ qua đăng ký, xác minh email, và đăng nhập. Path còn lại gọi `AuthService.currentUserId` và gắn `userId` vào request. WebSocket `/ws` lấy session từ query `access_token`, không lấy từ header. Request vào một nhóm hoặc một hội thoại đã mở bị 403 khi user không thuộc nhóm hoặc hội thoại đó. `POST /conversations/direct` và danh sách không cần membership sẵn. Kiểm tra session cho module khác là lời gọi `currentUserId` trong process, không có endpoint HTTP nội bộ.
 

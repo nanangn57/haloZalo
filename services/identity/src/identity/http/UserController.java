@@ -2,6 +2,7 @@ package identity.http;
 
 import identity.account.Account;
 import identity.auth.TokenResponse;
+import identity.auth.UserSummaryList;
 import identity.service.UserSearchService;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,5 +21,12 @@ public final class UserController {
     public TokenResponse.User find(@RequestParam(value = "q", required = false) String query) {
         Account account = users.find(query);
         return new TokenResponse.User(account.getUserId(), account.getUsername(), account.getEmail());
+    }
+
+    @GetMapping("/users/lookup")
+    public UserSummaryList lookup(@RequestParam(value = "ids", required = false) String ids) {
+        return new UserSummaryList(users.lookup(ids).stream()
+            .map(account -> new UserSummaryList.UserSummary(account.getUserId(), account.getUsername()))
+            .toList());
     }
 }
