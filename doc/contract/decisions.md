@@ -35,6 +35,8 @@ Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, 
 
 ## Bản này cố ý chưa có
 
-Upload media, dashboard, refresh token, FCM.
+Upload media, dashboard, refresh token, FCM, avatar.
+
+Tên người trong hội thoại: hội thoại chỉ có `memberIds`, messaging không giữ tên user. Client lấy tên qua `GET /users/lookup?ids=` của identity, một lần cho cả trang hội thoại, rồi cache theo `userId`.
 
 Hội thoại phải được mở trước khi gửi tin. Chat 1-1 mở bằng `POST /conversations/direct`. Hội thoại nhóm dùng `groupId` làm `conversationId`. Client không tự sinh `conversationId` rồi gửi tin khi hội thoại chưa mở.
