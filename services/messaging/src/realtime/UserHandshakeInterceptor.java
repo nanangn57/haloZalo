@@ -33,7 +33,7 @@ public final class UserHandshakeInterceptor implements HandshakeInterceptor {
         WebSocketHandler handler,
         Map<String, Object> attributes) {
         // Same spelling as the member ids read from Postgres, so frames find this socket.
-        String given = request instanceof ServletServerHttpRequest servlet ? currentUser.of(servlet.getServletRequest()) : null;
+        String given = request instanceof ServletServerHttpRequest servlet ? currentUser.ofHandshake(servlet.getServletRequest()) : null;
         String userId = Ids.canonical(given);
         if (userId == null) {
             response.setStatusCode(HttpStatus.UNAUTHORIZED);
