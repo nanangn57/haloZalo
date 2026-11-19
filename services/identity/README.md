@@ -6,7 +6,9 @@ Người giữ: P1 Ngọc Anh.
 
 Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào database `halozalo`. Pool đặt `search_path` là schema `identity`.
 
-Chạy bằng Docker, gồm PostgreSQL riêng: `docker compose up --build` trong thư mục này. App ở `http://localhost:8080`. `docker compose down` giữ dữ liệu. `docker compose down -v` xóa dữ liệu. Trong container, JDBC trỏ vào service `postgres`. Link xác minh vẫn là `http://localhost:8080` vì người dùng mở trên máy mình. Mail ghi ra log, lấy link bằng `docker compose logs -f identity`. Cổng 5432 trên máy thuộc `infra/docker-compose.yml`, nên Postgres của compose này mở ở `127.0.0.1:5433`. Image chạy bằng user không phải root.
+Web chạy Vite (thường `http://localhost:5173`) gọi API từ origin khác. `CorsConfig` cho phép origin khớp `identity.cors.allowed-origin-patterns` và trả preflight `OPTIONS` trước `SessionFilter`. Response 401 vẫn có `Access-Control-Allow-Origin`, nên trình duyệt đọc được lỗi thay vì báo CORS. Request không gửi `Origin` (curl, mobile) không đi qua nhánh này.
+
+Chạy bằng Docker, gồm PostgreSQL riêng: `docker compose up --build` trong thư mục này. Context build là `services/` để image gồm cả analytics. App ở `http://localhost:8080`. `docker compose down` giữ dữ liệu. `docker compose down -v` xóa dữ liệu. Trong container, JDBC trỏ vào service `postgres`. Link xác minh vẫn là `http://localhost:8080` vì người dùng mở trên máy mình. Mặc định `identity.mail.mode` là `log`: mail ghi ra log, lấy link bằng `docker compose logs -f identity`. Gmail đặt trong `.env.local` (copy từ `.env.example`), chạy app từ thư mục này để Spring đọc file. File đó không được commit và không vào image. `docker compose` không đọc `.env.local`; muốn gửi từ container thì export cùng các biến trong shell trước khi chạy compose. Cổng 5432 trên máy thuộc `infra/docker-compose.yml`, nên Postgres của compose này mở ở `127.0.0.1:5433`. Image chạy bằng user không phải root.
 
 ```
 services/identity/
@@ -14,30 +16,36 @@ services/identity/
   Dockerfile
   docker-compose.yml
   resources/          cổng, database, và schema.sql
-  src/
+  src/identity/
     app/              khởi động Spring Boot
     account/          dữ liệu tài khoản, gồm hash mật khẩu
     verification/     dữ liệu bản chờ xác minh email
     session/          dữ liệu session
+    access/           quyền vào nhóm và hội thoại, trước handler
+    group/            dữ liệu nhóm, quyền theo role
     auth/             JSON request và response
     password/         hash và so khớp bcrypt
     mail/             gửi mail xác minh
     storage/          interface lưu, và implementation PostgreSQL
     event/            phát event đăng nhập trong process
-    service/          đăng ký, xác minh email, đăng nhập, kiểm tra session
-    http/             nhận HTTP public, đổi lỗi thành status
-  test/               cùng các package trên, mỗi nhóm một test
+    service/          đăng ký, xác minh email, đăng nhập, kiểm tra session, nhóm
+    http/             nhận HTTP public, filter session, đổi lỗi thành status
+  test/identity/      cùng các package trên, mỗi nhóm một test
 ```
 
 ## API
 
 `POST /auth/register` trả 202 với `email`. Chưa tạo tài khoản và chưa cấp token. Mail chứa link `GET /auth/verify?token=`, hết hạn sau 120 giây. Bấm link trong hạn thì trả `userId`, `username`, `email` và xóa bản chờ. Hết hạn hoặc token lạ thì 400. `POST /auth/login` chỉ thành công sau khi đã verify, trả 200 với `accessToken`, `tokenType`, `expiresIn`, và `user`. Không trả hash mật khẩu.
 
-`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. Kiểm tra session cho module khác là lời gọi `AuthService.currentUserId` trong process, không có endpoint HTTP nội bộ.
+`GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. `GET /users?q=` tìm đúng một user theo username, hoặc theo email khi `q` có `@`. Thiếu session thì 401, không trả user. Không có thì 404.
+
+`SessionFilter` bỏ qua đăng ký, xác minh email, và đăng nhập. Path còn lại gọi `AuthService.currentUserId` và gắn `userId` vào request. WebSocket `/ws` lấy session từ query `access_token`, không lấy từ header. Request vào một nhóm hoặc một hội thoại đã mở bị 403 khi user không thuộc nhóm hoặc hội thoại đó. `POST /conversations/direct` và danh sách không cần membership sẵn. Kiểm tra session cho module khác là lời gọi `currentUserId` trong process, không có endpoint HTTP nội bộ.
+
+`POST /groups` body `{ name }` trả 201 với `groupId`, `name`, `ownerId`, `role`. Người tạo là owner. `GET /groups` trả các nhóm của user hiện tại. `GET /groups/{groupId}/members` trả `{ members: [{ userId, username, role }] }` cho thành viên của nhóm đó; người ngoài nhóm thì 403. `POST /groups/{groupId}/members` body `{ userId }` trả 201, role `MEMBER`. `DELETE /groups/{groupId}/members/{userId}` trả 204: owner xoá người khác, thành viên tự rời. Owner không tự rời.
 
 Lỗi: `VALIDATION_ERROR` 400, `CONFLICT` 409, `UNAUTHENTICATED` 401.
 
-Đăng nhập thành công thì `LoggingEventPublisher` ghi event `identity.user.logged_in`, payload chỉ có `userId`. Đăng ký không phát event.
+Đăng nhập thành công thì `LoggingEventPublisher` ghi event `identity.user.logged_in`, payload chỉ có `userId`. Tạo nhóm xong, sau khi transaction commit, phát `identity.group.created` với `groupId` và `ownerId`. Cả hai được đưa vào analytics trong cùng process. Đăng ký không phát event. `GET /stats` đọc số đã gom.
 
 ## Schema
 

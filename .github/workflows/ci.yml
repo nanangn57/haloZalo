@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Java tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Test analytics
+        run: mvn -B -f services/analytics/pom.xml test
+
+      - name: Install analytics
+        run: mvn -B -DskipTests -f services/analytics/pom.xml install
+
+      - name: Test identity
+        run: mvn -B -f services/identity/pom.xml test
+
+      - name: Test messaging
+        run: mvn -B -f services/messaging/pom.xml test
+
+  web:
+    name: Web lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: clients/web/ui/package-lock.json
+
+      - name: Install, lint, build
+        working-directory: clients/web/ui
+        run: |
+          npm ci
+          npm run lint
+          npm run build

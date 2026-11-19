@@ -22,10 +22,16 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import analytics.record.ActivityRecorder;
+
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+
 /**
  * Wraps each change in the shared envelope, logs it for the event bus, and fans it out to every socket of
  * every conversation member. The sender is a member too, so the sender's other devices get it as well.
  * Group members are read from identity at the moment of sending, so someone removed from a group gets nothing.
+ * The envelope is recorded after the source transaction has committed.
  */
 @Component
 public final class EnvelopeEventPublisher implements EventPublisher {
@@ -41,11 +47,32 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ConversationRepository conversations;
     private final ConversationMembers members;
     private final RealtimeBus realtime;
+    private final ActivityRecorder activities;
 
     public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
+        this(conversations, members, realtime, envelope -> { });
+    }
+
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, ActivityRecorder activities
+    ) {
         this.conversations = conversations;
         this.members = members;
         this.realtime = realtime;
+        this.activities = activities;
+    }
+
+    /**
+     * Uses analytics when that module shares this process. Without a database the recorder is absent.
+     */
+    @Autowired
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ObjectProvider<ActivityRecorder> activities
+    ) {
+        this(conversations, members, realtime, activities.getIfAvailable(() -> envelope -> { }));
     }
 
     @Override
@@ -73,16 +100,29 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     public void publishReadUpdated(String conversationId, String userId, long lastReadSeq) {
         String envelope = envelope(READ_UPDATED, new ReadUpdatedPayload(conversationId, userId, lastReadSeq));
         log.info(envelope);
+        record(envelope);
         push(READ_UPDATED, conversationId, () -> List.of(userId), envelope);
     }
 
     private void emit(String conversationId, String type, Object payload) {
         String envelope = envelope(type, payload);
         log.info(envelope);
+        record(envelope);
         push(type, conversationId, () -> {
             Conversation conversation = conversations.findById(conversationId);
             return conversation == null ? List.of() : List.copyOf(members.memberIds(conversation));
         }, envelope);
+    }
+
+    /**
+     * Called only after the source transaction has committed. A failed write must not fail the request.
+     */
+    private void record(String envelope) {
+        try {
+            activities.record(envelope);
+        } catch (RuntimeException failure) {
+            log.warn("Activity was not recorded: {}", failure.toString());
+        }
     }
 
     /**

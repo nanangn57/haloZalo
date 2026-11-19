@@ -1,0 +1,1364 @@
+
+/* =========================================================
+   HALOZALO - GLOBAL STYLESHEET
+   Single CSS file for the entire application
+========================================================= */
+
+
+/* =========================================================
+   1. THEME VARIABLES
+========================================================= */
+
+:root,
+[data-bs-theme="light"] {
+  color-scheme: light;
+
+  /* Background */
+  --app-bg: #ffffff;
+  --app-surface: #f8fafc;
+  --app-surface-secondary: #f1f5f9;
+  --app-surface-hover: #eef2f7;
+
+  /* Text */
+  --app-text: #1e293b;
+  --app-text-secondary: #64748b;
+  --app-text-muted: #94a3b8;
+
+  /* Border */
+  --app-border: #e2e8f0;
+
+  /* Brand */
+  --app-primary: #4f46e5;
+  --app-primary-hover: #4338ca;
+  --app-primary-soft: #eef2ff;
+
+  /* Status */
+  --app-success: #16a34a;
+  --app-success-soft: #dcfce7;
+
+  --app-danger: #dc2626;
+  --app-danger-soft: #fee2e2;
+
+  --app-warning: #d97706;
+  --app-warning-soft: #fef3c7;
+
+  --app-info: #0284c7;
+  --app-info-soft: #e0f2fe;
+
+  /* Inputs */
+  --app-input-bg: #ffffff;
+  --app-input-border: #cbd5e1;
+
+  /* Chat */
+  --chat-own-bg: #4f46e5;
+  --chat-own-text: #ffffff;
+  --chat-other-bg: #f1f5f9;
+  --chat-other-text: #1e293b;
+
+  /* Effects */
+  --app-card-shadow:
+    0 2px 8px rgba(15, 23, 42, 0.04);
+
+  --app-shadow:
+    0 4px 16px rgba(15, 23, 42, 0.08);
+
+  /* Radius */
+  --app-radius-sm: 6px;
+  --app-radius-md: 10px;
+  --app-radius-lg: 14px;
+  --app-radius-xl: 20px;
+}
+
+[data-bs-theme="dark"] {
+  color-scheme: dark;
+
+  /* Background */
+  --app-bg: #0f172a;
+  --app-surface: #1e293b;
+  --app-surface-secondary: #273449;
+  --app-surface-hover: #334155;
+
+  /* Text */
+  --app-text: #e2e8f0;
+  --app-text-secondary: #94a3b8;
+  --app-text-muted: #64748b;
+
+  /* Border */
+  --app-border: #334155;
+
+  /* Brand */
+  --app-primary: #818cf8;
+  --app-primary-hover: #a5b4fc;
+  --app-primary-soft: #312e81;
+
+  /* Status */
+  --app-success: #4ade80;
+  --app-success-soft: #14532d;
+
+  --app-danger: #f87171;
+  --app-danger-soft: #7f1d1d;
+
+  --app-warning: #fbbf24;
+  --app-warning-soft: #78350f;
+
+  --app-info: #38bdf8;
+  --app-info-soft: #0c4a6e;
+
+  /* Inputs */
+  --app-input-bg: #1e293b;
+  --app-input-border: #475569;
+
+  /* Chat */
+  --chat-own-bg: #4f46e5;
+  --chat-own-text: #ffffff;
+  --chat-other-bg: #334155;
+  --chat-other-text: #e2e8f0;
+
+  /* Effects */
+  --app-card-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15);
+
+  --app-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+
+/* =========================================================
+   2. GLOBAL RESET & BASE
+========================================================= */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--app-bg);
+  color: var(--app-text);
+
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  font-size: 14px;
+  line-height: 1.5;
+
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+a {
+  color: var(--app-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--app-primary-hover);
+}
+
+img {
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--app-text);
+  font-weight: 600;
+}
+
+p {
+  color: var(--app-text-secondary);
+}
+
+hr {
+  border-color: var(--app-border);
+  opacity: 1;
+}
+
+
+/* =========================================================
+   3. COMMON UTILITIES
+========================================================= */
+
+.app-bg {
+  background-color: var(--app-bg);
+}
+
+.app-surface {
+  background-color: var(--app-surface);
+}
+
+.app-text {
+  color: var(--app-text);
+}
+
+.app-text-secondary {
+  color: var(--app-text-secondary);
+}
+
+.app-text-muted {
+  color: var(--app-text-muted);
+}
+
+.app-border {
+  border: 1px solid var(--app-border);
+}
+
+.app-divider {
+  border: 0;
+  border-top: 1px solid var(--app-border);
+  opacity: 1;
+}
+
+.app-rounded {
+  border-radius: var(--app-radius-md);
+}
+
+.app-shadow {
+  box-shadow: var(--app-shadow);
+}
+
+.app-full-height {
+  height: 100%;
+  min-height: 0;
+}
+
+.app-scrollable {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+
+/* =========================================================
+   4. BUTTONS
+========================================================= */
+
+.app-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 8px 14px;
+
+  background-color: var(--app-bg);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-md);
+
+  font-weight: 500;
+
+  transition: all 0.2s ease;
+}
+
+.app-button:hover,
+.app-button:focus-visible {
+  background-color: var(--app-surface-hover);
+  color: var(--app-text);
+  border-color: var(--app-border);
+}
+
+.app-button-primary {
+  background-color: var(--app-primary);
+  color: #ffffff;
+  border-color: var(--app-primary);
+}
+
+.app-button-primary:hover {
+  background-color: var(--app-primary-hover);
+  color: #ffffff;
+  border-color: var(--app-primary-hover);
+}
+
+.app-button-danger {
+  background-color: var(--app-danger);
+  color: #ffffff;
+  border-color: var(--app-danger);
+}
+
+.app-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 38px;
+  height: 38px;
+
+  background: transparent;
+  color: var(--app-text-secondary);
+
+  border: none;
+  border-radius: 50%;
+
+  transition: all 0.2s ease;
+}
+
+.app-icon-button:hover {
+  background-color: var(--app-surface-hover);
+  color: var(--app-text);
+}
+
+
+/* =========================================================
+   5. CARDS
+========================================================= */
+
+.app-card {
+  background-color: var(--app-surface);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+
+  box-shadow: var(--app-card-shadow);
+}
+
+.app-card-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.app-card-body {
+  padding: 20px;
+}
+
+
+/* =========================================================
+   6. INPUTS & FORMS
+========================================================= */
+
+.app-input,
+.app-select,
+.app-textarea {
+  width: 100%;
+
+  background-color: var(--app-input-bg);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-input-border);
+  border-radius: var(--app-radius-md);
+
+  padding: 10px 12px;
+
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.app-input:focus,
+.app-select:focus,
+.app-textarea:focus {
+  background-color: var(--app-input-bg);
+  color: var(--app-text);
+
+  border-color: var(--app-primary);
+
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--app-primary) 18%, transparent);
+}
+
+.app-input::placeholder,
+.input-placeholder::placeholder,
+.app-textarea::placeholder {
+  color: var(--app-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  opacity: 1;
+}
+
+.app-textarea {
+  resize: vertical;
+}
+
+.app-form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--app-text);
+  font-weight: 500;
+}
+
+
+/* =========================================================
+   7. BADGES & STATUS
+========================================================= */
+
+.app-badge {
+  display: inline-flex;
+  align-items: center;
+
+  padding: 4px 9px;
+
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-badge-success {
+  background-color: var(--app-success-soft);
+  color: var(--app-success);
+}
+
+.app-badge-danger {
+  background-color: var(--app-danger-soft);
+  color: var(--app-danger);
+}
+
+.app-badge-warning {
+  background-color: var(--app-warning-soft);
+  color: var(--app-warning);
+}
+
+.app-badge-primary {
+  background-color: var(--app-primary-soft);
+  color: var(--app-primary);
+}
+
+
+/* =========================================================
+   8. MAIN LAYOUT & NAVIGATION
+========================================================= */
+
+.main-layout {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+.main-sidebar {
+  flex-shrink: 0;
+  width: 260px;
+  height: 100%;
+
+  background-color: var(--app-surface);
+  border-right: 1px solid var(--app-border);
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-page {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+
+  padding: 24px;
+
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+.app-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.app-page-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.app-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 10px 14px;
+
+  color: var(--app-text-secondary);
+  border-radius: var(--app-radius-md);
+
+  transition: all 0.2s ease;
+}
+
+.app-nav-item:hover,
+.app-nav-item.active {
+  background-color: var(--app-primary-soft);
+  color: var(--app-primary);
+}
+
+
+/* =========================================================
+   9. LOGIN & REGISTER
+========================================================= */
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 100vh;
+  padding: 24px;
+
+  background-color: var(--app-surface);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+
+  padding: 32px;
+
+  background-color: var(--app-bg);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-xl);
+
+  box-shadow: var(--app-shadow);
+}
+
+.auth-title {
+  margin-bottom: 8px;
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.auth-description {
+  margin-bottom: 24px;
+  color: var(--app-text-secondary);
+  text-align: center;
+}
+
+
+/* =========================================================
+   10. CHAT
+========================================================= */
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  background-color: var(--app-bg);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  flex-shrink: 0;
+  min-height: 64px;
+  padding: 12px 20px;
+
+  background-color: var(--app-bg);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.chat-header-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  overflow-y: auto;
+  padding: 20px;
+
+  background-color: var(--app-surface);
+}
+
+.chat-message {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+
+  max-width: 75%;
+}
+
+.chat-message-own {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.chat-message-other {
+  align-self: flex-start;
+}
+
+.chat-message-bubble {
+  padding: 10px 14px;
+
+  border-radius: 16px;
+
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-message-own .chat-message-bubble {
+  background-color: var(--chat-own-bg);
+  color: var(--chat-own-text);
+
+  border-bottom-right-radius: 4px;
+}
+
+.chat-message-other .chat-message-bubble {
+  background-color: var(--chat-other-bg);
+  color: var(--chat-other-text);
+
+  border-bottom-left-radius: 4px;
+}
+
+.chat-message-time {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.chat-input-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  flex-shrink: 0;
+  padding: 14px 20px;
+
+  background-color: var(--app-bg);
+  border-top: 1px solid var(--app-border);
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+
+  padding: 10px 14px;
+
+  background-color: var(--app-input-bg);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-input-border);
+  border-radius: 22px;
+  outline: none;
+}
+
+.chat-input:focus {
+  border-color: var(--app-primary);
+}
+
+.chat-input::placeholder {
+  color: var(--app-text-muted);
+}
+
+.chat-send-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 40px;
+  height: 40px;
+
+  background-color: var(--app-primary);
+  color: #ffffff;
+
+  border: none;
+  border-radius: 50%;
+}
+
+.chat-send-button:hover {
+  background-color: var(--app-primary-hover);
+}
+
+
+/* =========================================================
+   11. CONTACTS & GROUPS
+========================================================= */
+
+.contact-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.contact-sidebar {
+  flex-shrink: 0;
+  width: 320px;
+
+  background-color: var(--app-bg);
+  border-right: 1px solid var(--app-border);
+  overflow-y: auto;
+}
+
+.contact-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+
+  background-color: var(--app-bg);
+}
+
+.contact-row,
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  width: 100%;
+  padding: 12px 16px;
+
+  background-color: transparent;
+  color: var(--app-text);
+
+  border: none;
+  border-bottom: 1px solid var(--app-border);
+
+  text-align: left;
+  transition: background-color 0.2s ease;
+}
+
+.contact-row:hover,
+.contact-row.active,
+.group-row:hover,
+.group-row.active {
+  background-color: var(--app-surface-hover);
+  color: var(--app-text);
+}
+
+.contact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-name {
+  color: var(--app-text);
+  font-weight: 600;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-description {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   12. AVATAR
+========================================================= */
+
+.app-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  width: 42px;
+  height: 42px;
+
+  overflow: hidden;
+
+  background-color: var(--app-primary-soft);
+  color: var(--app-primary);
+
+  border-radius: 50%;
+
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.app-avatar-sm {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.app-avatar-lg {
+  width: 56px;
+  height: 56px;
+  font-size: 18px;
+}
+
+.app-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+
+
+/* =========================================================
+   ANALYTICS / ACTIVITY DASHBOARD
+========================================================= */
+
+.activity-page {
+  width: 100%;
+  min-height: 100%;
+  padding: 32px;
+  overflow-y: auto;
+
+  background-color: var(--app-bg);
+  color: var(--app-text);
+}
+
+/* Header */
+
+.activity-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+
+  margin-bottom: 36px;
+}
+
+.activity-eyebrow {
+  margin-bottom: 8px;
+
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+
+.activity-header h1 {
+  margin: 0 0 10px;
+
+  color: var(--app-text);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+}
+
+.activity-header p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 14px;
+}
+
+.activity-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 14px;
+
+  background-color: var(--app-surface);
+  color: var(--app-text-secondary);
+
+  border: 1px solid var(--app-border);
+  border-radius: 30px;
+
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.activity-status-dot {
+  width: 8px;
+  height: 8px;
+
+  background-color: var(--app-success);
+  border-radius: 50%;
+}
+
+/* Section heading */
+
+.activity-section {
+  width: 100%;
+}
+
+.activity-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+
+  margin-bottom: 20px;
+}
+
+.activity-section-heading h2 {
+  margin: 0 0 5px;
+
+  color: var(--app-text);
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.activity-section-heading p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.activity-count {
+  color: var(--app-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+/* Statistics grid */
+
+.activity-page .activity-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+
+  width: 100%;
+}
+
+/* Metric cards */
+
+.activity-page .activity-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+
+  min-width: 0;
+  min-height: 190px;
+  padding: 22px;
+
+  background-color: var(--app-surface);
+  color: var(--app-text);
+
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+
+  box-shadow: var(--app-card-shadow);
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.activity-page .activity-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--app-shadow);
+  border-color: var(--app-primary);
+}
+
+.activity-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 24px;
+}
+
+.activity-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 46px;
+  height: 46px;
+
+  border-radius: 12px;
+  font-size: 20px;
+}
+
+.activity-icon.blue {
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+}
+
+.activity-icon.purple {
+  background-color: rgba(168, 85, 247, 0.12);
+  color: #a855f7;
+}
+
+.activity-icon.green {
+  background-color: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
+}
+
+.activity-icon.orange {
+  background-color: rgba(249, 115, 22, 0.12);
+  color: #f97316;
+}
+
+.activity-more {
+  color: var(--app-text-muted);
+  font-size: 18px;
+}
+
+.activity-card-content {
+  min-width: 0;
+}
+
+.activity-label {
+  margin: 0 0 8px;
+
+  color: var(--app-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.activity-card-content h3 {
+  margin: 0 0 6px;
+
+  color: var(--app-text);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.activity-description {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+/* Information note */
+
+.activity-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+
+  margin-top: 28px;
+  padding: 18px 20px;
+
+  background-color: var(--app-primary-soft);
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+}
+
+.activity-note-icon {
+  color: var(--app-primary);
+  font-size: 19px;
+}
+
+.activity-note strong {
+  display: block;
+  margin-bottom: 4px;
+
+  color: var(--app-text);
+  font-size: 13px;
+}
+
+.activity-note p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Loading skeleton */
+
+.activity-skeleton {
+  min-width: 0;
+  min-height: 190px;
+  padding: 22px;
+
+  background-color: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+}
+
+.skeleton-line {
+  background: var(--app-surface-hover);
+  border-radius: 6px;
+  animation: activity-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-icon {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 24px;
+}
+
+.skeleton-title {
+  width: 65%;
+  height: 12px;
+  margin-bottom: 14px;
+}
+
+.skeleton-value {
+  width: 40%;
+  height: 28px;
+}
+
+@keyframes activity-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Error state */
+
+.activity-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+
+  padding: 20px;
+
+  background-color: var(--app-danger-soft);
+  color: var(--app-danger);
+
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+}
+
+.activity-error > i {
+  font-size: 20px;
+}
+
+.activity-error strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.activity-error p {
+  margin: 0;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+/* Responsive */
+
+@media (max-width: 1200px) {
+  .activity-page .activity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .activity-page {
+    padding: 20px 16px;
+  }
+
+  .activity-header {
+    flex-direction: column;
+    margin-bottom: 28px;
+  }
+
+  .activity-header h1 {
+    font-size: 24px;
+  }
+
+  .activity-status {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .activity-page .activity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-section-heading {
+    align-items: flex-start;
+  }
+
+  .activity-count {
+    font-size: 10px;
+  }
+}
+
+
+
+/* =========================================================
+   14. LOADING & EMPTY STATES
+========================================================= */
+
+.app-loading,
+.app-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 180px;
+  padding: 24px;
+
+  color: var(--app-text-secondary);
+  text-align: center;
+}
+
+.app-spinner {
+  width: 32px;
+  height: 32px;
+
+  border: 3px solid var(--app-border);
+  border-top-color: var(--app-primary);
+  border-radius: 50%;
+
+  animation: app-spin 0.8s linear infinite;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* =========================================================
+   15. SCROLLBAR
+========================================================= */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color:
+    var(--app-border)
+    transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--app-border);
+  border-radius: 10px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--app-text-muted);
+}
+
+
+/* =========================================================
+   16. RESPONSIVE DESIGN
+========================================================= */
+
+@media (max-width: 992px) {
+  .main-sidebar {
+    width: 220px;
+  }
+
+  .contact-sidebar {
+    width: 280px;
+  }
+
+  .activity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .main-sidebar {
+    width: 100%;
+    height: auto;
+  }
+
+  .main-content {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .app-page {
+    padding: 16px;
+  }
+
+  .contact-sidebar {
+    width: 100%;
+  }
+
+  .contact-layout {
+    flex-direction: column;
+  }
+
+  .chat-message {
+    max-width: 90%;
+  }
+
+  .chat-messages {
+    padding: 12px;
+  }
+
+  .chat-input-area {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 576px) {
+  .activity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-page-title {
+    font-size: 20px;
+  }
+
+  .app-page-header {
+    align-items: flex-start;
+  }
+
+  .auth-card {
+    padding: 24px 20px;
+  }
+
+  .chat-header {
+    padding: 10px 12px;
+  }
+}
+
+
+/* =========================================================
+   END OF HALOZALO GLOBAL STYLESHEET
+========================================================= */

@@ -115,6 +115,27 @@ class EnvelopeEventPublisherTest {
     }
 
     @Test
+    void createdMessageIsRecordedAfterTheStoreReturns() {
+        List<String> recorded = new ArrayList<>();
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> { }, recorded::add)
+            .publishMessageCreated(MESSAGE);
+
+        assertEquals(1, recorded.size());
+        assertEquals("messaging.message.created", JsonPath.read(recorded.get(0), "$.type"));
+        assertEquals("messaging", JsonPath.read(recorded.get(0), "$.producer"));
+        assertEquals(MESSAGE.getMessageId(), JsonPath.read(recorded.get(0), "$.payload.messageId"));
+    }
+
+    @Test
+    void aFailedActivityWriteDoesNotFailTheChangeThatIsAlreadyStored() {
+        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> { }, envelope -> {
+            throw new IllegalStateException("analytics down");
+        });
+
+        assertDoesNotThrow(() -> publisher.publishMessageCreated(MESSAGE));
+    }
+
+    @Test
     void aFailedPushDoesNotFailTheChangeThatIsAlreadyStored() {
         EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> {
             throw new IllegalStateException("socket send failed");
