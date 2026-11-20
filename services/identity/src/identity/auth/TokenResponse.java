@@ -1,6 +1,7 @@
 package identity.auth;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 import identity.session.Session;
 
 public final class TokenResponse {
@@ -13,7 +14,7 @@ public final class TokenResponse {
         this.accessToken = session.getSessionId();
         this.tokenType = "Bearer";
         this.expiresIn = expiresIn;
-        this.user = new User(account.getUserId(), account.getUsername(), account.getEmail());
+        this.user = User.from(account);
     }
 
     public String getAccessToken() {
@@ -36,11 +37,26 @@ public final class TokenResponse {
         private final String userId;
         private final String username;
         private final String email;
+        private final PlatformRole platformRole;
 
         public User(String userId, String username, String email) {
+            this(userId, username, email, PlatformRole.USER);
+        }
+
+        public User(String userId, String username, String email, PlatformRole platformRole) {
             this.userId = userId;
             this.username = username;
             this.email = email;
+            this.platformRole = platformRole == null ? PlatformRole.USER : platformRole;
+        }
+
+        public static User from(Account account) {
+            return new User(
+                account.getUserId(),
+                account.getUsername(),
+                account.getEmail(),
+                account.getPlatformRole()
+            );
         }
 
         public String getUserId() {
@@ -53,6 +69,10 @@ public final class TokenResponse {
 
         public String getEmail() {
             return email;
+        }
+
+        public PlatformRole getPlatformRole() {
+            return platformRole;
         }
     }
 }

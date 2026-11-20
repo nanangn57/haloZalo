@@ -5,7 +5,6 @@ import media.LocalMediaStore;
 import media.MediaProperties;
 import media.TestLinks;
 import member.ConversationMembers;
-import member.StandaloneGroupController;
 import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +27,7 @@ import org.springframework.util.unit.DataSize;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -57,12 +57,12 @@ class MessageControllerTest {
         MemoryMessages messages = new MemoryMessages(conversations);
         MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
             new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
+        groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
         MediaService media = new MediaService(service, new MemoryMedia(), new LocalMediaStore(mediaDir), TestLinks.LINKS,
             new MediaProperties(mediaDir.toString(), "", Duration.ofHours(1), DataSize.ofMegabytes(10),
                 DataSize.ofMegabytes(25), DataSize.ofMegabytes(10)),
             new RecordingEvents());
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service, media, TestLinks.LINKS),
-                new StandaloneGroupController(groups))
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service, media, TestLinks.LINKS))
             .setControllerAdvice(new MessageExceptionHandler())
             .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
@@ -72,10 +72,6 @@ class MessageControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.type").value("DIRECT"))
             .andExpect(jsonPath("$.memberIds.length()").value(2));
-        mvc.perform(put("/internal/groups/" + GROUP + "/members")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"memberIds\":[\"" + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
-            .andExpect(status().isNoContent());
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\"}"))
@@ -114,12 +110,16 @@ class MessageControllerTest {
     }
 
     @Test
-    void sendRejectsUnknownTypesAndMediaWithoutAnUpload() throws Exception {
-        send(ALICE, "{\"type\":\"STICKER\",\"body\":\"x\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    void sendRejectsImageWithoutAnUpload() throws Exception {
         // A URL in body is not a file: IMAGE needs the mediaId of an upload.
         send(ALICE, "{\"type\":\"IMAGE\",\"body\":\"https://cdn/a.png\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void sendRejectsUnknownType() throws Exception {
+        send(ALICE, "{\"type\":\"STICKER\",\"body\":\"x\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }

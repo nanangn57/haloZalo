@@ -34,7 +34,7 @@ public final class MembershipRequestAuthorizer implements RequestAuthorizer {
 
     static String conversationId(String path) {
         String id = firstSegment(path, "/conversations/");
-        if (id == null || "direct".equals(id)) {
+        if (id == null || "direct".equals(id) || "group".equals(id)) {
             return null;
         }
         return id;

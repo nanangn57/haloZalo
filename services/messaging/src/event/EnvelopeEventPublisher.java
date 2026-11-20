@@ -7,8 +7,10 @@ import media.MediaLinks;
 import member.ConversationMembers;
 import message.Message;
 import reaction.MessageReaction;
+import push.PushNotifier;
 import realtime.RealtimeBus;
 import realtime.RealtimeFrame;
+import realtime.RealtimeSessions;
 import storage.ConversationRepository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -18,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,12 +54,14 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ConversationMembers members;
     private final RealtimeBus realtime;
     private final ActivityRecorder activities;
+    private final RealtimeSessions sessions;
+    private final PushNotifier push;
     private final MediaLinks links;
 
     public EnvelopeEventPublisher(
         ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, MediaLinks links
     ) {
-        this(conversations, members, realtime, envelope -> { }, links);
+        this(conversations, members, realtime, envelope -> { }, null, (ids, conversationId, preview) -> { }, links);
     }
 
     public EnvelopeEventPublisher(
@@ -66,10 +71,24 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         ActivityRecorder activities,
         MediaLinks links
     ) {
+        this(conversations, members, realtime, activities, null, (ids, conversationId, preview) -> { }, links);
+    }
+
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ActivityRecorder activities,
+        RealtimeSessions sessions,
+        PushNotifier push,
+        MediaLinks links
+    ) {
         this.conversations = conversations;
         this.members = members;
         this.realtime = realtime;
         this.activities = activities;
+        this.sessions = sessions;
+        this.push = push == null ? (ids, conversationId, preview) -> { } : push;
         this.links = links;
     }
 
@@ -82,14 +101,25 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         ConversationMembers members,
         RealtimeBus realtime,
         ObjectProvider<ActivityRecorder> activities,
+        ObjectProvider<RealtimeSessions> sessions,
+        ObjectProvider<PushNotifier> push,
         MediaLinks links
     ) {
-        this(conversations, members, realtime, activities.getIfAvailable(() -> envelope -> { }), links);
+        this(
+            conversations,
+            members,
+            realtime,
+            activities.getIfAvailable(() -> envelope -> { }),
+            sessions.getIfAvailable(),
+            push.getIfAvailable(() -> (ids, conversationId, preview) -> { }),
+            links
+        );
     }
 
     @Override
     public void publishMessageCreated(Message message) {
         emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message, links));
+        notifyOffline(message);
     }
 
     @Override
@@ -177,5 +207,51 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Could not write event", ex);
         }
+    }
+
+    private void notifyOffline(Message message) {
+        if (sessions == null) {
+            return;
+        }
+        try {
+            Conversation conversation = conversations.findById(message.getConversationId());
+            if (conversation == null) {
+                return;
+            }
+            List<String> offline = new ArrayList<>();
+            for (String memberId : members.memberIds(conversation)) {
+                if (memberId.equals(message.getSenderId())) {
+                    continue;
+                }
+                if (sessions.count(memberId) == 0) {
+                    offline.add(memberId);
+                }
+            }
+            if (!offline.isEmpty()) {
+                push.notifyNewMessage(offline, message.getConversationId(), previewOf(message));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Offline push failed for conversation {}", message.getConversationId(), ex);
+        }
+    }
+
+    private static String previewOf(Message message) {
+        if (message.getContent() instanceof message.MessageContent.Text text) {
+            String body = text.text();
+            if (body == null || body.isBlank()) {
+                return "New message";
+            }
+            return body.length() > 80 ? body.substring(0, 77) + "…" : body;
+        }
+        if (message.getType() == null) {
+            return "New message";
+        }
+        return switch (message.getType()) {
+            case IMAGE -> "Sent an image";
+            case VIDEO -> "Sent a video";
+            case DOCUMENT -> "Sent a file";
+            case EMOTION -> "Sent an emotion";
+            case TEXT -> "New message";
+        };
     }
 }

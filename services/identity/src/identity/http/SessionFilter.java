@@ -38,7 +38,20 @@ public final class SessionFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
         String path = request.getRequestURI();
-        return "/auth/register".equals(path) || "/auth/login".equals(path) || "/auth/verify".equals(path);
+        if (path == null) {
+            return false;
+        }
+        if ("/auth/register".equals(path) || "/auth/login".equals(path) || "/auth/verify".equals(path)) {
+            return true;
+        }
+        if (path.startsWith("/actuator")) {
+            return true;
+        }
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+        // Public read of uploaded media bytes.
+        return "GET".equalsIgnoreCase(request.getMethod()) && path.matches("/media/[^/]+");
     }
 
     @Override

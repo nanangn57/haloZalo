@@ -9,7 +9,7 @@ import java.time.Duration;
 /**
  * Settings for media upload and download. See resources/application.yml.
  *
- * @param directory      where LocalMediaStore keeps the files
+ * @param storageDir     where LocalMediaStore keeps the files
  * @param signingKey     HMAC key for download links. Blank means a random key per process: links then stop working
  *                       on restart, which is fine on one machine but not with two instances behind a load balancer
  * @param linkTtl        how long a download link stays valid at least
@@ -19,7 +19,7 @@ import java.time.Duration;
  */
 @ConfigurationProperties("messaging.media")
 public record MediaProperties(
-    @DefaultValue("./data/media") String directory,
+    @DefaultValue("./data/media") String storageDir,
     @DefaultValue("") String signingKey,
     @DefaultValue("1h") Duration linkTtl,
     @DefaultValue("10MB") DataSize maxImageSize,

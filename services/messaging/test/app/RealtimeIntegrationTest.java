@@ -25,6 +25,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -58,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
     classes = RealtimeIntegrationTest.TestApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {"messaging.user-header-enabled=true", "messaging.media.directory=target/test-media"})
+    properties = {"messaging.user-header-enabled=true", "messaging.media.storage-dir=target/test-media"})
 class RealtimeIntegrationTest {
     // New users for every test: the app is shared, and a pair of users has only one DIRECT conversation.
     private final String aliceId = UUID.randomUUID().toString();
@@ -239,7 +240,13 @@ class RealtimeIntegrationTest {
         FlywayAutoConfiguration.class
     })
     @ConfigurationPropertiesScan({"realtime", "media"})
-    @ComponentScan({"api", "event", "http", "media", "member", "realtime", "service"})
+    @ComponentScan(
+        basePackages = {"api", "event", "http", "media", "member", "realtime", "service"},
+        excludeFilters = @ComponentScan.Filter(
+            type = FilterType.ASSIGNABLE_TYPE,
+            classes = {http.SharedSessionFilter.class, member.SharedDbGroupMembers.class}
+        )
+    )
     static class TestApplication {
         @Bean
         MemoryConversations conversations() {

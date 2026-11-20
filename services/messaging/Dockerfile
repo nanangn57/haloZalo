@@ -12,8 +12,8 @@ RUN useradd --system --uid 10001 messaging \
     && mkdir -p /var/lib/halozalo/media && chown messaging /var/lib/halozalo/media
 WORKDIR /app
 # Uploads. Mount a volume here, or files are lost with the container.
-ENV MESSAGING_MEDIA_DIR=/var/lib/halozalo/media
-COPY --from=build /build/messaging/target/messaging-0.1.0.jar app.jar
+ENV MESSAGING_MEDIA_STORAGE_DIR=/var/lib/halozalo/media
+COPY --from=build /build/messaging/target/messaging-0.1.0-exec.jar app.jar
 USER messaging
 EXPOSE 8082
 # Size the heap from the container memory limit, not the host.

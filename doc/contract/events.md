@@ -47,9 +47,22 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `messaging.reaction.removed` | Gỡ reaction | messaging | cùng payload với `messaging.reaction.added` |
 | `messaging.read.updated` | Mốc đã đọc của một user tiến lên | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "lastReadSeq": 1 }` |
 | `messaging.media.uploaded` | Upload media đã commit | messaging | `{ "senderId": "<uuid>", "conversationId": "<uuid>", "type": "IMAGE" }` |
+| `messaging.typing` | Client báo đang gõ (ephemeral, không persist) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "typing": true }` |
+| `messaging.presence` | Client báo online/offline trong hội thoại (ephemeral) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "status": "online" }` |
 
-`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics chỉ đếm envelope, không đọc payload. Event này chỉ ghi log và analytics, không đẩy qua `/ws`: upload chưa phải là tin. Thành viên thấy file qua `messaging.message.created` của tin gửi `mediaId`.
+`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics đếm envelope upload, không dùng payload của upload. Event này chỉ ghi log và analytics, không đẩy qua `/ws`: upload chưa phải là tin. Thành viên thấy file qua `messaging.message.created` của tin gửi `mediaId`.
+
+Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, và `conversationId` trong payload của login, tạo nhóm, và tin mới để ghi bảng tổng hợp của chính schema `analytics`. Không đọc bảng schema `messaging`.
 
 `code` của reaction nằm trong bộ `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 
-WebSocket `/ws` đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, và `messaging.read.updated`. Frame là nguyên phong bì, không có thêm lớp bọc. `messaging.read.updated` chỉ tới các thiết bị của user đã đọc, không tới thành viên khác.
+WebSocket `/ws` đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, `messaging.read.updated`, `messaging.typing`, và `messaging.presence`. Frame là nguyên phong bì, không có thêm lớp bọc. `messaging.read.updated` chỉ tới các thiết bị của user đã đọc, không tới thành viên khác.
+
+Client gửi tín hiệu ephemeral trên cùng `/ws` (không qua HTTP):
+
+```json
+{ "type": "messaging.typing", "payload": { "conversationId": "<uuid>", "typing": true } }
+{ "type": "messaging.presence", "payload": { "conversationId": "<uuid>", "status": "online" } }
+```
+
+Server kiểm tra membership rồi fan-out phong bì chuẩn tới thành viên khác của hội thoại. `status` là `online` hoặc `offline`.

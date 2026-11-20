@@ -1,0 +1,46 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "elapsedSec": 6.01,
+  "agents": 6,
+  "checksPassed": 57,
+  "checksTotal": 57,
+  "failedAgents": [],
+  "perAgent": [
+    {
+      "agent": "auth_profile",
+      "passed": 8,
+      "total": 8,
+      "failures": []
+    },
+    {
+      "agent": "friends",
+      "passed": 5,
+      "total": 5,
+      "failures": []
+    },
+    {
+      "agent": "chat_sync",
+      "passed": 13,
+      "total": 13,
+      "failures": []
+    },
+    {
+      "agent": "media",
+      "passed": 10,
+      "total": 10,
+      "failures": []
+    },
+    {
+      "agent": "groups",
+      "passed": 13,
+      "total": 13,
+      "failures": []
+    },
+    {
+      "agent": "dashboard_devices",
+      "passed": 8,
+      "total": 8,
+      "failures": []
+    }
+  ]
+}

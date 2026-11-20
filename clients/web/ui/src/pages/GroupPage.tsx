@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import GroupHeader from '../components/group/GroupHeader'
 
-import type { Group, Member } from '@core/types/group'
+import type { AssignableGroupRole, Group, Member } from '@core/types/group'
 
 import { findUserApi } from '@core/userService'
 import {
@@ -13,6 +13,7 @@ import {
   getGroupMembersApi,
   addGroupMemberApi,
   removeGroupMemberApi,
+  assignGroupMemberRoleApi,
 } from '@core/groupService'
 
 import { getAuth } from '@core/authSession'
@@ -49,6 +50,7 @@ function GroupPage() {
   const [loadingMembers, setLoadingMembers] = useState(false)
   const [membersError, setMembersError] = useState('')
   const [removingUserId, setRemovingUserId] = useState<string | null>(null)
+  const [roleUpdatingUserId, setRoleUpdatingUserId] = useState<string | null>(null)
 
   // Find and add user
   const [searchQuery, setSearchQuery] = useState('')
@@ -449,6 +451,32 @@ function GroupPage() {
     void loadGroups()
   }
 
+  async function handleAssignRole(
+    userId: string,
+    role: AssignableGroupRole,
+  ) {
+    if (!selectedGroup || roleUpdatingUserId) return
+
+    setRoleUpdatingUserId(userId)
+    setMemberError('')
+    setMemberSuccess('')
+
+    try {
+      await assignGroupMemberRoleApi(selectedGroup.groupId, userId, role)
+      setMemberSuccess(
+        role === 'ADMIN' ? 'Member promoted to ADMIN.' : 'Member set to MEMBER.',
+      )
+      setLoadingMembers(true)
+      await loadGroupMembers(selectedGroup.groupId)
+    } catch (err) {
+      setMemberError(
+        err instanceof Error ? err.message : 'Cannot update role',
+      )
+    } finally {
+      setRoleUpdatingUserId(null)
+    }
+  }
+
   // No authenticated session
   if (!authUser?.userId) {
     return (
@@ -483,7 +511,9 @@ function GroupPage() {
               <small className="text-secondary">
                 {selectedGroup.role === 'OWNER'
                   ? 'You are the owner'
-                  : 'You are a member'}
+                  : selectedGroup.role === 'ADMIN'
+                    ? 'You are an admin'
+                    : 'You are a member'}
               </small>
             </div>
 
@@ -533,7 +563,17 @@ function GroupPage() {
                   const isCurrentUser =
                     member.userId === authUser.userId
 
+                  const canManageMembers =
+                    selectedGroup.role === 'OWNER' ||
+                    selectedGroup.role === 'ADMIN'
+
                   const canRemove =
+                    canManageMembers &&
+                    !isCurrentUser &&
+                    member.role !== 'OWNER' &&
+                    !(selectedGroup.role === 'ADMIN' && member.role === 'ADMIN')
+
+                  const canAssignRole =
                     selectedGroup.role === 'OWNER' &&
                     !isCurrentUser &&
                     member.role !== 'OWNER'
@@ -541,7 +581,7 @@ function GroupPage() {
                   return (
                     <li
                       key={member.userId}
-                      className="list-group-item d-flex justify-content-between align-items-center"
+                      className="list-group-item d-flex justify-content-between align-items-center gap-2"
                     >
                       <div>
                         <span className="fw-semibold">
@@ -559,20 +599,50 @@ function GroupPage() {
                         </span>
                       </div>
 
-                      {canRemove && (
-                        <button
-                          type="button"
-                          className="btn btn-outline-danger btn-sm"
-                          disabled={removingUserId !== null}
-                          onClick={() =>
-                            void handleRemoveMember(member.userId)
-                          }
-                        >
-                          {removingUserId === member.userId
-                            ? 'Removing...'
-                            : 'Remove'}
-                        </button>
-                      )}
+                      <div className="d-flex gap-2 flex-wrap justify-content-end">
+                        {canAssignRole && member.role !== 'ADMIN' && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm"
+                            disabled={roleUpdatingUserId !== null}
+                            onClick={() =>
+                              void handleAssignRole(member.userId, 'ADMIN')
+                            }
+                          >
+                            {roleUpdatingUserId === member.userId
+                              ? '…'
+                              : 'Make admin'}
+                          </button>
+                        )}
+                        {canAssignRole && member.role === 'ADMIN' && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary btn-sm"
+                            disabled={roleUpdatingUserId !== null}
+                            onClick={() =>
+                              void handleAssignRole(member.userId, 'MEMBER')
+                            }
+                          >
+                            {roleUpdatingUserId === member.userId
+                              ? '…'
+                              : 'Make member'}
+                          </button>
+                        )}
+                        {canRemove && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            disabled={removingUserId !== null}
+                            onClick={() =>
+                              void handleRemoveMember(member.userId)
+                            }
+                          >
+                            {removingUserId === member.userId
+                              ? 'Removing...'
+                              : 'Remove'}
+                          </button>
+                        )}
+                      </div>
                     </li>
                   )
                 })}
@@ -580,8 +650,9 @@ function GroupPage() {
             )}
           </div>
 
-          {/* Owner adds members */}
-          {selectedGroup.role === 'OWNER' && (
+          {/* Owner / admin adds members */}
+          {(selectedGroup.role === 'OWNER' ||
+            selectedGroup.role === 'ADMIN') && (
             <>
               <form
                 onSubmit={handleSearchUser}
@@ -638,8 +709,9 @@ function GroupPage() {
             </>
           )}
 
-          {/* Member leaves group */}
-          {selectedGroup.role === 'MEMBER' && (
+          {/* Member / admin leaves group */}
+          {(selectedGroup.role === 'MEMBER' ||
+            selectedGroup.role === 'ADMIN') && (
             <button
               type="button"
               className="btn btn-outline-danger btn-sm mt-3"
@@ -791,29 +863,29 @@ function GroupPage() {
           </button>
         </div>
       ) : (
-        <ul className="list-group list-group-flush flex-grow-1 overflow-auto">
+        <ul className="group-list flex-grow-1 overflow-auto">
           {filteredGroups.length === 0 ? (
-            <li className="list-group-item text-center py-5">
-              <i className="bi bi-people fs-1 text-secondary" />
-              <h5 className="mt-3">
+            <li className="app-empty-state">
+              <i className="bi bi-people" style={{ fontSize: 40 }} />
+              <h2 style={{ fontSize: 18, marginTop: 12 }}>
                 {selectedFilter === 'owned'
                   ? 'You do not own any groups'
                   : 'No groups yet'}
-              </h5>
-              <p className="text-secondary">
+              </h2>
+              <p>
                 Create a group to start connecting with others.
               </p>
 
               {selectedFilter === 'all' && (
                 <button
                   type="button"
-                  className="btn btn-primary"
+                  className="app-button app-button-primary"
                   onClick={() => {
                     setActionError('')
                     setShowCreateForm(true)
                   }}
                 >
-                  <i className="bi bi-plus-lg me-2" />
+                  <i className="bi bi-plus-lg" aria-hidden="true" />
                   Create group
                 </button>
               )}
@@ -824,70 +896,55 @@ function GroupPage() {
                 selectedGroup?.groupId === group.groupId
 
               const count = memberCounts[group.groupId]
+              const initial = (group.name?.trim()?.charAt(0) || 'G').toUpperCase()
 
               return (
                 <li
                   key={group.groupId}
-                  className={`list-group-item p-0 ${
-                    isSelected ? 'bg-primary-subtle' : ''
+                  className={`group-row-item ${
+                    isSelected ? 'is-selected' : ''
                   }`}
                 >
-                  <div className="d-flex align-items-center">
-                    {/* Click group information to expand members */}
-                    <button
-                      type="button"
-                      className="btn btn-light flex-grow-1 rounded-0 text-start p-3 border-0"
-                      onClick={() => handleSelectGroup(group)}
-                    >
-                      <div className="d-flex align-items-center gap-3">
-                        <div
-                          className="rounded-circle bg-primary-subtle text-primary d-flex align-items-center justify-content-center"
-                          style={{
-                            width: 48,
-                            height: 48,
-                            flexShrink: 0,
-                          }}
-                        >
-                          <i className="bi bi-people fs-4" />
-                        </div>
+                  <button
+                    type="button"
+                    className="group-row-main"
+                    onClick={() => handleSelectGroup(group)}
+                  >
+                    <span className="group-avatar" aria-hidden="true">
+                      {initial}
+                    </span>
 
-                        <div className="flex-grow-1 overflow-hidden">
-                          <div className="fw-semibold text-truncate">
-                            {group.name}
-                          </div>
+                    <span className="group-row-copy">
+                      <span className="group-row-name">{group.name}</span>
+                      <span className="group-row-meta">
+                        {group.role === 'OWNER' ? 'Owner' : 'Member'}
+                        {' · '}
+                        {count === undefined
+                          ? 'Loading members…'
+                          : count === null
+                            ? 'Members unavailable'
+                            : `${count} members`}
+                      </span>
+                    </span>
 
-                          <small className="text-secondary">
-                            {group.role === 'OWNER' ? 'Owner' : 'Member'}
-                            {' · '}
-                            {count === undefined
-                              ? 'Loading members...'
-                              : count === null
-                                ? 'Members unavailable'
-                                : `${count} members`}
-                          </small>
-                        </div>
+                    <i
+                      className={`bi ${
+                        isSelected ? 'bi-chevron-up' : 'bi-chevron-down'
+                      }`}
+                      aria-hidden="true"
+                      style={{ color: 'var(--app-text-muted)' }}
+                    />
+                  </button>
 
-                        <i
-                          className={`bi ${
-                            isSelected
-                              ? 'bi-chevron-up'
-                              : 'bi-chevron-down'
-                          } text-secondary`}
-                        />
-                      </div>
-                    </button>
-
-                    {/* Arrow opens ChatPage */}
-                    <button
-                      type="button"
-                      className="btn btn-light rounded-0 border-0 align-self-stretch px-4"
-                      title={`Open chat ${group.name}`}
-                      aria-label={`Open chat ${group.name}`}
-                      onClick={() => handleOpenChat(group)}
-                    >
-                      <i className="bi bi-chevron-right text-secondary fs-5" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="app-icon-button group-row-chat"
+                    title={`Open chat ${group.name}`}
+                    aria-label={`Open chat ${group.name}`}
+                    onClick={() => handleOpenChat(group)}
+                  >
+                    <i className="bi bi-chat-dots" aria-hidden="true" />
+                  </button>
                 </li>
               )
             })

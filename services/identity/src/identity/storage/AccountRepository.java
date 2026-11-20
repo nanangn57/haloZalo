@@ -1,6 +1,7 @@
 package identity.storage;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -10,9 +11,25 @@ public interface AccountRepository {
 
     Account findByUsername(String username);
 
+    /**
+     * Same as {@link #findByUsername(String)} but case-insensitive. Used for admin bootstrap.
+     */
+    default Account findByUsernameIgnoreCase(String username) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+        Account exact = findByUsername(username);
+        if (exact != null) {
+            return exact;
+        }
+        return findByUsername(username.toLowerCase());
+    }
+
     Account findByEmail(String email);
 
     Account findById(String userId);
+
+    void updatePlatformRole(String userId, PlatformRole role);
 
     /**
      * Accounts for these ids, in the order given. Ids without an account are left out.

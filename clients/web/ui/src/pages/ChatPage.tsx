@@ -18,7 +18,8 @@ import type { AuthUser } from '@core/types/auth'
 import type { User } from '../types/user'
 import type { Message } from '@core/types/message'
 import type { Member } from '@core/types/group'
-import type { MessagingEvent } from '@core/types/event'
+import type { MessageCreatedPayload, MessagingEvent } from '@core/types/event'
+import { mapEventToMessage } from '@core/types/messageMapper'
 
 import ConversationItem from '../components/chat/ConversationItem'
 import ChatHeader from '../components/chat/ChatHeader'
@@ -30,11 +31,13 @@ import {
   sendMessageApi,
   getMessagesApi,
   createGroupConversationApi,
-  uploadMediaApi,
+  markConversationReadApi,
+  type EmotionCode,
 } from '@core/messageService'
-import type { MediaKind } from '@core/types/message'
-import { getGroupMembersApi } from '@core/groupService'
-// import { socketClient } from '@core/socketClient'
+import { uploadMediaApi, type MediaUploadType } from '@core/mediaService'
+import { getGroupMembersApi, getGroupsApi } from '@core/groupService'
+import { socketClient } from '@core/socketClient'
+import type { SocketStatus } from '@core/socketClient'
 
 import EmojiPicker, {
   type EmojiClickData,
@@ -49,12 +52,6 @@ interface ChatNavigationState {
   conversationType: 'GROUP' | 'DIRECT'
   title: string
 }
-
-// type SocketStatus =
-//   | 'disconnected'
-//   | 'connecting'
-//   | 'connected'
-//   | 'error'
 
 // ======================================================
 // CHAT PAGE
@@ -108,6 +105,8 @@ function ChatPage() {
 
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null)
+  const selectedConversationRef = useRef<Conversation | null>(null)
+  selectedConversationRef.current = selectedConversation
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -119,22 +118,41 @@ function ChatPage() {
   // Messages
   const [messages, setMessages] = useState<Message[]>([])
 
+  // Insert or replace by messageId/clientMsgId. A message can arrive twice: as the HTTP
+  // response and as the /ws echo, in either order.
+  function upsertMessage(incoming: Message) {
+    setMessages((previous) => {
+      const index = previous.findIndex(
+        (message) =>
+          (incoming.messageId !== undefined && message.messageId === incoming.messageId) ||
+          message.clientMsgId === incoming.clientMsgId,
+      )
+      if (index < 0) {
+        return [...previous, incoming]
+      }
+      return previous.map((message, i) => (i === index ? incoming : message))
+    })
+  }
+  const messagesRef = useRef<Message[]>([])
+  messagesRef.current = messages
+
   const [isLoadingMessages, setIsLoadingMessages] =
     useState(false)
 
   const [messageLoadError, setMessageLoadError] =
     useState<string | null>(null)
 
-  // Attachments: hidden file inputs opened by the toolbar buttons.
-  const imageInputRef = useRef<HTMLInputElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [attachError, setAttachError] =
-    useState<string | null>(null)
 
   const [newMessage, setNewMessage] = useState('')
 
   const [showEmojiPicker, setShowEmojiPicker] =
     useState(false)
+
+  const [showEmotionBar, setShowEmotionBar] = useState(false)
+  const [showSocketDebug, setShowSocketDebug] = useState(false)
+  const [uploadingMedia, setUploadingMedia] = useState(false)
+  const mediaInputRef = useRef<HTMLInputElement | null>(null)
+  const mediaTypeRef = useRef<MediaUploadType>('IMAGE')
 
   // Group members
   const [groupMembers, setGroupMembers] =
@@ -174,15 +192,25 @@ function ChatPage() {
   const [usersById, setUsersById] =
     useState<Record<string, UserSummary>>({})
 
+  // Identity group names keyed by groupId (= conversationId for GROUP).
+  const [groupNamesById, setGroupNamesById] = useState<
+    Record<string, string>
+  >({})
+
   // Ids already asked for, so an id without an account is not asked again.
   const requestedUserIds = useRef<Set<string>>(new Set())
 
   // WebSocket
-  // const [socketStatus, setSocketStatus] =
-  //   useState<SocketStatus>('disconnected')
+  const [socketStatus, setSocketStatus] =
+    useState<SocketStatus>('disconnected')
 
   const [socketEvents, setSocketEvents] =
     useState<MessagingEvent[]>([])
+
+  const [typingUserId, setTypingUserId] = useState<string | null>(null)
+  const [peerOnline, setPeerOnline] = useState(false)
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTypingSentRef = useRef(false)
 
   // --------------------------------------------------
   // 4. LOAD CONVERSATIONS
@@ -291,6 +319,19 @@ function ChatPage() {
 
         if (isMounted) {
           setGroupMembers(result.members)
+          setUsersById((previous) => {
+            const next = { ...previous }
+            result.members.forEach((member) => {
+              if (!next[member.userId]) {
+                next[member.userId] = {
+                  userId: member.userId,
+                  username: member.username,
+                  displayName: member.username,
+                }
+              }
+            })
+            return next
+          })
         }
       } catch (err) {
         console.error('Cannot load group members:', err)
@@ -316,14 +357,45 @@ function ChatPage() {
   ])
   
   // --------------------------------------------------
-  // 5b. LOAD MEMBER NAMES FOR DIRECT CONVERSATIONS
+  // 5b. LOAD GROUP NAMES + MEMBER NAMES FOR LIST/HEADER
   // --------------------------------------------------
+
+  useEffect(() => {
+    const hasGroup = conversations.some(
+      (conversation) => conversation.type === 'GROUP',
+    )
+    if (!hasGroup) {
+      return
+    }
+
+    let cancelled = false
+    void getGroupsApi()
+      .then((groups) => {
+        if (cancelled) {
+          return
+        }
+        const next: Record<string, string> = {}
+        groups.forEach((group) => {
+          const name = group.name?.trim()
+          if (name) {
+            next[group.groupId] = name
+          }
+        })
+        setGroupNamesById((previous) => ({ ...previous, ...next }))
+      })
+      .catch((err) => {
+        console.error('Cannot load group names:', err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [conversations])
 
   useEffect(() => {
     const missing = [
       ...new Set(
         conversations
-          .filter((conversation) => conversation.type === 'DIRECT')
           .flatMap((conversation) => conversation.memberIds)
           .filter(
             (userId) =>
@@ -398,6 +470,17 @@ function ChatPage() {
 
         setMessages(result.messages)
         setMessageLoadError(null)
+
+        const maxSeq = result.messages.reduce(
+          (max, message) =>
+            typeof message.seq === 'number' ? Math.max(max, message.seq) : max,
+          0,
+        )
+        if (maxSeq > 0) {
+          void markConversationReadApi(currentConversationId, maxSeq).catch(
+            (err) => console.error('Cannot mark read:', err),
+          )
+        }
       } catch (err) {
         console.error(
           'Cannot initialize conversation or load messages:',
@@ -433,87 +516,131 @@ function ChatPage() {
   // 7. WEBSOCKET CONNECTION
   // --------------------------------------------------
 
-  // useEffect(() => {
-  //   const unsubscribeEvent = socketClient.subscribe((event) => {
-  //     console.log('Received WebSocket event:', event)
+  useEffect(() => {
+    const mergeIncoming = upsertMessage
 
-  //     setSocketEvents((previous) => [
-  //       event,
-  //       ...previous,
-  //     ])
+    const unsubscribeEvent = socketClient.subscribe((event) => {
+      console.log('Received WebSocket event:', event)
 
-  //     if (event.type !== 'messaging.message.created') {
-  //       return
-  //     }
+      setSocketEvents((previous) => [event as MessagingEvent, ...previous])
 
-  //     const payload = event.payload as {
-  //       messageId: string
-  //       conversationId: string
-  //       seq: number
-  //       senderId: string
-  //       type: 'TEXT' | 'EMOTION'
-  //       body: string
-  //       clientMsgId: string
-  //       createdAt: string
-  //     }
+      if (event.type === 'messaging.read.updated') {
+        const payload = event.payload as {
+          conversationId?: string
+          lastReadSeq?: number
+          unreadCount?: number
+        }
+        if (!payload.conversationId) return
+        setConversations((previous) =>
+          previous.map((conversation) =>
+            conversation.conversationId === payload.conversationId
+              ? {
+                  ...conversation,
+                  lastReadSeq: payload.lastReadSeq ?? conversation.lastReadSeq,
+                  unreadCount:
+                    payload.unreadCount ?? conversation.unreadCount,
+                }
+              : conversation,
+          ),
+        )
+        return
+      }
 
-  //     if (
-  //       !payload.messageId ||
-  //       !payload.conversationId ||
-  //       !payload.clientMsgId
-  //     ) {
-  //       return
-  //     }
+      if (event.type === 'messaging.typing') {
+        const payload = event.payload as {
+          conversationId?: string
+          userId?: string
+          typing?: boolean
+        }
+        if (
+          !payload.conversationId ||
+          payload.conversationId !==
+            selectedConversationRef.current?.conversationId ||
+          payload.userId === currentUserId
+        ) {
+          return
+        }
+        setTypingUserId(payload.typing ? payload.userId || null : null)
+        return
+      }
 
-  //     const createdAt = Date.parse(payload.createdAt)
+      if (event.type === 'messaging.presence') {
+        const payload = event.payload as {
+          conversationId?: string
+          userId?: string
+          status?: string
+        }
+        if (
+          !payload.conversationId ||
+          payload.conversationId !==
+            selectedConversationRef.current?.conversationId ||
+          payload.userId === currentUserId
+        ) {
+          return
+        }
+        setPeerOnline(payload.status === 'online')
+        return
+      }
 
-  //     const incomingMessage: Message = {
-  //       id: payload.messageId,
-  //       messageId: payload.messageId,
-  //       conversationId: payload.conversationId,
-  //       senderId: payload.senderId,
-  //       type: payload.type,
-  //       content: payload.body,
-  //       seq: payload.seq,
-  //       clientMsgId: payload.clientMsgId,
-  //       sentAt: Number.isFinite(createdAt)
-  //         ? Math.floor(createdAt / 1000)
-  //         : Math.floor(Date.now() / 1000),
-  //       status: 'sent',
-  //     }
+      if (event.type !== 'messaging.message.created') {
+        return
+      }
 
-  //     setMessages((previous) => {
-  //       const existingIndex = previous.findIndex(
-  //         (message) =>
-  //           message.messageId === incomingMessage.messageId ||
-  //           message.clientMsgId === incomingMessage.clientMsgId,
-  //       )
+      // Payload is the contract's Message; the shared mapper keeps media and signs-in its link.
+      const payload = event.payload as unknown as MessageCreatedPayload
 
-  //       if (existingIndex >= 0) {
-  //         return previous.map((message, index) =>
-  //           index === existingIndex
-  //             ? incomingMessage
-  //             : message,
-  //         )
-  //       }
+      if (
+        !payload.messageId ||
+        !payload.conversationId ||
+        !payload.clientMsgId
+      ) {
+        return
+      }
 
-  //       return [...previous, incomingMessage]
-  //     })
-  //   })
+      mergeIncoming(mapEventToMessage(payload))
 
-  //   const unsubscribeStatus = socketClient.subscribeStatus(
-  //     (status) => {
-  //       setSocketStatus(status)
-  //     },
-  //   )
+      if (
+        selectedConversationRef.current?.conversationId ===
+          payload.conversationId &&
+        typeof payload.seq === 'number'
+      ) {
+        void markConversationReadApi(
+          payload.conversationId,
+          payload.seq,
+        ).catch((err) => console.error('Cannot mark read:', err))
+      }
+    })
 
-  //   socketClient.connect()
+    const unsubscribeStatus = socketClient.subscribeStatus((status) => {
+      setSocketStatus(status)
+    })
 
-  //   return () => {
-  //     unsubscribeEvent()
-  //     unsubscribeStatus()
-  //   }
-  // }, [])
+    const unsubscribeReconnect = socketClient.subscribeReconnect(() => {
+      const activeId = selectedConversationRef.current?.conversationId
+      if (!activeId) return
+
+      const afterSeq = messagesRef.current.reduce(
+        (max, message) =>
+          message.conversationId === activeId && typeof message.seq === 'number'
+            ? Math.max(max, message.seq)
+            : max,
+        0,
+      )
+
+      void getMessagesApi(activeId, { afterSeq }).then((page) => {
+        page.messages.forEach(mergeIncoming)
+      })
+    })
+
+    socketClient.connect()
+
+    return () => {
+      unsubscribeEvent()
+      unsubscribeStatus()
+      unsubscribeReconnect()
+      socketClient.disconnect()
+    }
+  }, [])
 
   // --------------------------------------------------
   // 8. DERIVED DATA FOR COMPONENTS
@@ -554,6 +681,71 @@ function ChatPage() {
     return name.trim().charAt(0).toUpperCase()
   }
 
+  function memberDisplayNames(
+    memberIds: string[],
+    options?: { excludeSelf?: boolean },
+  ): string[] {
+    const excludeSelf = options?.excludeSelf ?? true
+    const ids = excludeSelf
+      ? memberIds.filter((id) => id !== currentUserId)
+      : memberIds
+
+    const names = ids
+      .map((id) => usersById[id])
+      .filter(Boolean)
+      .map((user) => displayName(user!))
+
+    // If everyone else is unresolved, show whoever we can resolve.
+    if (names.length === 0 && excludeSelf) {
+      return memberDisplayNames(memberIds, { excludeSelf: false })
+    }
+    return names
+  }
+
+  function formatMemberTitle(names: string[]): string {
+    if (names.length === 0) {
+      return ''
+    }
+    if (names.length <= 3) {
+      return names.join(', ')
+    }
+    return `${names.slice(0, 3).join(', ')}…`
+  }
+
+  function groupInitials(memberIds: string[]): string {
+    const names = memberDisplayNames(memberIds)
+    if (names.length >= 2) {
+      return `${initialsOf(names[0])}${initialsOf(names[1])}`
+    }
+    if (names.length === 1) {
+      return initialsOf(names[0]) || 'G'
+    }
+    return 'G'
+  }
+
+  function resolveGroupTitle(conversation: Conversation): string {
+    if (
+      conversation.conversationId === requestedConversationId &&
+      requestedConversationTitle.trim()
+    ) {
+      return requestedConversationTitle.trim()
+    }
+
+    const named = groupNamesById[conversation.conversationId]?.trim()
+    if (named) {
+      return named
+    }
+
+    const fromMembers = formatMemberTitle(
+      memberDisplayNames(conversation.memberIds),
+    )
+    if (fromMembers) {
+      return fromMembers
+    }
+
+    return 'Group conversation'
+  }
+
   const selectedDirectUser =
     selectedConversation?.type === 'DIRECT'
       ? getDirectUser(selectedConversation)
@@ -578,12 +770,16 @@ function ChatPage() {
     }
 
     if (selectedConversation.type === 'GROUP') {
-      return (
-        selectedConversation.conversationId ===
-        requestedConversationId
-          ? requestedConversationTitle || 'Group conversation'
-          : 'Group conversation'
-      )
+      // Prefer identity members of the open group when list memberIds are thin.
+      const memberIds =
+        groupMembers.length > 0
+          ? groupMembers.map((member) => member.userId)
+          : selectedConversation.memberIds
+      const titled = resolveGroupTitle({
+        ...selectedConversation,
+        memberIds,
+      })
+      return titled
     }
 
     return (
@@ -592,13 +788,38 @@ function ChatPage() {
     )
   })()
 
+  useEffect(() => {
+    const conversationId = selectedConversation?.conversationId
+    setTypingUserId(null)
+    setPeerOnline(false)
+    lastTypingSentRef.current = false
+    if (!conversationId) {
+      return
+    }
+    socketClient.sendPresence(conversationId, 'online')
+    return () => {
+      socketClient.sendPresence(conversationId, 'offline')
+      socketClient.sendTyping(conversationId, false)
+    }
+  }, [selectedConversation?.conversationId])
+
   // Resolve subtitle.
-  const chatSubtitle =
-    selectedConversation?.type === 'GROUP'
-      ? loadingGroupMembers
-        ? 'Loading members...'
-        : `${groupMembers.length} members`
-      : ''
+  const chatSubtitle = (() => {
+    if (typingUserId) {
+      return 'Đang nhập…'
+    }
+    if (selectedConversation?.type === 'GROUP') {
+      if (loadingGroupMembers) {
+        return 'Loading members...'
+      }
+      const count = groupMembers.length
+      return `${count} member${count === 1 ? '' : 's'}`
+    }
+    if (selectedConversation?.type === 'DIRECT') {
+      return peerOnline ? 'Online' : 'Offline'
+    }
+    return ''
+  })()
 
   // Resolve conversation list display information.
   function getConversationDisplayInfo(
@@ -606,13 +827,9 @@ function ChatPage() {
   ) {
     if (conversation.type === 'GROUP') {
       return {
-        title:
-          conversation.conversationId ===
-          requestedConversationId
-            ? requestedConversationTitle || 'Group conversation'
-            : 'Group conversation',
+        title: resolveGroupTitle(conversation),
         avatar: undefined,
-        initials: undefined,
+        initials: groupInitials(conversation.memberIds),
       }
     }
 
@@ -622,7 +839,7 @@ function ChatPage() {
     return {
       title,
       avatar: undefined,
-      initials: user ? initialsOf(title) : undefined,
+      initials: user ? initialsOf(title) : '?',
     }
   }
 
@@ -683,6 +900,8 @@ function ChatPage() {
 
     setNewMessage('')
     setShowEmojiPicker(false)
+    lastTypingSentRef.current = false
+    socketClient.sendTyping(conversationId, false)
 
     try {
       const savedMessage = await sendMessageApi(
@@ -719,92 +938,66 @@ function ChatPage() {
     }
   }
 
-  // --------------------------------------------------
-  // 10b. SEND FILE: upload, then send a message with the mediaId
-  // --------------------------------------------------
-
-  // Guess only for the optimistic preview; the server decides the real kind.
-  function guessKind(file: File): MediaKind {
-    if (file.type.startsWith('image/')) return 'IMAGE'
-    if (file.type.startsWith('video/')) return 'VIDEO'
-    return 'DOCUMENT'
-  }
-
-  async function handleSendFile(
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) {
-    const file = event.target.files?.[0]
-    // Reset so picking the same file again still fires onChange.
-    event.target.value = ''
-
-    if (
-      !file ||
-      !selectedConversation ||
-      isLoadingMessages ||
-      messageLoadError
-    ) {
+  async function handleSendEmotion(code: EmotionCode) {
+    if (!selectedConversation || isLoadingMessages || messageLoadError) {
       return
     }
 
-    setAttachError(null)
-
     const conversationId = selectedConversation.conversationId
     const clientMsgId = crypto.randomUUID()
-    const kind = guessKind(file)
-    const previewUrl = URL.createObjectURL(file)
-
-    setMessages((previous) => [
-      ...previous,
-      {
-        id: clientMsgId,
-        conversationId,
-        senderId: currentUserId,
-        type: kind,
-        content: '',
-        media: {
-          mediaId: '',
-          kind,
-          url: previewUrl,
-          fileName: file.name,
-          mimeType: file.type,
-          size: file.size,
-        },
-        clientMsgId,
-        sentAt: Math.floor(Date.now() / 1000),
-        status: 'sending',
-      },
-    ])
+    setShowEmotionBar(false)
 
     try {
-      const media = await uploadMediaApi(conversationId, file)
-      const savedMessage = await sendMessageApi(conversationId, {
-        type: media.kind,
-        mediaId: media.mediaId,
+      const saved = await sendMessageApi(conversationId, {
+        type: 'EMOTION',
+        body: code,
         clientMsgId,
       })
-
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.clientMsgId === clientMsgId
-            ? savedMessage
-            : message,
-        ),
-      )
-      URL.revokeObjectURL(previewUrl)
+      upsertMessage(saved)
     } catch (err) {
-      console.error('Cannot send file:', err)
-      setAttachError(
-        err instanceof Error ? err.message : 'Cannot send file.',
-      )
+      console.error('Cannot send emotion:', err)
+    }
+  }
 
-      // Keep the preview so the user sees which file failed.
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.clientMsgId === clientMsgId
-            ? { ...message, status: 'failed' }
-            : message,
-        ),
-      )
+  // Types and limits match POST /conversations/{id}/media. The button only filters
+  // the picker; the server decides the real kind from the file.
+  const MEDIA_ACCEPT: Record<MediaUploadType, string> = {
+    IMAGE: 'image/jpeg,image/png,image/gif,image/webp',
+    VIDEO: 'video/mp4,video/webm,video/quicktime',
+    DOCUMENT: '.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
+  }
+
+  function pickMedia(type: MediaUploadType) {
+    mediaTypeRef.current = type
+    if (mediaInputRef.current) {
+      mediaInputRef.current.accept = MEDIA_ACCEPT[type]
+      mediaInputRef.current.click()
+    }
+  }
+
+  async function handleMediaSelected(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !selectedConversation) return
+
+    const conversationId = selectedConversation.conversationId
+    setUploadingMedia(true)
+    try {
+      // Step 1: upload. Step 2: send a message of the kind the server decided.
+      const media = await uploadMediaApi(conversationId, file, file.name)
+      const saved = await sendMessageApi(conversationId, {
+        type: media.kind,
+        mediaId: media.mediaId,
+        clientMsgId: crypto.randomUUID(),
+      })
+      upsertMessage(saved)
+    } catch (err) {
+      console.error('Cannot upload media:', err)
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploadingMedia(false)
     }
   }
 
@@ -940,36 +1133,35 @@ function ChatPage() {
               New conversation
             </strong>
 
-            <form onSubmit={handleSearchUser}>
-              <div className="input-group">
-                <input
-                  type="search"
-                  className="form-control form-control-sm"
-                  placeholder="Username or email"
-                  value={searchQuery}
-                  onChange={(event) => {
-                    setSearchQuery(event.target.value)
-                    setSearchResult(null)
-                    setSearchUserError(null)
-                    setCreateConversationError(null)
-                  }}
-                  disabled={
-                    searchingUser || creatingConversation
-                  }
-                />
+            <form
+              className="chat-search-form"
+              onSubmit={handleSearchUser}
+            >
+              <input
+                type="search"
+                className="form-control form-control-sm chat-search-input"
+                placeholder="Username or email"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value)
+                  setSearchResult(null)
+                  setSearchUserError(null)
+                  setCreateConversationError(null)
+                }}
+                disabled={searchingUser || creatingConversation}
+              />
 
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-sm"
-                  disabled={
-                    searchingUser ||
-                    creatingConversation ||
-                    !searchQuery.trim()
-                  }
-                >
-                  {searchingUser ? 'Searching...' : 'Search'}
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="app-button app-button-primary chat-search-button"
+                disabled={
+                  searchingUser ||
+                  creatingConversation ||
+                  !searchQuery.trim()
+                }
+              >
+                {searchingUser ? '…' : 'Search'}
+              </button>
             </form>
 
             {searchUserError && (
@@ -1079,43 +1271,37 @@ function ChatPage() {
         }}
       >
         {/* Chat header */}
-        <div className="flex-shrink-0 border-bottom">
+        <div className="chat-thread-header flex-shrink-0">
           <ChatHeader
             title={chatTitle}
             subtitle={chatSubtitle}
             type={selectedConversation?.type ?? 'DIRECT'}
             avatar={headerUser?.avatar || undefined}
             initials={
-              headerUser ? initialsOf(headerUser.name) : undefined
+              selectedConversation?.type === 'GROUP'
+                ? groupInitials(selectedConversation.memberIds)
+                : headerUser
+                  ? initialsOf(headerUser.name)
+                  : '?'
             }
-            // onInfoClick={() => {
-            //   if (headerUser) {
-            //     setShowUserInfo((previous) => !previous)
-            //   }
-            // }}
           />
-
-          {/* WebSocket connection status */}
-          {/* <div className="d-flex align-items-center gap-2 px-3 py-2 border-bottom bg-light">
+          <button
+            type="button"
+            className="chat-socket-pill"
+            onClick={() => setShowSocketDebug((previous) => !previous)}
+            title="Toggle connection debug"
+          >
             <span
-              className={`rounded-circle ${
+              className={`chat-socket-dot ${
                 socketStatus === 'connected'
-                  ? 'bg-success'
+                  ? 'is-ok'
                   : socketStatus === 'error'
-                    ? 'bg-danger'
-                    : 'bg-secondary'
+                    ? 'is-bad'
+                    : ''
               }`}
-              style={{
-                width: 9,
-                height: 9,
-                display: 'inline-block',
-              }}
             />
-
-            <small className="text-muted">
-              WebSocket: {socketStatus}
-            </small>
-          </div> */}
+            {socketStatus}
+          </button>
         </div>
 
         {/* Message list */}
@@ -1151,162 +1337,173 @@ function ChatPage() {
 
         {/* Message composer */}
         <form
-          className="border-top flex-shrink-0 position-relative"
+          className="chat-composer flex-shrink-0 position-relative"
           onSubmit={handleSendMessage}
         >
           <MesToolbar
+            disabled={!selectedConversation || uploadingMedia}
+            emojiOpen={showEmojiPicker}
+            emotionOpen={showEmotionBar}
             onEmojiClick={() => {
               setShowEmojiPicker((previous) => !previous)
+              setShowEmotionBar(false)
             }}
-            onImageClick={
-              selectedConversation
-                ? () => imageInputRef.current?.click()
-                : undefined
-            }
-            onFileClick={
-              selectedConversation
-                ? () => fileInputRef.current?.click()
-                : undefined
-            }
+            onEmotionClick={() => {
+              setShowEmotionBar((previous) => !previous)
+              setShowEmojiPicker(false)
+            }}
+            onImageClick={() => pickMedia('IMAGE')}
+            onFileClick={() => pickMedia('DOCUMENT')}
+            onVideoClick={() => pickMedia('VIDEO')}
           />
 
-          {/* Types and limits match POST /conversations/{id}/media. */}
           <input
-            ref={imageInputRef}
+            ref={mediaInputRef}
             type="file"
-            hidden
-            accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
-            onChange={handleSendFile}
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            hidden
-            accept=".pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-            onChange={handleSendFile}
+            className="d-none"
+            onChange={handleMediaSelected}
           />
 
-          {attachError && (
-            <div className="small text-danger px-2 pt-1">
-              {attachError}
-            </div>
-          )}
-
-          {/* Emoji picker */}
-          {showEmojiPicker && (
-            <div
-              className="position-absolute"
-              style={{
-                bottom: '100%',
-                left: '8px',
-                zIndex: 1050,
-              }}
-            >
+          {showEmojiPicker ? (
+            <div className="chat-emoji-popover" role="dialog" aria-label="Emoji picker">
               <EmojiPicker
+                width={320}
+                height={360}
+                previewConfig={{ showPreview: false }}
                 onEmojiClick={(emojiData: EmojiClickData) => {
-                  setNewMessage(
-                    (previous) => previous + emojiData.emoji,
-                  )
+                  setNewMessage((previous) => previous + emojiData.emoji)
+                  setShowEmojiPicker(false)
                 }}
               />
             </div>
-          )}
+          ) : null}
 
-          <div className="d-flex align-items-center gap-2 p-2">
+          {showEmotionBar ? (
+            <div className="chat-emotion-bar">
+              {(
+                [
+                  ['like', '👍'],
+                  ['love', '❤️'],
+                  ['haha', '😄'],
+                  ['wow', '😮'],
+                  ['sad', '😢'],
+                  ['angry', '😠'],
+                ] as const
+              ).map(([code, emoji]) => (
+                <button
+                  key={code}
+                  type="button"
+                  className="chat-emotion-chip"
+                  disabled={!selectedConversation || uploadingMedia}
+                  onClick={() => void handleSendEmotion(code)}
+                  title={code}
+                  aria-label={`Send ${code}`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="chat-composer-row">
             <input
               type="text"
-              className="form-control"
+              className="form-control chat-composer-input"
               placeholder={
                 selectedConversation
-                  ? 'Type a message...'
+                  ? uploadingMedia
+                    ? 'Uploading…'
+                    : 'Type a message...'
                   : 'Select a conversation first'
               }
               value={newMessage}
-              disabled={!selectedConversation}
-              onChange={(event) =>
-                setNewMessage(event.target.value)
-              }
+              disabled={!selectedConversation || uploadingMedia}
+              onChange={(event) => {
+                const value = event.target.value
+                setNewMessage(value)
+                const conversationId =
+                  selectedConversation?.conversationId
+                if (!conversationId) {
+                  return
+                }
+                if (value.trim() && !lastTypingSentRef.current) {
+                  lastTypingSentRef.current = true
+                  socketClient.sendTyping(conversationId, true)
+                }
+                if (typingTimerRef.current) {
+                  clearTimeout(typingTimerRef.current)
+                }
+                typingTimerRef.current = setTimeout(() => {
+                  lastTypingSentRef.current = false
+                  socketClient.sendTyping(conversationId, false)
+                }, 1500)
+              }}
             />
 
             <button
-              className="btn btn-primary flex-shrink-0"
+              className="app-button app-button-primary chat-send-button"
               type="submit"
+              aria-label="Send message"
               disabled={
                 !selectedConversation ||
                 !newMessage.trim() ||
                 isLoadingMessages ||
-                Boolean(messageLoadError)
+                Boolean(messageLoadError) ||
+                uploadingMedia
               }
             >
-              <i className="bi bi-send fs-4" />
+              <i className="bi bi-send" aria-hidden="true" />
             </button>
           </div>
         </form>
 
-        {/* ========================================== */}
-        {/* WEBSOCKET DEBUG PANEL */}
-        {/* ========================================== */}
-
-        <div
-          className="border-top bg-light p-2 flex-shrink-0"
-          style={{
-            maxHeight: '180px',
-            overflowY: 'auto',
-          }}
-        >
-          <div className="d-flex justify-content-between align-items-center mb-2">
-            <strong className="small">
-              WebSocket Debug
-            </strong>
-
-            <div className="d-flex gap-2 align-items-center">
-              <small className="text-muted">
-                {socketEvents.length} events
-              </small>
-
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-secondary"
-                onClick={() => setSocketEvents([])}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {socketEvents.length === 0 ? (
-            <small className="text-muted">
-              Waiting for WebSocket events...
-            </small>
-          ) : (
-            socketEvents.map((event) => (
-              <div
-                key={event.eventId}
-                className="border rounded bg-white p-2 mb-2"
-              >
-                <div className="d-flex justify-content-between">
-                  <strong className="small">
-                    {event.type}
-                  </strong>
-
-                  <small className="text-muted">
-                    {event.producer}
-                  </small>
-                </div>
-
-                <pre
-                  className="small mb-0 mt-2"
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
+        {showSocketDebug ? (
+          <div className="chat-debug-panel flex-shrink-0">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <strong className="small">WebSocket Debug</strong>
+              <div className="d-flex gap-2 align-items-center">
+                <small className="text-muted">
+                  {socketEvents.length} events
+                </small>
+                <button
+                  type="button"
+                  className="app-button"
+                  style={{ padding: '4px 10px', fontSize: 12 }}
+                  onClick={() => setSocketEvents([])}
                 >
-                  {JSON.stringify(event.payload, null, 2)}
-                </pre>
+                  Clear
+                </button>
               </div>
-            ))
-          )}
-        </div>
+            </div>
+
+            {socketEvents.length === 0 ? (
+              <small className="text-muted">
+                Waiting for WebSocket events...
+              </small>
+            ) : (
+              socketEvents.map((event) => (
+                <div
+                  key={event.eventId}
+                  className="border rounded bg-white p-2 mb-2"
+                >
+                  <div className="d-flex justify-content-between">
+                    <strong className="small">{event.type}</strong>
+                    <small className="text-muted">{event.producer}</small>
+                  </div>
+                  <pre
+                    className="small mb-0 mt-2"
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {JSON.stringify(event.payload, null, 2)}
+                  </pre>
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
       </main>
 
       {/* ============================================ */}

@@ -52,7 +52,7 @@ Chạy cả service bằng Docker, gồm Postgres riêng: `docker compose up --b
 | `POSTGRES_URL` | `jdbc:postgresql://localhost:5432/halozalo` | JDBC URL của database chung. Cloud thường thêm `?sslmode=require` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD` | `halozalo`, `halozalo` | User và password của database |
 | `MESSAGING_USER_HEADER_ENABLED` | `true` | Nhận `X-User-Id` khi messaging chạy riêng. Trong app phải là `false`, xem mục Ai đang gọi |
-| `MESSAGING_MEDIA_DIR` | `./data/media` | Thư mục lưu file upload. Image Docker dùng `/var/lib/halozalo/media`, compose gắn volume `media-data` |
+| `MESSAGING_MEDIA_STORAGE_DIR` | `./data/media` | Thư mục lưu file upload. Image Docker dùng `/var/lib/halozalo/media`, compose gắn volume `media-data` |
 | `MESSAGING_MEDIA_SIGNING_KEY` | trống | Khoá HMAC ký link tải, ít nhất 32 byte. Trống thì mỗi lần khởi động một khoá ngẫu nhiên: link cũ hết hiệu lực, đọc lại tin là có link mới. Trên cloud phải đặt |
 | `MESSAGING_MEDIA_LINK_TTL` | `1h` | Link tải còn hạn ít nhất bao lâu |
 
@@ -142,7 +142,7 @@ Tin chỉ lưu `mediaId` trong `content`. `url` được ký lại mỗi lần t
 
 `GET /media/{mediaId}?expires=&sig=` không cần user: chữ ký là quyền, để `img` và `video` dùng thẳng. Sai hoặc hết hạn: 403. Có `Range` cho video. Ảnh và video `inline`, tài liệu luôn `attachment`. Luôn có `nosniff` và CSP `sandbox`, nên file mở thẳng trên origin của API không chạy được script.
 
-File nằm trên đĩa sau `media.MediaStore` (`LocalMediaStore`, chia 256 thư mục theo 2 ký tự đầu của id, ghi file tạm rồi move). Đổi sang S3 thì thêm một `MediaStore` khác, API không đổi. Bảng `media` (migration V3) giữ metadata.
+File nằm trên đĩa sau `media.MediaStore` (`LocalMediaStore`, chia 256 thư mục theo 2 ký tự đầu của id, ghi file tạm rồi move). Đổi sang S3 thì thêm một `MediaStore` khác, API không đổi. Bảng `media` (migration V4) giữ metadata.
 
 Chưa có: thumbnail, thời lượng video, dọn file upload mà không gửi.
 

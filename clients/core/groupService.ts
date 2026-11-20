@@ -8,9 +8,11 @@ import type {
   AddMemberRequest,
   Membership,
   MemberListResponse,
+  AssignableGroupRole,
 } from './types/group'
+import { connectionConfig } from './connectionConfig'
 
-const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
+const API_BASE_URL = connectionConfig.identityBaseUrl
 
 async function getErrorMessage(
   response: Response,
@@ -121,11 +123,11 @@ export async function removeGroupMemberApi(
     throw new Error(await getErrorMessage(response))
   }
 }
- // 5. Lấy danh sách thành viên nhóm
- export async function getGroupMembersApi(
-  groupId: string
+// 5. Lấy danh sách thành viên nhóm
+export async function getGroupMembersApi(
+  groupId: string,
 ): Promise<MemberListResponse> {
-  const token = await requireAccessToken()
+  const token = requireAccessToken()
 
   const response = await fetch(
     `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members`,
@@ -134,7 +136,7 @@ export async function removeGroupMemberApi(
       headers: {
         Authorization: `Bearer ${token}`,
       },
-    }
+    },
   )
 
   if (!response.ok) {
@@ -142,4 +144,31 @@ export async function removeGroupMemberApi(
   }
 
   return response.json()
+}
+
+// 6. Owner gán ADMIN / MEMBER (không đổi OWNER)
+export async function assignGroupMemberRoleApi(
+  groupId: string,
+  userId: string,
+  role: AssignableGroupRole,
+): Promise<Membership> {
+  const token = requireAccessToken()
+
+  const response = await fetch(
+    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}/role`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ role }),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  return (await response.json()) as Membership
 }

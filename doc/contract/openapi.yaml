@@ -5,8 +5,9 @@ info:
   description: |
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
-    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, tìm user, tra tên user theo id, nhóm,
-    hội thoại, tin TEXT hoặc EMOTION, file (IMAGE, VIDEO, DOCUMENT), lịch sử, đã đọc, reaction, và thống kê đã gom.
+    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, profile, bạn bè, tìm user,
+    tra tên user theo id, nhóm với role admin, hội thoại, tin TEXT hoặc EMOTION, file (IMAGE, VIDEO, DOCUMENT)
+    qua upload media, lịch sử, đã đọc, reaction, và thống kê đã gom.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
   - url: https://api.example.com
@@ -132,6 +133,137 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    patch:
+      tags: [Auth]
+      operationId: updateProfile
+      summary: Sửa tên hiển thị hoặc avatar
+      description: Gửi ít nhất một field. Avatar bỏ trống thì xoá avatar.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Profile sau khi sửa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /me/activity:
+    get:
+      tags: [Stats]
+      operationId: myActivity
+      summary: Hoạt động của user đang đăng nhập
+      description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Số lần đăng nhập, tin đã gửi và nhóm đã tạo của đúng user này.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserActivity"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /friends/requests:
+    post:
+      tags: [Users]
+      operationId: sendFriendRequest
+      summary: Gửi lời mời kết bạn
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FriendRequestBody"
+      responses:
+        "201":
+          description: Đã ghi lời mời.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendRequest"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: Không có user này.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: User not found
+        "409":
+          description: Đã là bạn, hoặc lời mời đã có.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: CONFLICT
+                  message: Friend request already exists
+  /friends/requests/{userId}/accept:
+    post:
+      tags: [Users]
+      operationId: acceptFriendRequest
+      summary: Chấp nhận lời mời từ userId
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "200":
+          description: Hai user đã là bạn.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Friend"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: Không có lời mời từ user này.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: NOT_FOUND
+                  message: Friend request not found
+  /friends:
+    get:
+      tags: [Users]
+      operationId: listFriends
+      summary: Danh sách bạn bè của user hiện tại
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Các bạn đã chấp nhận.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendList"
         "401":
           $ref: "#/components/responses/Unauthenticated"
   /users:
@@ -285,7 +417,7 @@ paths:
     post:
       tags: [Groups]
       operationId: addGroupMember
-      summary: Owner thêm thành viên
+      summary: Owner hoặc admin thêm thành viên
       security:
         - bearerAuth: []
       parameters:
@@ -327,7 +459,7 @@ paths:
       operationId: removeGroupMember
       summary: Owner xoá thành viên, hoặc thành viên tự rời
       description: |
-        Owner xoá user khác. Thành viên tự rời khi userId là chính mình.
+        Owner hoặc admin xoá user khác. Admin không xoá được owner. Thành viên tự rời khi userId là chính mình.
         Owner không tự rời và không bị xoá.
       security:
         - bearerAuth: []
@@ -343,6 +475,74 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /groups/{groupId}/members/{userId}/role:
+    put:
+      tags: [Groups]
+      operationId: setGroupRole
+      summary: Owner gán hoặc gỡ role admin
+      description: Role nhận ADMIN hoặc MEMBER. Không đổi role của owner.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+        - $ref: "#/components/parameters/MemberUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetRoleRequest"
+      responses:
+        "200":
+          description: Role mới của thành viên.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membership"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /conversations/group:
+    post:
+      tags: [Messages]
+      operationId: openGroupConversation
+      summary: Mở hội thoại nhóm theo groupId (caller phải là thành viên)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [groupId]
+              properties:
+                groupId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Hội thoại nhóm vừa tạo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "200":
+          description: Hội thoại đã tồn tại.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/NotMember"
   /conversations/direct:
     post:
       tags: [Messages]
@@ -733,7 +933,8 @@ paths:
       description: |
         Không cần Authorization: link đã ký là quyền, để thẻ `img`, `video` và link tải dùng thẳng được.
         Client không tự ghép URL này. Lấy nguyên `media.url` trong tin hoặc trong kết quả upload,
-        resolve theo base URL của API (`new URL(url, apiBase)`).
+        nối vào sau base URL của API (`apiBase + url`). Không dùng `new URL(url, apiBase)`: base có thể có
+        tiền tố đường dẫn như `/api/messaging`, và `new URL` sẽ bỏ mất tiền tố đó.
         Link hết hạn sau ít nhất 1 giờ. Mỗi lần đọc tin (lịch sử, catch-up, `/ws`, danh sách hội thoại) có link mới,
         nên tin cũ không bao giờ giữ link chết: gặp 403 thì đọc lại tin.
         Có hỗ trợ `Range` (206) để video tua được.
@@ -785,7 +986,9 @@ paths:
       tags: [Stats]
       operationId: activityStats
       summary: Số lần đăng nhập, tạo nhóm, tin mới và upload media
-      description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+      description: |
+        Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
+        Không quét schema `messaging`.
       security:
         - bearerAuth: []
       responses:
@@ -797,6 +1000,86 @@ paths:
                 $ref: "#/components/schemas/ActivityStats"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /stats/dashboard:
+    get:
+      tags: [Stats]
+      operationId: activityDashboard
+      summary: Tin theo ngày, user hoạt động và top nhóm
+      description: |
+        Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
+        Không quét schema `messaging`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Số liệu đã gom.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /devices:
+    post:
+      tags: [Messages]
+      operationId: registerDeviceToken
+      summary: Đăng ký device token để nhận push khi offline
+      description: |
+        Mobile gửi Expo/FCM push token sau login. Messaging lưu theo userId.
+        Khi có tin mới mà user không có socket mở, server gửi push summary.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                  description: Expo push token hoặc FCM registration token
+                platform:
+                  type: string
+                  enum: [ios, android, web, unknown]
+                  default: unknown
+      responses:
+        "204":
+          description: Đã lưu token.
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    delete:
+      tags: [Messages]
+      operationId: unregisterDeviceToken
+      summary: Huỷ đăng ký device token
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+      responses:
+        "204":
+          description: Đã xoá token nếu tồn tại.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
   /ws:
     get:
       tags: [Messages]
@@ -806,8 +1089,9 @@ paths:
         Nâng cấp lên WebSocket. Session id truyền query `access_token` vì trình duyệt không gắn header Authorization cho WebSocket.
         Thiếu session, session không tồn tại, hoặc session hết hạn thì đóng kết nối, không nâng cấp.
         Mỗi frame là envelope trong doc/contract/events.md.
-        Bản này đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, và `messaging.read.updated`.
+        Bản này đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, `messaging.read.updated`, `messaging.typing`, và `messaging.presence`.
         `messaging.read.updated` chỉ tới thiết bị của user đã đọc.
+        Client có thể gửi tín hiệu ephemeral `messaging.typing` / `messaging.presence` trên cùng socket; server fan-out cho thành viên hội thoại.
       parameters:
         - name: access_token
           in: query
@@ -987,7 +1271,7 @@ components:
     User:
       type: object
       additionalProperties: false
-      required: [userId, username, email]
+      required: [userId, username, email, platformRole]
       properties:
         userId:
           type: string
@@ -997,8 +1281,69 @@ components:
         email:
           type: string
           format: email
+        platformRole:
+          type: string
+          description: Quyền nền tảng trên tài khoản. Khác role trong nhóm.
+          enum: [USER, ADMIN]
         displayName:
           type: string
+          maxLength: 64
+        avatar:
+          type: string
+          maxLength: 2048
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        avatar:
+          type: string
+          maxLength: 2048
+          description: Chuỗi rỗng xoá avatar.
+    FriendRequestBody:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+    FriendRequest:
+      type: object
+      additionalProperties: false
+      required: [fromUserId, toUserId]
+      properties:
+        fromUserId:
+          type: string
+          format: uuid
+        toUserId:
+          type: string
+          format: uuid
+    Friend:
+      type: object
+      additionalProperties: false
+      required: [userId, username]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        username:
+          type: string
+        displayName:
+          type: string
+    FriendList:
+      type: object
+      additionalProperties: false
+      required: [friends]
+      properties:
+        friends:
+          type: array
+          items:
+            $ref: "#/components/schemas/Friend"
     UserSummary:
       type: object
       additionalProperties: false
@@ -1020,6 +1365,66 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/UserSummary"
+    SetRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [ADMIN, MEMBER]
+    UserActivity:
+      type: object
+      additionalProperties: false
+      required: [logins, messagesSent, groupsCreated]
+      properties:
+        logins:
+          type: integer
+          minimum: 0
+        messagesSent:
+          type: integer
+          minimum: 0
+        groupsCreated:
+          type: integer
+          minimum: 0
+    DayCount:
+      type: object
+      additionalProperties: false
+      required: [day, total]
+      properties:
+        day:
+          type: string
+          format: date
+        total:
+          type: integer
+          minimum: 0
+    GroupCount:
+      type: object
+      additionalProperties: false
+      required: [groupId, total]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        total:
+          type: integer
+          minimum: 0
+    Dashboard:
+      type: object
+      additionalProperties: false
+      required: [messagesByDay, activeUsers, topGroups]
+      properties:
+        messagesByDay:
+          type: array
+          items:
+            $ref: "#/components/schemas/DayCount"
+        activeUsers:
+          type: integer
+          minimum: 0
+        topGroups:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroupCount"
     CreateGroupRequest:
       type: object
       additionalProperties: false
@@ -1053,7 +1458,7 @@ components:
         role:
           type: string
           description: Role của user hiện tại trong nhóm.
-          enum: [OWNER, MEMBER]
+          enum: [OWNER, ADMIN, MEMBER]
     GroupList:
       type: object
       additionalProperties: false
@@ -1076,7 +1481,7 @@ components:
           format: uuid
         role:
           type: string
-          enum: [MEMBER]
+          enum: [ADMIN, MEMBER]
     Member:
       type: object
       additionalProperties: false
@@ -1090,7 +1495,7 @@ components:
           description: Tên hiện trên UI. Không trả email.
         role:
           type: string
-          enum: [OWNER, MEMBER]
+          enum: [OWNER, ADMIN, MEMBER]
     MemberList:
       type: object
       additionalProperties: false
@@ -1381,7 +1786,7 @@ components:
           type: string
           description: |
             Link tải đã ký, có hạn. Đường dẫn tương đối với base URL của API, ví dụ
-            `/media/{mediaId}?expires=1795000000&sig=...`. Resolve bằng `new URL(url, apiBase)`.
+            `/media/{mediaId}?expires=1795000000&sig=...`. Nối vào sau base URL của API (`apiBase + url`).
             Không lưu lâu dài: lần đọc tin sau có link mới.
         fileName:
           type: string

@@ -7,14 +7,16 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 /**
- * /ws is push-only. Clients send messages over HTTP, where clientMsgId makes retries safe.
- * Anything a client sends only counts as a sign of life.
+ * /ws receives ephemeral client signals (typing/presence) and pushes server envelopes.
+ * Durable messages still go over HTTP with clientMsgId for safe retries.
  */
 public final class RealtimeHandler extends AbstractWebSocketHandler {
     private final RealtimeSessions sessions;
+    private final ClientSignalRelay signals;
 
-    public RealtimeHandler(RealtimeSessions sessions) {
+    public RealtimeHandler(RealtimeSessions sessions, ClientSignalRelay signals) {
         this.sessions = sessions;
+        this.signals = signals;
     }
 
     @Override
@@ -25,6 +27,7 @@ public final class RealtimeHandler extends AbstractWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) {
         sessions.seen(session.getId());
+        signals.handle(userIdOf(session), message.getPayload());
     }
 
     @Override
@@ -40,5 +43,13 @@ public final class RealtimeHandler extends AbstractWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         sessions.forget(session.getId());
+    }
+
+    private static String userIdOf(WebSocketSession session) {
+        Object fromHandshake = session.getAttributes().get(UserHandshakeInterceptor.USER_ID);
+        if (fromHandshake instanceof String value && !value.isBlank()) {
+            return value;
+        }
+        return null;
     }
 }

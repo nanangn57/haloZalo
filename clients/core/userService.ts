@@ -1,9 +1,10 @@
 
 import type { AuthUser, ApiErrorResponse } from './types/auth'
 import { getAuth } from './authSession'
-import { getIdentityApiHeaders } from './apiClient';
+import { getIdentityApiHeaders } from './apiClient'
+import { connectionConfig } from './connectionConfig'
 
-const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
+const API_BASE_URL = connectionConfig.identityBaseUrl
 
 export async function findUserApi(
   query: string,
@@ -55,6 +56,35 @@ export async function getMyProfileApi(): Promise<AuthUser> {
   }
 
   return response.json()
+}
+
+export interface UpdateProfileRequest {
+  displayName?: string | null
+  avatar?: string | null
+}
+
+export async function updateProfileApi(
+  patch: UpdateProfileRequest,
+): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE_URL}/me`, {
+    method: 'PATCH',
+    headers: {
+      ...getIdentityApiHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(patch),
+  })
+
+  const data = await response.json().catch(() => null)
+  if (!response.ok) {
+    const message =
+      data && typeof data === 'object' && 'error' in data
+        ? (data as { error?: { message?: string } }).error?.message
+        : undefined
+    throw new Error(message ?? `Cannot update profile: ${response.status}`)
+  }
+
+  return data as AuthUser
 }
 
 export interface UserSummary {

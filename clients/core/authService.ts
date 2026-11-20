@@ -1,6 +1,7 @@
 import type { LoginRequest, LoginResponse } from './types/auth'
+import { connectionConfig } from './connectionConfig'
 
-const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
+const API_BASE_URL = connectionConfig.identityBaseUrl
 
 export async function loginApi(
   credentials: LoginRequest,

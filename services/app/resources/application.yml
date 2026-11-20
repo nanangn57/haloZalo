@@ -1,0 +1,76 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  profiles:
+    default: app
+  config:
+    import: optional:file:./.env.local[.properties]
+  servlet:
+    multipart:
+      # Must be at least the largest per-kind limit under messaging.media.
+      max-file-size: 25MB
+      max-request-size: 26MB
+      file-size-threshold: 1MB
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/halozalo}
+    username: ${SPRING_DATASOURCE_USERNAME:halozalo}
+    password: ${SPRING_DATASOURCE_PASSWORD:halozalo}
+    hikari:
+      # Messaging uses unqualified names; identity/analytics use schema-qualified names.
+      connection-init-sql: SET search_path TO messaging, identity, analytics, public
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql,classpath:analytics-schema.sql
+  flyway:
+    schemas: messaging
+    default-schema: messaging
+    locations: classpath:db/migration
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+
+identity:
+  public-base-url: ${IDENTITY_PUBLIC_BASE_URL:http://localhost:8080}
+  platform-admins: ${IDENTITY_PLATFORM_ADMINS:}
+  mail:
+    mode: ${IDENTITY_MAIL_MODE:log}
+    from: ${IDENTITY_MAIL_FROM:noreply@halozalo.local}
+  cors:
+    allowed-origin-patterns: ${IDENTITY_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,http://192.168.*:*}
+
+messaging:
+  user-header-enabled: false
+  session-auth-enabled: false
+  media:
+    storage-dir: ${MESSAGING_MEDIA_STORAGE_DIR:./data/media}
+    # HMAC key for signed download links, at least 32 bytes. Unset: random per process, links break on restart.
+    signing-key: ${MESSAGING_MEDIA_SIGNING_KEY:}
+    link-ttl: ${MESSAGING_MEDIA_LINK_TTL:1h}
+    max-image-size: 10MB
+    max-video-size: 25MB
+    max-document-size: 10MB
+  cors:
+    allowed-origins: ${MESSAGING_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081,http://127.0.0.1:8081,http://192.168.*:*}
+  realtime:
+    allowed-origins: "*"
+    ping-interval: 25s
+    pong-timeout: 60s
+    send-time-limit: 10s
+    send-buffer-limit: 512KB
+    max-text-message-size: 8KB
+  push:
+    enabled: ${MESSAGING_PUSH_ENABLED:true}
+    expo-url: ${MESSAGING_PUSH_EXPO_URL:https://exp.host/--/api/v2/push/send}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  health:
+    mail:
+      enabled: false
+

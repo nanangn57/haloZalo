@@ -1,14 +1,61 @@
-
 import type { LoginResponse } from './types/auth'
 
 const AUTH_KEY = 'auth'
 
+const memoryStore = new Map<string, string>()
+
+function webStorage(): Storage | null {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      return sessionStorage
+    }
+  } catch {
+    // Private mode / React Native may throw.
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage
+    }
+  } catch {
+    // Ignore.
+  }
+
+  return null
+}
+
+function readRaw(): string | null {
+  const storage = webStorage()
+  if (storage) {
+    return storage.getItem(AUTH_KEY)
+  }
+  return memoryStore.get(AUTH_KEY) ?? null
+}
+
+function writeRaw(value: string | null): void {
+  const storage = webStorage()
+  if (storage) {
+    if (value === null) {
+      storage.removeItem(AUTH_KEY)
+    } else {
+      storage.setItem(AUTH_KEY, value)
+    }
+    return
+  }
+
+  if (value === null) {
+    memoryStore.delete(AUTH_KEY)
+  } else {
+    memoryStore.set(AUTH_KEY, value)
+  }
+}
+
 export function saveAuth(auth: LoginResponse): void {
-  sessionStorage.setItem(AUTH_KEY, JSON.stringify(auth))
+  writeRaw(JSON.stringify(auth))
 }
 
 export function getAuth(): LoginResponse | null {
-  const value = sessionStorage.getItem(AUTH_KEY)
+  const value = readRaw()
 
   if (!value) return null
 
@@ -28,7 +75,7 @@ export function getUserId(): string | null {
 }
 
 export function clearAuth(): void {
-  sessionStorage.removeItem(AUTH_KEY)
+  writeRaw(null)
 }
 
 export function requireAccessToken(): string {
@@ -52,5 +99,17 @@ export function requireUserId(): string {
 }
 
 export function logout(): void {
-  sessionStorage.removeItem('auth')
+  clearAuth()
+}
+
+export function updateStoredUser(user: LoginResponse['user']): void {
+  const current = getAuth()
+  if (!current) {
+    return
+  }
+  saveAuth({ ...current, user })
+}
+
+export function isPlatformAdmin(): boolean {
+  return getAuth()?.user?.platformRole === 'ADMIN'
 }

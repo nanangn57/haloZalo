@@ -1,22 +1,23 @@
-
 interface GroupHeaderProps {
   onCreateGroup: () => void
 }
 
 function GroupHeader({ onCreateGroup }: GroupHeaderProps) {
   return (
-    <header className="d-flex align-items-center justify-content-between border-bottom px-4 py-3">
-      <div className="d-flex align-items-center gap-3">
-        <i className="bi bi-people fs-4" />
-        <h5 className="mb-0">Groups</h5>
+    <header className="group-page-header">
+      <div className="group-page-title">
+        <span className="group-page-title-icon" aria-hidden="true">
+          <i className="bi bi-people" />
+        </span>
+        <h1>Groups</h1>
       </div>
 
       <button
         type="button"
-        className="btn btn-primary"
+        className="app-button app-button-primary"
         onClick={onCreateGroup}
       >
-        <i className="bi bi-plus-lg me-2" />
+        <i className="bi bi-plus-lg" aria-hidden="true" />
         Create group
       </button>
     </header>

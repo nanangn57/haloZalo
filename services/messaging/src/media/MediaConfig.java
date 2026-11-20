@@ -16,7 +16,7 @@ public class MediaConfig {
 
     @Bean
     public MediaStore mediaStore(MediaProperties properties) throws IOException {
-        return new LocalMediaStore(Path.of(properties.directory()));
+        return new LocalMediaStore(Path.of(properties.storageDir()));
     }
 
     @Bean

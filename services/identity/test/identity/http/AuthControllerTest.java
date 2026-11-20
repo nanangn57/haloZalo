@@ -1,6 +1,8 @@
 package identity.http;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
+import identity.account.Profile;
 import identity.mail.MailSender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import identity.password.BcryptPasswordHasher;
 import identity.service.AuthService;
+import identity.service.ProfileService;
+import identity.storage.ProfileRepository;
 import identity.session.Session;
 import identity.storage.AccountRepository;
 import identity.storage.SessionRepository;
@@ -35,9 +39,10 @@ class AuthControllerTest {
     @BeforeEach
     void setUp() {
         mail = new MemoryMail();
+        MemoryAccounts accounts = new MemoryAccounts();
         AuthService auth = new AuthService(
             new BcryptPasswordHasher(),
-            new MemoryAccounts(),
+            accounts,
             new MemorySessions(),
             userId -> { },
             new MemoryVerifications(),
@@ -45,7 +50,7 @@ class AuthControllerTest {
             Clock.systemUTC(),
             "http://localhost:8080"
         );
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth))
+        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth, new ProfileService(accounts, emptyProfiles())))
             .addFilters(new SessionFilter(auth, new ObjectMapper(), (userId, path) -> { }))
             .setControllerAdvice(new AuthExceptionHandler())
             .build();
@@ -192,6 +197,19 @@ class AuthControllerTest {
         return body.substring(body.indexOf("token=") + "token=".length());
     }
 
+    private static ProfileRepository emptyProfiles() {
+        return new ProfileRepository() {
+            @Override
+            public Profile find(String userId) {
+                return null;
+            }
+
+            @Override
+            public void save(Profile profile) {
+            }
+        };
+    }
+
     private static final class MemoryAccounts implements AccountRepository {
         private final List<Account> rows = new ArrayList<>();
 
@@ -214,6 +232,18 @@ class AuthControllerTest {
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemorySessions implements SessionRepository {

@@ -1,4 +1,4 @@
-import type { LoginFormProps } from "../../types/auth"
+import type { LoginFormProps } from '../../types/auth'
 
 function LoginForm({
   email,
@@ -10,66 +10,49 @@ function LoginForm({
   isLoading,
 }: LoginFormProps) {
   return (
-    <form onSubmit={onSubmit}>
-      {/* Email */}
-      <div className="mb-3">
-        <label
-          htmlFor="email"
-          className="form-label"
-        >
-          Email
+    <form className="auth-form" onSubmit={onSubmit}>
+      <div>
+        <label htmlFor="email" className="app-form-label">
+          Email or username
         </label>
-
         <input
           id="email"
-          type="email"
-          className="form-control input-placeholder"
-          placeholder="Enter your email"
+          type="text"
+          className="app-input"
+          placeholder="you@example.com"
           value={email}
+          autoComplete="username"
           onChange={(event) => onUsernameChange(event.target.value)}
         />
       </div>
 
-      {/* Password */}
-      <div className="mb-3">
-        <label
-          htmlFor="password"
-          className="form-label"
-        >
+      <div>
+        <label htmlFor="password" className="app-form-label">
           Password
         </label>
-
         <input
           id="password"
           type="password"
-          className="form-control input-placeholder"
-          placeholder="Enter your password"
+          className="app-input"
+          placeholder="At least 8 characters"
           value={password}
+          autoComplete="current-password"
           onChange={(event) => onPasswordChange(event.target.value)}
         />
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="text-danger mb-3">
+      {error ? (
+        <div className="auth-alert auth-alert-error" role="alert">
           {error}
         </div>
-      )}
+      ) : null}
 
-      {/* Forgot password */}
-      {/* <div className="text-end mb-3">
-        <a href="#" className="text-decoration-none">
-          Forgot password?
-        </a>
-      </div> */}
-
-      {/* Login button */}
       <button
         type="submit"
-        className="btn btn-primary w-100"
+        className="app-button app-button-primary w-100"
         disabled={isLoading}
       >
-        Login
+        {isLoading ? 'Signing in…' : 'Sign in'}
       </button>
     </form>
   )
