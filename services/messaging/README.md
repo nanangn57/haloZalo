@@ -15,6 +15,7 @@ services/messaging/
     conversation/     hội thoại DIRECT hoặc GROUP, seq cuối, cursor của danh sách
     member/           ai thuộc hội thoại: DIRECT lưu ở đây, GROUP hỏi identity
     message/          tin, loại tin, nội dung theo loại, trạng thái, kiểm tra nội dung
+    media/            file đã upload, loại file nhận, nơi lưu file, link tải đã ký
     reaction/         reaction của một user trên một tin
     api/              JSON request và response, đúng shape trong OpenAPI
     storage/          interface lưu, và implementation Postgres
@@ -51,6 +52,9 @@ Chạy cả service bằng Docker, gồm Postgres riêng: `docker compose up --b
 | `POSTGRES_URL` | `jdbc:postgresql://localhost:5432/halozalo` | JDBC URL của database chung. Cloud thường thêm `?sslmode=require` |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD` | `halozalo`, `halozalo` | User và password của database |
 | `MESSAGING_USER_HEADER_ENABLED` | `true` | Nhận `X-User-Id` khi messaging chạy riêng. Trong app phải là `false`, xem mục Ai đang gọi |
+| `MESSAGING_MEDIA_STORAGE_DIR` | `./data/media` | Thư mục lưu file upload. Image Docker dùng `/var/lib/halozalo/media`, compose gắn volume `media-data` |
+| `MESSAGING_MEDIA_SIGNING_KEY` | trống | Khoá HMAC ký link tải, ít nhất 32 byte. Trống thì mỗi lần khởi động một khoá ngẫu nhiên: link cũ hết hiệu lực, đọc lại tin là có link mới. Trên cloud phải đặt |
+| `MESSAGING_MEDIA_LINK_TTL` | `1h` | Link tải còn hạn ít nhất bao lâu |
 
 `.env.local` không được commit. Biến môi trường thật, ví dụ trên AWS, thắng giá trị trong file. File đọc kiểu properties: không đặt dấu nháy, dấu `\` trong giá trị phải viết `\\`.
 
@@ -117,9 +121,30 @@ Mọi id là UUID và được trả về chữ thường. Gửi chữ hoa vẫn
 
 ## API
 
-`POST /conversations/{conversationId}/messages` nhận `SendMessageRequest` của OpenAPI, chỉ `TEXT` và `EMOTION`. Trả `Message` của OpenAPI: 201 khi tin mới, 200 khi trùng `clientMsgId`. Ghi xong mới phát `messaging.message.created`.
+`POST /conversations/{conversationId}/messages` nhận `SendMessageRequest` của OpenAPI: `TEXT`, `EMOTION`, và `IMAGE`, `VIDEO`, `DOCUMENT` kèm `mediaId`, xem mục Media. Trả `Message` của OpenAPI: 201 khi tin mới, 200 khi trùng `clientMsgId`. Ghi xong mới phát `messaging.message.created`.
 
 Body có thể thêm `replyTo`: id một tin trong cùng hội thoại, sai thì 400. Response có `replyTo` khi tin là trả lời, tin thường giữ đúng shape cũ.
+
+### Media
+
+Gửi file hai bước:
+
+1. `POST /conversations/{conversationId}/media`, multipart, part `file`. Chỉ thành viên. Trả 201 `Media`: `{ mediaId, kind, url, fileName, mimeType, size, width?, height? }`. Chưa có tin nào, không đẩy gì qua `/ws`; chỉ phát `messaging.media.uploaded` cho analytics.
+2. `POST /conversations/{conversationId}/messages` với `{ type: kind, mediaId, body?: chú thích, clientMsgId }`. Từ đây đi y như tin text: `seq`, chống trùng, `/ws`, catch-up, chuyển tiếp, xoá.
+
+Tin trả `media` (shape `Media`) và chú thích ở `body`. Tin đã xoá không có cả hai.
+
+Loại file nhận và giới hạn nằm ở `media.MediaTypes` và `messaging.media` trong `application.yml`: ảnh JPEG/PNG/GIF/WebP 10MB, video MP4/WebM/MOV 25MB, tài liệu PDF/TXT/CSV/ZIP/Office 10MB. Content-Type `application/octet-stream` thì xét theo đuôi file. Ảnh phải có byte đầu đúng loại; server đọc header ảnh để lấy `width`, `height` (WebP chưa có). SVG, HTML và mọi loại khác: 400. Quá giới hạn: 413 `PAYLOAD_TOO_LARGE`.
+
+Gửi media: chỉ người upload, chỉ trong hội thoại đã upload, `type` phải bằng `kind`. Sai thì 400. Chuyển tiếp chép nguyên `mediaId`, nên file đi theo tin sang hội thoại khác.
+
+Tin chỉ lưu `mediaId` trong `content`. `url` được ký lại mỗi lần trả tin: `/media/{mediaId}?expires=&sig=`, HMAC-SHA256 của `mediaId:expires`. `expires` làm tròn lên mốc 10 phút để tin đọc lại trong 10 phút có cùng link, trình duyệt dùng lại cache. `url` là đường dẫn tương đối, client resolve theo base URL của messaging.
+
+`GET /media/{mediaId}?expires=&sig=` không cần user: chữ ký là quyền, để `img` và `video` dùng thẳng. Sai hoặc hết hạn: 403. Có `Range` cho video. Ảnh và video `inline`, tài liệu luôn `attachment`. Luôn có `nosniff` và CSP `sandbox`, nên file mở thẳng trên origin của API không chạy được script.
+
+File nằm trên đĩa sau `media.MediaStore` (`LocalMediaStore`, chia 256 thư mục theo 2 ký tự đầu của id, ghi file tạm rồi move). Đổi sang S3 thì thêm một `MediaStore` khác, API không đổi. Bảng `media` (migration V4) giữ metadata.
+
+Chưa có: thumbnail, thời lượng video, dọn file upload mà không gửi.
 
 ### Hội thoại
 
@@ -167,7 +192,7 @@ Catch-up chỉ trả tin mới hơn `afterSeq`. Tin cũ hơn bị xoá, hoặc r
 
 `PUT /conversations/{conversationId}/messages/{messageId}/reactions/{code}` thêm reaction, trả 204. Thêm lại cùng mã vẫn 204, không tạo dòng mới. `DELETE` cùng path bỏ reaction, trả 204 kể cả khi chưa có. `GET .../messages/{messageId}/reactions` trả `{ "reactions": [{ userId, code, createdAt }] }`, cũ trước. Mã ngoài bộ emotion thì 400. Tin đã xoá không nhận reaction mới.
 
-Lỗi: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409. Hội thoại không tồn tại cũng trả 403, giống người ngoài, để không dò được id. Đề xuất đổi hợp đồng nằm ở [contract-proposal.md](contract-proposal.md).
+Lỗi: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409, `PAYLOAD_TOO_LARGE` 413. Hội thoại không tồn tại cũng trả 403, giống người ngoài, để không dò được id. Đề xuất đổi hợp đồng nằm ở [contract-proposal.md](contract-proposal.md).
 
 ## Event
 
@@ -180,6 +205,7 @@ Mọi event dùng phong bì trong `doc/contract/events.md`. Event phát trong pr
 | `messaging.reaction.added` | Thêm reaction mới | `{ messageId, conversationId, userId, code }` |
 | `messaging.reaction.removed` | Bỏ reaction đang có | `{ messageId, conversationId, userId, code }` |
 | `messaging.read.updated` | Mốc đã đọc của user tiến lên. Chỉ gửi tới thiết bị của user đó | `{ conversationId, userId, lastReadSeq }` |
+| `messaging.media.uploaded` | File đã lưu. Chỉ log và analytics, không đẩy qua `/ws` | `{ senderId, conversationId, type }` |
 
 ## WebSocket
 

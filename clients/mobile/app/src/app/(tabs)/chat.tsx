@@ -24,7 +24,7 @@ import {
   markConversationReadApi,
   type EmotionCode,
 } from '@core/messageService';
-import { uploadMediaApi, type MediaUploadType } from '@core/mediaService';
+import { uploadMediaApi } from '@core/mediaService';
 import { lookupUsersApi } from '@core/userService';
 import { getGroupsApi } from '@core/groupService';
 import { socketClient } from '@core/socketClient';
@@ -410,32 +410,19 @@ export default function ChatPage() {
     }
   };
 
-  const sendUploaded = async (type: MediaUploadType, uri: string, fileName: string, mimeType: string) => {
+  // Upload, then send a message of the kind the server decided from the file.
+  const sendUploaded = async (uri: string, fileName: string) => {
     if (!selectedConversation) return;
     setSending(true);
     setError('');
     try {
       const blob = await (await fetch(uri)).blob();
-      const uploaded = await uploadMediaApi(blob, type, {
-        fileName,
-        conversationId: selectedConversation.conversationId,
+      const media = await uploadMediaApi(selectedConversation.conversationId, blob, fileName);
+      const sent = await sendMessageApi(selectedConversation.conversationId, {
+        type: media.kind,
+        mediaId: media.mediaId,
+        clientMsgId: uuid(),
       });
-      const clientMsgId = uuid();
-      const sent =
-        type === 'DOCUMENT'
-          ? await sendMessageApi(selectedConversation.conversationId, {
-              type: 'DOCUMENT',
-              body: uploaded.url,
-              clientMsgId,
-              fileName: uploaded.fileName,
-              mimeType: uploaded.contentType || mimeType,
-              size: uploaded.size,
-            })
-          : await sendMessageApi(selectedConversation.conversationId, {
-              type,
-              body: uploaded.url,
-              clientMsgId,
-            });
       upsertMessage(sent);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload media');
@@ -458,24 +445,15 @@ export default function ChatPage() {
     });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
-    await sendUploaded(
-      asVideo ? 'VIDEO' : 'IMAGE',
-      asset.uri,
-      asset.fileName ?? (asVideo ? 'video.mp4' : 'image.jpg'),
-      asset.mimeType ?? (asVideo ? 'video/mp4' : 'image/jpeg'),
-    );
+    // The file name's extension tells the server the type when the blob has none.
+    await sendUploaded(asset.uri, asset.fileName ?? (asVideo ? 'video.mp4' : 'image.jpg'));
   };
 
   const pickDocument = async () => {
     const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
-    await sendUploaded(
-      'DOCUMENT',
-      asset.uri,
-      asset.name,
-      asset.mimeType ?? 'application/octet-stream',
-    );
+    await sendUploaded(asset.uri, asset.name);
   };
 
   const titleOf = useMemo(

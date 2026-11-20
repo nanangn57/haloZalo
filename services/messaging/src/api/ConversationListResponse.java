@@ -1,5 +1,6 @@
 package api;
 
+import media.MediaLinks;
 import service.MessageService;
 
 import java.util.List;
@@ -11,8 +12,8 @@ public final class ConversationListResponse {
     private final List<ConversationResponse> conversations;
     private final String nextCursor;
 
-    public ConversationListResponse(MessageService.ConversationPage page) {
-        this.conversations = page.conversations().stream().map(ConversationResponse::new).toList();
+    public ConversationListResponse(MessageService.ConversationPage page, MediaLinks links) {
+        this.conversations = page.conversations().stream().map(summary -> new ConversationResponse(summary, links)).toList();
         this.nextCursor = page.nextCursor();
     }
 

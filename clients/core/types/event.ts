@@ -16,10 +16,17 @@ export interface EventEnvelope<TPayload = unknown> {
   payload: TPayload
 }
 
+import type { MessageMedia } from './message'
+
 /**
  * Message types defined by the current API contract.
  */
-export type ApiMessageType = 'TEXT' | 'EMOTION'
+export type ApiMessageType =
+  | 'TEXT'
+  | 'EMOTION'
+  | 'IMAGE'
+  | 'VIDEO'
+  | 'DOCUMENT'
 
 /**
  * messaging.message.created
@@ -32,7 +39,10 @@ export interface MessageCreatedPayload {
   seq: number
   senderId: string
   type: ApiMessageType
-  body: string
+  // Vắng ở tin file không có chú thích, và ở tin đã xoá.
+  body?: string
+  // IMAGE, VIDEO, DOCUMENT. url tương đối, chưa resolve.
+  media?: MessageMedia
   clientMsgId: string
   createdAt: string
 }

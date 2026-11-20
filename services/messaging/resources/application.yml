@@ -7,10 +7,6 @@ spring:
   config:
     # Local secrets, never committed. Real environment variables win over this file. See .env.example.
     import: optional:file:./.env.local[.properties]
-  servlet:
-    multipart:
-      max-file-size: 20MB
-      max-request-size: 21MB
   datasource:
     # The shared halozalo database. Defaults match infra/docker-compose.yml.
     url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/halozalo}
@@ -21,6 +17,13 @@ spring:
       connection-init-sql: SET search_path TO messaging
       # Fail fast instead of queueing requests for half a minute when Postgres is down.
       connection-timeout: 5000
+  servlet:
+    multipart:
+      # Must be at least the largest per-kind limit under messaging.media. Bigger requests get 413 before any work.
+      max-file-size: 25MB
+      max-request-size: 26MB
+      # Parts over this size are streamed to a temp file instead of held in memory.
+      file-size-threshold: 1MB
   flyway:
     # Creates schema messaging if missing, and upgrades it from resources/db/migration on start.
     schemas: messaging
@@ -33,12 +36,19 @@ messaging:
   user-header-enabled: ${MESSAGING_USER_HEADER_ENABLED:true}
   # When true, SharedSessionFilter resolves Bearer / access_token via identity.sessions on the shared DB.
   session-auth-enabled: ${MESSAGING_SESSION_AUTH_ENABLED:false}
-  media:
-    storage-dir: ${MESSAGING_MEDIA_STORAGE_DIR:/tmp/halozalo-media}
-    public-base-url: ${MESSAGING_MEDIA_PUBLIC_BASE_URL:http://localhost:8082}
   cors:
     # Browser origins allowed to call the REST API. Comma-separated; patterns like http://localhost:* work.
     allowed-origins: ${MESSAGING_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081,http://127.0.0.1:8081}
+  media:
+    # Local disk store for uploads. Mount a volume here in Docker, or files are lost with the container.
+    storage-dir: ${MESSAGING_MEDIA_STORAGE_DIR:./data/media}
+    # HMAC key for signed download links, at least 32 bytes. Unset: a random key per process, so links break on restart.
+    signing-key: ${MESSAGING_MEDIA_SIGNING_KEY:}
+    # A link stays valid at least this long. Clients get a fresh link with every read of the message.
+    link-ttl: ${MESSAGING_MEDIA_LINK_TTL:1h}
+    max-image-size: 10MB
+    max-video-size: 25MB
+    max-document-size: 10MB
   realtime:
     allowed-origins: "*"
     ping-interval: 25s

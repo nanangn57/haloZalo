@@ -1,15 +1,18 @@
 import { getApiHeaders } from './apiClient'
 import { connectionConfig } from './connectionConfig'
-import type { Message } from './types/message'
+import { mapMedia } from './mediaService'
+import type {
+  MediaKind,
+  Message,
+  MessageMedia,
+} from './types/message'
 
 const API_MESSAGE_BASE_URL = connectionConfig.messageBaseUrl
 
 export type SendableMessageType =
   | 'TEXT'
   | 'EMOTION'
-  | 'IMAGE'
-  | 'VIDEO'
-  | 'DOCUMENT'
+  | MediaKind
 
 export type EmotionCode =
   | 'like'
@@ -33,33 +36,12 @@ export type SendMessageRequest =
       replyTo?: string
     }
   | {
-      type: 'IMAGE'
-      body: string
+      // Phải bằng kind của media đã upload.
+      type: MediaKind
+      mediaId: string
+      // Chú thích, không bắt buộc.
+      body?: string
       clientMsgId: string
-      thumbnailUrl?: string
-      width?: number
-      height?: number
-      caption?: string
-      replyTo?: string
-    }
-  | {
-      type: 'VIDEO'
-      body: string
-      clientMsgId: string
-      thumbnailUrl?: string
-      width?: number
-      height?: number
-      duration?: number
-      caption?: string
-      replyTo?: string
-    }
-  | {
-      type: 'DOCUMENT'
-      body: string
-      clientMsgId: string
-      fileName: string
-      mimeType: string
-      size: number
       replyTo?: string
     }
 
@@ -70,6 +52,8 @@ export interface ApiMessage {
   senderId: string
   type: SendableMessageType
   body?: string
+  // IMAGE, VIDEO, DOCUMENT. url tương đối; mapApiMessage resolve qua mediaService.
+  media?: MessageMedia
   clientMsgId: string
   createdAt: string
   replyTo?: string
@@ -99,7 +83,11 @@ async function getErrorMessage(response: Response): Promise<string> {
   )
 }
 
-function mapApiMessage(message: ApiMessage): Message {
+// =========================
+// MAP API MESSAGE TO FRONTEND MESSAGE
+// =========================
+
+export function mapApiMessage(message: ApiMessage): Message {
   return {
     id: message.messageId,
     messageId: message.messageId,
@@ -107,6 +95,7 @@ function mapApiMessage(message: ApiMessage): Message {
     senderId: message.senderId,
     type: message.type,
     content: message.body ?? '',
+    media: message.media ? mapMedia(message.media) : undefined,
     seq: message.seq,
     clientMsgId: message.clientMsgId,
     sentAt: Math.floor(new Date(message.createdAt).getTime() / 1000),

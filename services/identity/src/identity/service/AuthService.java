@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -69,6 +70,8 @@ public final class AuthService {
         );
     }
 
+    /** The constructor Spring uses; the other one is for tests. */
+    @Autowired
     public AuthService(
         PasswordHasher passwordHasher,
         AccountRepository accounts,

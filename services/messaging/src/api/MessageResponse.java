@@ -1,12 +1,14 @@
 package api;
 
+import media.MediaLinks;
 import message.Message;
 import message.MessageContent;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * The contract's Message: MessageBase plus type and body. Only TEXT and EMOTION have a contract shape yet.
+ * The contract's Message: MessageBase plus type and body. TEXT and EMOTION carry body; IMAGE, VIDEO and DOCUMENT
+ * carry media, with the caption, if any, as body.
  * replyTo, forwardedFrom, status and deletedAt are left out when null, so a plain message keeps the exact
  * contract shape. A deleted message keeps its seq slot but never shows its content again.
  */
@@ -17,6 +19,7 @@ public final class MessageResponse {
     private final String senderId;
     private final String type;
     private final String body;
+    private final MediaResponse media;
     private final String clientMsgId;
     private final String replyTo;
     private final String forwardedFrom;
@@ -24,13 +27,16 @@ public final class MessageResponse {
     private final String deletedAt;
     private final String createdAt;
 
-    public MessageResponse(Message message) {
+    public MessageResponse(Message message, MediaLinks links) {
         this.messageId = message.getMessageId();
         this.conversationId = message.getConversationId();
         this.seq = message.getSeq();
         this.senderId = message.getSenderId();
         this.type = message.getType().name();
         this.body = message.isDeleted() ? null : body(message.getContent());
+        this.media = !message.isDeleted() && message.getContent() instanceof MessageContent.Attachment attachment
+            ? new MediaResponse(attachment, links)
+            : null;
         this.clientMsgId = message.getClientMsgId();
         this.replyTo = message.getReplyTo();
         this.forwardedFrom = message.getForwardedFrom();
@@ -46,16 +52,7 @@ public final class MessageResponse {
         if (content instanceof MessageContent.Emotion emotion) {
             return emotion.code();
         }
-        if (content instanceof MessageContent.Image image) {
-            return image.url();
-        }
-        if (content instanceof MessageContent.Video video) {
-            return video.url();
-        }
-        if (content instanceof MessageContent.Document document) {
-            return document.url();
-        }
-        throw new IllegalStateException("No contract shape for message type " + content.type());
+        return ((MessageContent.Attachment) content).caption();
     }
 
     public String getMessageId() {
@@ -81,6 +78,11 @@ public final class MessageResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getBody() {
         return body;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public MediaResponse getMedia() {
+        return media;
     }
 
     public String getClientMsgId() {

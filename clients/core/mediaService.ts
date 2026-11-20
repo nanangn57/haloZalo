@@ -1,71 +1,57 @@
-import { getAccessToken, requireUserId } from './authSession'
 import { connectionConfig } from './connectionConfig'
 import { getApiHeaders } from './apiClient'
+import type { MediaKind, MessageMedia } from './types/message'
 
-export type MediaUploadType = 'IMAGE' | 'DOCUMENT' | 'VIDEO'
+// Gửi file hai bước (openapi.yaml, tag Media):
+//   1. uploadMediaApi(conversationId, file) -> MessageMedia có mediaId và kind
+//   2. sendMessageApi(conversationId, { type: media.kind, mediaId: media.mediaId, clientMsgId })
+// Ảnh 10MB, video 25MB, tài liệu 10MB; vượt thì server trả 413.
 
-export interface MediaUploadResult {
-  mediaId: string
-  url: string
-  type: MediaUploadType
-  contentType: string
-  fileName: string
-  size: number
-}
+export type MediaUploadType = MediaKind
 
 /**
- * Turns relative `/media/...` (or bare media id) into an absolute URL for Image/Video.
- * Absolute http(s) URLs are returned unchanged.
+ * Link media do server ký, có hạn, dạng `/media/{id}?expires=&sig=`, tương đối với base URL của messaging.
+ * Nối thẳng vào sau base thay vì `new URL(url, base)`, để giữ tiền tố như `/api/messaging` khi đi qua gateway.
+ * Link hết hạn (403) thì tải lại tin là có link mới. URL tuyệt đối, blob: và data: giữ nguyên.
  */
-export function resolveMediaUrl(content: string | null | undefined): string {
-  const raw = (content ?? '').trim()
+export function resolveMediaUrl(url: string | null | undefined): string {
+  const raw = (url ?? '').trim()
   if (!raw) {
     return ''
   }
-  if (/^https?:\/\//i.test(raw) || /^blob:/i.test(raw) || /^data:/i.test(raw)) {
+  if (/^(https?:|blob:|data:)/i.test(raw)) {
     return raw
   }
-  const base = connectionConfig.messageBaseUrl.replace(/\/$/, '')
-  if (raw.startsWith('/')) {
-    return `${base}${raw}`
-  }
-  if (raw.startsWith('media/')) {
-    return `${base}/${raw}`
-  }
-  return `${base}/media/${raw}`
+  const base = connectionConfig.messageBaseUrl.replace(/\/+$/, '')
+  return `${base}${raw.startsWith('/') ? '' : '/'}${raw}`
 }
 
+export function mapMedia(media: MessageMedia): MessageMedia {
+  return { ...media, url: resolveMediaUrl(media.url) }
+}
+
+/**
+ * Bước một của gửi file. Chỉ thành viên hội thoại upload được. Server tự suy ra kind từ MIME,
+ * hoặc từ đuôi file khi Blob không có type (React Native), nên luôn truyền fileName có đuôi.
+ */
 export async function uploadMediaApi(
+  conversationId: string,
   file: Blob,
-  type: MediaUploadType,
-  options?: {
-    fileName?: string
-    conversationId?: string
-  },
-): Promise<MediaUploadResult> {
+  fileName?: string,
+): Promise<MessageMedia> {
+  // File does not exist in React Native, so check before instanceof.
+  const name =
+    fileName ??
+    (typeof File !== 'undefined' && file instanceof File ? file.name : 'upload.bin')
   const form = new FormData()
-  form.append('file', file, options?.fileName ?? 'upload.bin')
-  form.append('type', type)
-  if (options?.conversationId) {
-    form.append('conversationId', options.conversationId)
-  }
+  form.append('file', file, name)
 
-  const headers: Record<string, string> = {}
-  if (connectionConfig.messageHttpAuthMode === 'TOKEN') {
-    const token = getAccessToken()
-    if (!token) {
-      throw new Error('Bạn cần đăng nhập để upload.')
-    }
-    headers.Authorization = `Bearer ${token}`
-  } else {
-    headers['X-User-Id'] = requireUserId()
-  }
-
+  // Không đặt Content-Type: runtime tự thêm boundary cho multipart.
   const response = await fetch(
-    `${connectionConfig.messageBaseUrl}/media/uploads`,
+    `${connectionConfig.messageBaseUrl}/conversations/${encodeURIComponent(conversationId)}/media`,
     {
       method: 'POST',
-      headers,
+      headers: getApiHeaders(),
       body: form,
     },
   )
@@ -79,10 +65,5 @@ export async function uploadMediaApi(
     )
   }
 
-  return (await response.json()) as MediaUploadResult
-}
-
-/** Headers helper kept for callers that already build multipart themselves. */
-export function mediaAuthHeaders(): HeadersInit {
-  return getApiHeaders(false)
+  return mapMedia((await response.json()) as MessageMedia)
 }

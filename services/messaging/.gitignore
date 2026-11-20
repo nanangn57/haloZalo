@@ -4,3 +4,6 @@
 .env.*.local
 
 target/
+
+# Uploads stored by LocalMediaStore when running locally.
+data/

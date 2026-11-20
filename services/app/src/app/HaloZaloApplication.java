@@ -13,7 +13,7 @@ import org.springframework.context.annotation.FilterType;
  * Modular monolith: identity + messaging + analytics in one process (profile {@code app}).
  */
 @SpringBootApplication
-@ConfigurationPropertiesScan(basePackages = "realtime")
+@ConfigurationPropertiesScan(basePackages = {"realtime", "media"})
 @ComponentScan(
     basePackages = {
         "app",

@@ -2,11 +2,11 @@ package message;
 
 import java.nio.charset.StandardCharsets;
 
+/**
+ * Checks the shape of content. File type and size limits are checked once, at upload, by media.MediaService.
+ */
 public final class ContentValidator {
     public static final int TEXT_MAX_BYTES = 4096;
-    public static final long IMAGE_MAX_BYTES = 5L * 1024 * 1024;
-    public static final long DOCUMENT_MAX_BYTES = 10L * 1024 * 1024;
-    public static final long VIDEO_MAX_BYTES = 20L * 1024 * 1024;
 
     private ContentValidator() {
     }
@@ -22,37 +22,29 @@ public final class ContentValidator {
             if (text.text() == null || text.text().isEmpty()) {
                 return "Text body is required";
             }
-            if (text.text().getBytes(StandardCharsets.UTF_8).length > TEXT_MAX_BYTES) {
-                return "Text body exceeds " + TEXT_MAX_BYTES + " bytes";
-            }
-            return null;
+            return tooLong(text.text()) ? "Text body exceeds " + TEXT_MAX_BYTES + " bytes" : null;
         }
         if (content instanceof MessageContent.Emotion emotion) {
             return MessageContent.EMOTION_CODES.contains(emotion.code()) ? null : "Unknown emotion code";
         }
-        if (content instanceof MessageContent.Image image) {
-            if (blank(image.url())) {
-                return "Image url is required";
-            }
-            return negative(image.width()) || negative(image.height()) ? "Image size must be positive" : null;
+        MessageContent.Attachment attachment = (MessageContent.Attachment) content;
+        if (blank(attachment.mediaId()) || blank(attachment.fileName()) || blank(attachment.mimeType())) {
+            return "mediaId, fileName and mimeType are required";
         }
-        if (content instanceof MessageContent.Video video) {
-            if (blank(video.url())) {
-                return "Video url is required";
-            }
-            if (negative(video.width()) || negative(video.height()) || negative(video.duration())) {
-                return "Video size and duration must be positive";
-            }
-            return null;
+        if (attachment.size() <= 0) {
+            return "File size must be positive";
         }
-        MessageContent.Document document = (MessageContent.Document) content;
-        if (blank(document.url()) || blank(document.fileName()) || blank(document.mimeType())) {
-            return "Document url, fileName and mimeType are required";
+        if (attachment.caption() != null && tooLong(attachment.caption())) {
+            return "Caption exceeds " + TEXT_MAX_BYTES + " bytes";
         }
-        if (document.size() <= 0 || document.size() > DOCUMENT_MAX_BYTES) {
-            return "Document size must be between 1 and " + DOCUMENT_MAX_BYTES + " bytes";
+        if (attachment instanceof MessageContent.Image image && (negative(image.width()) || negative(image.height()))) {
+            return "Image size must be positive";
         }
         return null;
+    }
+
+    private static boolean tooLong(String text) {
+        return text.getBytes(StandardCharsets.UTF_8).length > TEXT_MAX_BYTES;
     }
 
     private static boolean blank(String value) {

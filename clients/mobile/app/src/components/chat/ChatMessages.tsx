@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Linking, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import type { Message } from '@core/types/message';
-import { resolveMediaUrl } from '@core/mediaService';
 import { useTheme } from '@/hooks/use-theme';
 
 const EMOTION_LABEL: Record<string, string> = {
@@ -48,7 +47,8 @@ function MessageBody({
   imageBg: string;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
-  const mediaUrl = resolveMediaUrl(message.content);
+  // Signed, expiring link from the server; reloading messages gives a fresh one.
+  const mediaUrl = message.media?.url ?? '';
 
   if (message.type === 'EMOTION') {
     return (
@@ -96,7 +96,7 @@ function MessageBody({
   if (message.type === 'DOCUMENT') {
     return (
       <MediaFallback
-        label="Open file"
+        label={message.media?.fileName ?? 'Open file'}
         url={mediaUrl}
         isMine={isMine}
         mineColor={mineColor}

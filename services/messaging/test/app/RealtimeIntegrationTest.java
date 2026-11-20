@@ -5,6 +5,7 @@ import http.CurrentUser;
 import realtime.RealtimeSessions;
 import service.MessageService;
 import storage.MemoryConversations;
+import storage.MemoryMedia;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
 import storage.MemoryReadMarkers;
@@ -58,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
     classes = RealtimeIntegrationTest.TestApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = "messaging.user-header-enabled=true")
+    properties = {"messaging.user-header-enabled=true", "messaging.media.storage-dir=target/test-media"})
 class RealtimeIntegrationTest {
     // New users for every test: the app is shared, and a pair of users has only one DIRECT conversation.
     private final String aliceId = UUID.randomUUID().toString();
@@ -238,9 +239,9 @@ class RealtimeIntegrationTest {
         DataSourceAutoConfiguration.class,
         FlywayAutoConfiguration.class
     })
-    @ConfigurationPropertiesScan("realtime")
+    @ConfigurationPropertiesScan({"realtime", "media"})
     @ComponentScan(
-        basePackages = {"api", "event", "http", "member", "realtime", "service"},
+        basePackages = {"api", "event", "http", "media", "member", "realtime", "service"},
         excludeFilters = @ComponentScan.Filter(
             type = FilterType.ASSIGNABLE_TYPE,
             classes = {http.SharedSessionFilter.class, member.SharedDbGroupMembers.class}
@@ -265,6 +266,11 @@ class RealtimeIntegrationTest {
         @Bean
         MemoryReactions reactions() {
             return new MemoryReactions();
+        }
+
+        @Bean
+        MemoryMedia media() {
+            return new MemoryMedia();
         }
     }
 }

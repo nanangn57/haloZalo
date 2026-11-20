@@ -1,49 +1,76 @@
 package media;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.UUID;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import java.nio.file.StandardCopyOption;
 
 /**
- * Stores uploaded bytes under a local directory and returns a public URL path under /media/{id}.
+ * Files on local disk, under directory/ab/abcd...: the first two characters of the key spread files over 256
+ * folders. Keys are canonical UUIDs, so they never contain path separators. Each file is written to a temporary
+ * name first and moved into place, so a reader never sees half a file.
  */
-@Component
-public final class LocalMediaStore {
+public final class LocalMediaStore implements MediaStore {
+    private static final Logger log = LoggerFactory.getLogger(LocalMediaStore.class);
+
     private final Path root;
-    private final String publicBaseUrl;
 
-    public LocalMediaStore(
-        @Value("${messaging.media.storage-dir:./data/media}") String storageDir,
-        @Value("${messaging.media.public-base-url:http://localhost:8082}") String publicBaseUrl
-    ) throws IOException {
-        this.root = Path.of(storageDir).toAbsolutePath().normalize();
-        Files.createDirectories(this.root);
-        this.publicBaseUrl = publicBaseUrl.endsWith("/")
-            ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1)
-            : publicBaseUrl;
+    public LocalMediaStore(Path root) throws IOException {
+        this.root = Files.createDirectories(root).toAbsolutePath().normalize();
     }
 
-    public Stored store(byte[] bytes, String contentType, String originalName) throws IOException {
-        String id = UUID.randomUUID().toString();
-        String safeName = originalName == null || originalName.isBlank() ? "bin" : originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
-        Path file = root.resolve(id + "_" + safeName);
-        Files.write(file, bytes);
-        return new Stored(id, publicBaseUrl + "/media/" + id, contentType, safeName, bytes.length, file.getFileName().toString());
-    }
-
-    public Path resolve(String mediaId) throws IOException {
-        try (var stream = Files.list(root)) {
-            return stream
-                .filter(path -> path.getFileName().toString().startsWith(mediaId + "_"))
-                .findFirst()
-                .orElseThrow(() -> new IOException("Media not found"));
+    @Override
+    public long put(String key, InputStream content, long maxBytes) throws IOException, TooLarge {
+        Path target = path(key);
+        Files.createDirectories(target.getParent());
+        Path temporary = Files.createTempFile(target.getParent(), key, ".part");
+        try {
+            long written = 0;
+            byte[] buffer = new byte[64 * 1024];
+            try (OutputStream out = Files.newOutputStream(temporary)) {
+                int read;
+                while ((read = content.read(buffer)) != -1) {
+                    written += read;
+                    if (written > maxBytes) {
+                        throw new TooLarge();
+                    }
+                    out.write(buffer, 0, read);
+                }
+            }
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+            return written;
+        } finally {
+            Files.deleteIfExists(temporary);
         }
     }
 
-    public record Stored(String id, String url, String contentType, String fileName, long size, String storedName) {
+    @Override
+    public Resource get(String key) {
+        Path file = path(key);
+        return Files.isRegularFile(file) ? new FileSystemResource(file) : null;
+    }
+
+    @Override
+    public void delete(String key) {
+        try {
+            Files.deleteIfExists(path(key));
+        } catch (IOException ex) {
+            log.warn("Could not delete media file {}", key, ex);
+        }
+    }
+
+    private Path path(String key) {
+        Path file = root.resolve(key.substring(0, 2)).resolve(key).normalize();
+        if (!file.startsWith(root)) {
+            throw new IllegalArgumentException("Bad media key");
+        }
+        return file;
     }
 }

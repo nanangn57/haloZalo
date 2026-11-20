@@ -18,7 +18,8 @@ import type { AuthUser } from '@core/types/auth'
 import type { User } from '../types/user'
 import type { Message } from '@core/types/message'
 import type { Member } from '@core/types/group'
-import type { MessagingEvent } from '@core/types/event'
+import type { MessageCreatedPayload, MessagingEvent } from '@core/types/event'
+import { mapEventToMessage } from '@core/types/messageMapper'
 
 import ConversationItem from '../components/chat/ConversationItem'
 import ChatHeader from '../components/chat/ChatHeader'
@@ -104,8 +105,11 @@ function ChatPage() {
 
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null)
+  // Latest selection for socket callbacks; synced after render, not during it.
   const selectedConversationRef = useRef<Conversation | null>(null)
-  selectedConversationRef.current = selectedConversation
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  }, [selectedConversation])
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -116,14 +120,33 @@ function ChatPage() {
 
   // Messages
   const [messages, setMessages] = useState<Message[]>([])
+
+  // Insert or replace by messageId/clientMsgId. A message can arrive twice: as the HTTP
+  // response and as the /ws echo, in either order.
+  function upsertMessage(incoming: Message) {
+    setMessages((previous) => {
+      const index = previous.findIndex(
+        (message) =>
+          (incoming.messageId !== undefined && message.messageId === incoming.messageId) ||
+          message.clientMsgId === incoming.clientMsgId,
+      )
+      if (index < 0) {
+        return [...previous, incoming]
+      }
+      return previous.map((message, i) => (i === index ? incoming : message))
+    })
+  }
   const messagesRef = useRef<Message[]>([])
-  messagesRef.current = messages
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   const [isLoadingMessages, setIsLoadingMessages] =
     useState(false)
 
   const [messageLoadError, setMessageLoadError] =
     useState<string | null>(null)
+
 
   const [newMessage, setNewMessage] = useState('')
 
@@ -499,28 +522,12 @@ function ChatPage() {
   // --------------------------------------------------
 
   useEffect(() => {
-    const mergeIncoming = (incomingMessage: Message) => {
-      setMessages((previous) => {
-        const existingIndex = previous.findIndex(
-          (message) =>
-            message.messageId === incomingMessage.messageId ||
-            message.clientMsgId === incomingMessage.clientMsgId,
-        )
-
-        if (existingIndex >= 0) {
-          return previous.map((message, index) =>
-            index === existingIndex ? incomingMessage : message,
-          )
-        }
-
-        return [...previous, incomingMessage]
-      })
-    }
+    const mergeIncoming = upsertMessage
 
     const unsubscribeEvent = socketClient.subscribe((event) => {
       console.log('Received WebSocket event:', event)
 
-      setSocketEvents((previous) => [event as MessagingEvent, ...previous])
+      setSocketEvents((previous) => [event as unknown as MessagingEvent, ...previous])
 
       if (event.type === 'messaging.read.updated') {
         const payload = event.payload as {
@@ -584,16 +591,8 @@ function ChatPage() {
         return
       }
 
-      const payload = event.payload as {
-        messageId: string
-        conversationId: string
-        seq: number
-        senderId: string
-        type: Message['type']
-        body: string
-        clientMsgId: string
-        createdAt: string
-      }
+      // Payload is the contract's Message; the shared mapper keeps media and signs-in its link.
+      const payload = event.payload as unknown as MessageCreatedPayload
 
       if (
         !payload.messageId ||
@@ -603,22 +602,7 @@ function ChatPage() {
         return
       }
 
-      const createdAt = Date.parse(payload.createdAt)
-
-      mergeIncoming({
-        id: payload.messageId,
-        messageId: payload.messageId,
-        conversationId: payload.conversationId,
-        senderId: payload.senderId,
-        type: payload.type,
-        content: payload.body,
-        seq: payload.seq,
-        clientMsgId: payload.clientMsgId,
-        sentAt: Number.isFinite(createdAt)
-          ? Math.floor(createdAt / 1000)
-          : Math.floor(Date.now() / 1000),
-        status: 'sent',
-      })
+      mergeIncoming(mapEventToMessage(payload))
 
       if (
         selectedConversationRef.current?.conversationId ===
@@ -809,10 +793,19 @@ function ChatPage() {
     )
   })()
 
-  useEffect(() => {
-    const conversationId = selectedConversation?.conversationId
+  // Typing and presence belong to one conversation: reset them while rendering a
+  // new selection (React's "adjust state when a prop changes"), not in an effect.
+  const [presenceConversationId, setPresenceConversationId] = useState(
+    selectedConversation?.conversationId,
+  )
+  if (presenceConversationId !== selectedConversation?.conversationId) {
+    setPresenceConversationId(selectedConversation?.conversationId)
     setTypingUserId(null)
     setPeerOnline(false)
+  }
+
+  useEffect(() => {
+    const conversationId = selectedConversation?.conversationId
     lastTypingSentRef.current = false
     if (!conversationId) {
       return
@@ -974,15 +967,26 @@ function ChatPage() {
         body: code,
         clientMsgId,
       })
-      setMessages((previous) => [...previous, saved])
+      upsertMessage(saved)
     } catch (err) {
       console.error('Cannot send emotion:', err)
     }
   }
 
+  // Types and limits match POST /conversations/{id}/media. The button only filters
+  // the picker; the server decides the real kind from the file.
+  const MEDIA_ACCEPT: Record<MediaUploadType, string> = {
+    IMAGE: 'image/jpeg,image/png,image/gif,image/webp',
+    VIDEO: 'video/mp4,video/webm,video/quicktime',
+    DOCUMENT: '.pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx',
+  }
+
   function pickMedia(type: MediaUploadType) {
     mediaTypeRef.current = type
-    mediaInputRef.current?.click()
+    if (mediaInputRef.current) {
+      mediaInputRef.current.accept = MEDIA_ACCEPT[type]
+      mediaInputRef.current.click()
+    }
   }
 
   async function handleMediaSelected(
@@ -993,30 +997,16 @@ function ChatPage() {
     if (!file || !selectedConversation) return
 
     const conversationId = selectedConversation.conversationId
-    const type = mediaTypeRef.current
     setUploadingMedia(true)
     try {
-      const uploaded = await uploadMediaApi(file, type, {
-        fileName: file.name,
-        conversationId,
+      // Step 1: upload. Step 2: send a message of the kind the server decided.
+      const media = await uploadMediaApi(conversationId, file, file.name)
+      const saved = await sendMessageApi(conversationId, {
+        type: media.kind,
+        mediaId: media.mediaId,
+        clientMsgId: crypto.randomUUID(),
       })
-      const clientMsgId = crypto.randomUUID()
-      const saved =
-        type === 'DOCUMENT'
-          ? await sendMessageApi(conversationId, {
-              type: 'DOCUMENT',
-              body: uploaded.url,
-              clientMsgId,
-              fileName: uploaded.fileName,
-              mimeType: uploaded.contentType,
-              size: uploaded.size,
-            })
-          : await sendMessageApi(conversationId, {
-              type,
-              body: uploaded.url,
-              clientMsgId,
-            })
-      setMessages((previous) => [...previous, saved])
+      upsertMessage(saved)
     } catch (err) {
       console.error('Cannot upload media:', err)
       setError(err instanceof Error ? err.message : 'Upload failed')

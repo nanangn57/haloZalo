@@ -1,6 +1,9 @@
 package http;
 
 import event.RecordingEvents;
+import media.LocalMediaStore;
+import media.MediaProperties;
+import media.TestLinks;
 import member.ConversationMembers;
 import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,14 +13,20 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import service.MediaService;
 import service.MessageService;
 import storage.MemoryConversations;
+import storage.MemoryMedia;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
 import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.util.unit.DataSize;
 
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Set;
 import java.util.UUID;
 
@@ -38,6 +47,9 @@ class MessageControllerTest {
 
     private MockMvc mvc;
 
+    @TempDir
+    Path mediaDir;
+
     @BeforeEach
     void setUp() throws Exception {
         MemoryConversations conversations = new MemoryConversations();
@@ -46,7 +58,11 @@ class MessageControllerTest {
         MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
             new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
         groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
+        MediaService media = new MediaService(service, new MemoryMedia(), new LocalMediaStore(mediaDir), TestLinks.LINKS,
+            new MediaProperties(mediaDir.toString(), "", Duration.ofHours(1), DataSize.ofMegabytes(10),
+                DataSize.ofMegabytes(25), DataSize.ofMegabytes(10)),
+            new RecordingEvents());
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service, media, TestLinks.LINKS))
             .setControllerAdvice(new MessageExceptionHandler())
             .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
@@ -94,11 +110,11 @@ class MessageControllerTest {
     }
 
     @Test
-    void sendAcceptsImageUrl() throws Exception {
+    void sendRejectsImageWithoutAnUpload() throws Exception {
+        // A URL in body is not a file: IMAGE needs the mediaId of an upload.
         send(ALICE, "{\"type\":\"IMAGE\",\"body\":\"https://cdn/a.png\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.type").value("IMAGE"))
-            .andExpect(jsonPath("$.body").value("https://cdn/a.png"));
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }
 
     @Test

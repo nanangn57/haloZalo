@@ -50,7 +50,7 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `messaging.typing` | Client báo đang gõ (ephemeral, không persist) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "typing": true }` |
 | `messaging.presence` | Client báo online/offline trong hội thoại (ephemeral) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "status": "online" }` |
 
-`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics đếm envelope upload, không dùng payload của upload.
+`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics đếm envelope upload, không dùng payload của upload. Event này chỉ ghi log và analytics, không đẩy qua `/ws`: upload chưa phải là tin. Thành viên thấy file qua `messaging.message.created` của tin gửi `mediaId`.
 
 Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, và `conversationId` trong payload của login, tạo nhóm, và tin mới để ghi bảng tổng hợp của chính schema `analytics`. Không đọc bảng schema `messaging`.
 

@@ -2,6 +2,7 @@ package api;
 
 import conversation.Conversation;
 import conversation.ConversationSummary;
+import media.MediaLinks;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -22,7 +23,7 @@ public final class ConversationResponse {
     private final Long lastReadSeq;
     private final Long unreadCount;
 
-    public ConversationResponse(ConversationSummary summary) {
+    public ConversationResponse(ConversationSummary summary, MediaLinks links) {
         Conversation conversation = summary.conversation();
         this.conversationId = conversation.getConversationId();
         this.type = conversation.getType().name();
@@ -30,7 +31,7 @@ public final class ConversationResponse {
         this.lastSeq = conversation.getLastSeq();
         this.createdAt = conversation.getCreatedAt().toString();
         this.lastMessageAt = conversation.getLastMessageAt() == null ? null : conversation.getLastMessageAt().toString();
-        this.lastMessage = summary.lastMessage() == null ? null : new MessageResponse(summary.lastMessage());
+        this.lastMessage = summary.lastMessage() == null ? null : new MessageResponse(summary.lastMessage(), links);
         this.lastReadSeq = summary.read() == null ? null : summary.read().lastReadSeq();
         this.unreadCount = summary.read() == null ? null : summary.read().unreadCount();
     }

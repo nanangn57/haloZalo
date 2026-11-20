@@ -1,11 +1,16 @@
 import { useState } from 'react'
 import type { Message } from '@core/types/message'
-import { resolveMediaUrl } from '@core/mediaService'
 import './ChatMessages.css'
 
 interface ChatMessageProps {
   messages: Message[]
   currentUserId: string
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const EMOTION_LABEL: Record<string, string> = {
@@ -63,7 +68,7 @@ function MessageBody({
   }
 
   if (message.type === 'IMAGE') {
-    const url = resolveMediaUrl(message.content)
+    const url = message.media?.url ?? ''
     if (!url || imageFailed) {
       return (
         <MediaFallback
@@ -77,7 +82,9 @@ function MessageBody({
       <a href={url} target="_blank" rel="noreferrer" className="chat-media-link">
         <img
           src={url}
-          alt="Shared image"
+          alt={message.media?.fileName ?? 'Shared image'}
+          width={message.media?.width}
+          height={message.media?.height}
           className="chat-media-image"
           loading="lazy"
           onError={() => setImageFailed(true)}
@@ -87,7 +94,7 @@ function MessageBody({
   }
 
   if (message.type === 'VIDEO') {
-    const url = resolveMediaUrl(message.content)
+    const url = message.media?.url ?? ''
     if (!url || imageFailed) {
       return (
         <MediaFallback
@@ -110,7 +117,7 @@ function MessageBody({
   }
 
   if (message.type === 'DOCUMENT') {
-    const url = resolveMediaUrl(message.content)
+    const url = message.media?.url ?? ''
     return (
       <a
         href={url || undefined}
@@ -119,7 +126,12 @@ function MessageBody({
         className={`chat-doc-link ${isMine ? 'is-mine' : ''}`}
       >
         <i className="bi bi-file-earmark-text" aria-hidden="true" />
-        <span>Open file</span>
+        <span>
+          {message.media?.fileName ?? 'Open file'}
+          {message.media && (
+            <small className="d-block opacity-75">{formatSize(message.media.size)}</small>
+          )}
+        </span>
       </a>
     )
   }
@@ -159,6 +171,9 @@ function ChatMessages({ messages, currentUserId }: ChatMessageProps) {
                 }`}
               >
                 <MessageBody message={message} isMine={isMine} />
+                {message.media && message.content && (
+                  <div className="chat-media-caption">{message.content}</div>
+                )}
               </div>
 
               <div className={`message-time ${isMine ? 'is-mine' : ''}`}>

@@ -2,6 +2,8 @@ package event;
 
 import api.MessageResponse;
 import conversation.Conversation;
+import media.Media;
+import media.MediaLinks;
 import member.ConversationMembers;
 import message.Message;
 import reaction.MessageReaction;
@@ -54,18 +56,22 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ActivityRecorder activities;
     private final RealtimeSessions sessions;
     private final PushNotifier push;
+    private final MediaLinks links;
 
-    public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
-        this(conversations, members, realtime, envelope -> { }, null, (ids, conversationId, preview) -> { });
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, MediaLinks links
+    ) {
+        this(conversations, members, realtime, envelope -> { }, null, (ids, conversationId, preview) -> { }, links);
     }
 
     public EnvelopeEventPublisher(
         ConversationRepository conversations,
         ConversationMembers members,
         RealtimeBus realtime,
-        ActivityRecorder activities
+        ActivityRecorder activities,
+        MediaLinks links
     ) {
-        this(conversations, members, realtime, activities, null, (ids, conversationId, preview) -> { });
+        this(conversations, members, realtime, activities, null, (ids, conversationId, preview) -> { }, links);
     }
 
     public EnvelopeEventPublisher(
@@ -74,7 +80,8 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         RealtimeBus realtime,
         ActivityRecorder activities,
         RealtimeSessions sessions,
-        PushNotifier push
+        PushNotifier push,
+        MediaLinks links
     ) {
         this.conversations = conversations;
         this.members = members;
@@ -82,6 +89,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         this.activities = activities;
         this.sessions = sessions;
         this.push = push == null ? (ids, conversationId, preview) -> { } : push;
+        this.links = links;
     }
 
     /**
@@ -94,7 +102,8 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         RealtimeBus realtime,
         ObjectProvider<ActivityRecorder> activities,
         ObjectProvider<RealtimeSessions> sessions,
-        ObjectProvider<PushNotifier> push
+        ObjectProvider<PushNotifier> push,
+        MediaLinks links
     ) {
         this(
             conversations,
@@ -102,13 +111,14 @@ public final class EnvelopeEventPublisher implements EventPublisher {
             realtime,
             activities.getIfAvailable(() -> envelope -> { }),
             sessions.getIfAvailable(),
-            push.getIfAvailable(() -> (ids, conversationId, preview) -> { })
+            push.getIfAvailable(() -> (ids, conversationId, preview) -> { }),
+            links
         );
     }
 
     @Override
     public void publishMessageCreated(Message message) {
-        emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message));
+        emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message, links));
         notifyOffline(message);
     }
 
@@ -137,18 +147,17 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     }
 
     /**
-     * Upload committed. Analytics counts this; no realtime fan-out required for the demo.
+     * Logged and recorded, never pushed: the file is not visible to anyone until a message sends it.
      */
-    public void publishMediaUploaded(String senderId, String conversationId, String type) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("senderId", senderId);
-        if (conversationId != null && !conversationId.isBlank()) {
-            payload.put("conversationId", conversationId);
-        }
-        payload.put("type", type);
-        String body = envelope(MEDIA_UPLOADED, payload);
-        log.info(body);
-        record(body);
+    @Override
+    public void publishMediaUploaded(Media media) {
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("senderId", media.uploaderId());
+        payload.put("conversationId", media.conversationId());
+        payload.put("type", media.kind().name());
+        String envelope = envelope(MEDIA_UPLOADED, payload);
+        log.info(envelope);
+        record(envelope);
     }
 
     private void emit(String conversationId, String type, Object payload) {

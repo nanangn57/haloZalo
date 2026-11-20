@@ -8,8 +8,11 @@ RUN mvn -q -B -DskipTests -f analytics/pom.xml install && mvn -q -B -DskipTests 
 
 # Run stage: JRE only, non-root user.
 FROM eclipse-temurin:17-jre
-RUN useradd --system --uid 10001 messaging
+RUN useradd --system --uid 10001 messaging \
+    && mkdir -p /var/lib/halozalo/media && chown messaging /var/lib/halozalo/media
 WORKDIR /app
+# Uploads. Mount a volume here, or files are lost with the container.
+ENV MESSAGING_MEDIA_STORAGE_DIR=/var/lib/halozalo/media
 COPY --from=build /build/messaging/target/messaging-0.1.0-exec.jar app.jar
 USER messaging
 EXPOSE 8082

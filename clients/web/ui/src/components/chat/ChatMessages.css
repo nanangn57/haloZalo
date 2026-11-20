@@ -133,3 +133,11 @@
 .chat-doc-link .bi {
   font-size: 1.1rem;
 }
+
+/* Caption under an image or video: media bubbles have no background, so use page text color. */
+.chat-media-caption {
+  margin-top: 4px;
+  color: var(--app-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

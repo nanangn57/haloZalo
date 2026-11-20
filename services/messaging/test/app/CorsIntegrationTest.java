@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
     classes = RealtimeIntegrationTest.TestApplication.class,
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = "messaging.user-header-enabled=true")
+    properties = {"messaging.user-header-enabled=true", "messaging.media.storage-dir=target/test-media"})
 class CorsIntegrationTest {
     private final HttpClient client = HttpClient.newHttpClient();
 

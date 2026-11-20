@@ -23,6 +23,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-halozalo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halozalo}
       MESSAGING_USER_HEADER_ENABLED: ${MESSAGING_USER_HEADER_ENABLED:-true}
+      # Unset: a random key per start, so media links in open tabs break on restart. Reloading fetches new ones.
+      MESSAGING_MEDIA_SIGNING_KEY: ${MESSAGING_MEDIA_SIGNING_KEY:-}
+    volumes:
+      - media-data:/var/lib/halozalo/media
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,3 +61,4 @@ services:
 
 volumes:
   postgres-data:
+  media-data:

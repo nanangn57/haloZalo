@@ -12,7 +12,10 @@ import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
 import conversation.ConversationType;
+import media.MediaLinks;
 import message.MessageContent;
+import message.MessageType;
+import service.MediaService;
 import service.MessageService;
 
 import java.util.Arrays;
@@ -30,9 +33,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public final class MessageController {
     private final MessageService messages;
+    private final MediaService media;
+    private final MediaLinks links;
 
-    public MessageController(MessageService messages) {
+    public MessageController(MessageService messages, MediaService media, MediaLinks links) {
         this.messages = messages;
+        this.media = media;
+        this.links = links;
     }
 
     @PostMapping("/conversations/{conversationId}/messages")
@@ -42,10 +49,12 @@ public final class MessageController {
         @RequestBody SendMessageRequest request) {
         MessageContent content = request.toContent();
         if (content == null) {
-            throw new MessageService.Rejected(
-                MessageService.Rejected.Reason.VALIDATION,
-                "Message type must be TEXT, EMOTION, IMAGE, VIDEO, or DOCUMENT"
-            );
+            MessageType kind = request.mediaType();
+            if (kind == null) {
+                throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION,
+                    "Message type must be TEXT, EMOTION, IMAGE, VIDEO or DOCUMENT");
+            }
+            content = media.attachment(conversationId, userId, kind, request.getMediaId(), request.getBody());
         }
         MessageService.Sent sent = messages.send(
             conversationId, userId, request.getClientMsgId(), content, null, request.getReplyTo());
@@ -60,7 +69,7 @@ public final class MessageController {
         @UserId String userId,
         @RequestBody OpenDirectRequest request) {
         MessageService.Opened opened = messages.openDirect(userId, request.getUserId());
-        return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation()));
+        return ResponseEntity.status(opened.created() ? 201 : 200).body(new ConversationResponse(opened.conversation(), links));
     }
 
     @GetMapping("/conversations")
@@ -68,14 +77,14 @@ public final class MessageController {
         @UserId String userId,
         @RequestParam(required = false) String cursor,
         @RequestParam(required = false) Integer limit) {
-        return new ConversationListResponse(messages.conversations(userId, cursor, limit));
+        return new ConversationListResponse(messages.conversations(userId, cursor, limit), links);
     }
 
     @GetMapping("/conversations/{conversationId}")
     public ConversationResponse conversation(
         @UserId String userId,
         @PathVariable String conversationId) {
-        return new ConversationResponse(messages.conversation(conversationId, userId));
+        return new ConversationResponse(messages.conversation(conversationId, userId), links);
     }
 
     /**
@@ -100,7 +109,7 @@ public final class MessageController {
         @RequestParam(required = false) Long afterSeq,
         @RequestParam(required = false) Long beforeSeq,
         @RequestParam(required = false) Integer limit) {
-        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit));
+        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit), links);
     }
 
     @PostMapping("/conversations/{conversationId}/forwards")
@@ -158,7 +167,7 @@ public final class MessageController {
         @RequestBody OpenGroupRequest request) {
         MessageService.Opened opened = messages.openGroupForMember(userId, request.groupId());
         return ResponseEntity.status(opened.created() ? 201 : 200)
-            .body(new ConversationResponse(opened.conversation()));
+            .body(new ConversationResponse(opened.conversation(), links));
     }
 
     @PostMapping("/internal/conversations")
@@ -168,7 +177,7 @@ public final class MessageController {
             .findFirst()
             .orElse(null);
         return ResponseEntity.status(201).body(new ConversationResponse(
-            messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
+            messages.openConversation(request.getConversationId(), type, request.getMemberIds()), links));
     }
 
     public record OpenGroupRequest(String groupId) {
@@ -178,7 +187,7 @@ public final class MessageController {
         }
     }
 
-    private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {
-        return ResponseEntity.status(sent.isCreated() ? 201 : 200).body(new MessageResponse(sent.getMessage()));
+    private ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {
+        return ResponseEntity.status(sent.isCreated() ? 201 : 200).body(new MessageResponse(sent.getMessage(), links));
     }
 }

@@ -1,5 +1,6 @@
 package event;
 
+import media.Media;
 import message.Message;
 import reaction.MessageReaction;
 
@@ -11,6 +12,7 @@ public final class RecordingEvents implements EventPublisher {
     public final List<Message> deleted = new ArrayList<>();
     public final List<String> reactions = new ArrayList<>();
     public final List<String> reads = new ArrayList<>();
+    public final List<Media> uploads = new ArrayList<>();
 
     @Override
     public void publishMessageCreated(Message message) {
@@ -35,5 +37,10 @@ public final class RecordingEvents implements EventPublisher {
     @Override
     public void publishReadUpdated(String conversationId, String userId, long lastReadSeq) {
         reads.add(conversationId + " " + userId + " " + lastReadSeq);
+    }
+
+    @Override
+    public void publishMediaUploaded(Media media) {
+        uploads.add(media);
     }
 }

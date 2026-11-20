@@ -24,22 +24,42 @@ public sealed interface MessageContent {
         }
     }
 
-    record Image(String url, String thumbnailUrl, Integer width, Integer height, String caption) implements MessageContent {
+    /**
+     * A file uploaded through POST /conversations/{conversationId}/media. Only the mediaId is stored: links to the
+     * bytes are signed fresh each time the message is read, so a stored message never holds an expired link.
+     * fileName, mimeType and size are copied from the upload so a message reads without a second lookup.
+     */
+    sealed interface Attachment extends MessageContent {
+        String mediaId();
+
+        String fileName();
+
+        String mimeType();
+
+        long size();
+
+        /**
+         * Optional text shown with the file. Returned as the message body.
+         */
+        String caption();
+    }
+
+    record Image(String mediaId, String fileName, String mimeType, long size, Integer width, Integer height, String caption)
+        implements Attachment {
         @Override
         public MessageType type() {
             return MessageType.IMAGE;
         }
     }
 
-    record Video(String url, String thumbnailUrl, Integer width, Integer height, Integer duration, String caption)
-        implements MessageContent {
+    record Video(String mediaId, String fileName, String mimeType, long size, String caption) implements Attachment {
         @Override
         public MessageType type() {
             return MessageType.VIDEO;
         }
     }
 
-    record Document(String url, String fileName, String mimeType, long size) implements MessageContent {
+    record Document(String mediaId, String fileName, String mimeType, long size, String caption) implements Attachment {
         @Override
         public MessageType type() {
             return MessageType.DOCUMENT;

@@ -180,6 +180,14 @@ public final class MessageService {
         return new ConversationPage(summaries, next);
     }
 
+    /**
+     * The canonical conversation id when the user is a member, otherwise FORBIDDEN, as for every other call.
+     */
+    public MemberOf memberOf(String conversationId, String userId) {
+        String user = user(userId);
+        return new MemberOf(memberConversation(conversationId, user).getConversationId(), user);
+    }
+
     public ConversationSummary conversation(String conversationId, String userId) {
         String user = user(userId);
         return summary(memberConversation(conversationId, user), user);
@@ -475,6 +483,12 @@ public final class MessageService {
     public record ConversationPage(List<ConversationSummary> conversations, String nextCursor) {
     }
 
+    /**
+     * Canonical ids of a conversation and of a user who belongs to it.
+     */
+    public record MemberOf(String conversationId, String userId) {
+    }
+
     public record Opened(ConversationSummary conversation, boolean created) {
     }
 
@@ -502,7 +516,8 @@ public final class MessageService {
             UNAUTHENTICATED,
             FORBIDDEN,
             NOT_FOUND,
-            CONFLICT
+            CONFLICT,
+            TOO_LARGE
         }
 
         private final Reason reason;
