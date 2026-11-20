@@ -23,17 +23,22 @@ class ContentValidatorTest {
     }
 
     @Test
-    void mediaNeedsUrlAndPositiveSizes() {
-        assertNull(ContentValidator.problem(new MessageContent.Image("https://cdn/a.png", null, null, null, null)));
-        assertNotNull(ContentValidator.problem(new MessageContent.Image(" ", null, null, null, null)));
-        assertNotNull(ContentValidator.problem(new MessageContent.Video("https://cdn/a.mp4", null, 0, 10, null, null)));
+    void attachmentNeedsMediaIdNameTypeAndPositiveSize() {
+        String id = "dddddddd-0000-4000-8000-000000000001";
+        assertNull(ContentValidator.problem(new MessageContent.Image(id, "a.png", "image/png", 10, null, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Image(" ", "a.png", "image/png", 10, null, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Image(id, "a.png", "image/png", 10, 0, 10, null)));
+        assertNull(ContentValidator.problem(new MessageContent.Video(id, "a.mp4", "video/mp4", 10, "clip")));
+        assertNull(ContentValidator.problem(new MessageContent.Document(id, "a.pdf", "application/pdf", 10, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Document(id, "", "application/pdf", 10, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Document(id, "a.pdf", "application/pdf", 0, null)));
     }
 
     @Test
-    void documentNeedsNameTypeAndSizeWithinLimit() {
-        assertNull(ContentValidator.problem(new MessageContent.Document("https://cdn/a.pdf", "a.pdf", "application/pdf", 10)));
-        assertNotNull(ContentValidator.problem(new MessageContent.Document("https://cdn/a.pdf", "", "application/pdf", 10)));
-        assertNotNull(ContentValidator.problem(new MessageContent.Document("https://cdn/a.pdf", "a.pdf", "application/pdf",
-            ContentValidator.DOCUMENT_MAX_BYTES + 1)));
+    void captionFollowsTheTextLimit() {
+        String id = "dddddddd-0000-4000-8000-000000000001";
+        assertNull(ContentValidator.problem(new MessageContent.Video(id, "a.mp4", "video/mp4", 10, "a".repeat(4096))));
+        assertEquals("Caption exceeds 4096 bytes",
+            ContentValidator.problem(new MessageContent.Video(id, "a.mp4", "video/mp4", 10, "a".repeat(4097))));
     }
 }

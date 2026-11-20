@@ -67,11 +67,7 @@ Messaging đã theo decisions.md mới: một process, schema `messaging` trên 
 | `deletedAt` | date-time, nullable | |
 | `metadata` | object, nullable | Thông tin phụ |
 
-Loại tin media dùng `content` có cấu trúc thay cho `body` chuỗi:
-
-- `IMAGE`: `url`, `thumbnailUrl?`, `width?`, `height?`, `caption?`
-- `VIDEO`: `url`, `thumbnailUrl?`, `width?`, `height?`, `duration?`, `caption?`
-- `DOCUMENT`: `url`, `fileName`, `mimeType`, `size` (tối đa 10MB)
+Loại tin media: đã đưa vào `openapi.yaml` (`SendMediaRequest`, `MediaMessage`, `Media`, `POST /conversations/{conversationId}/media`, `GET /media/{mediaId}`). Khác đề xuất cũ: tin có `media` (link ký mới mỗi lần đọc) thay cho `url` cố định, chú thích nằm ở `body`, và chưa có `thumbnailUrl`, `duration`.
 
 ## Reaction (E3, hạng 2)
 

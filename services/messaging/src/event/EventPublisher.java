@@ -1,5 +1,6 @@
 package event;
 
+import media.Media;
 import message.Message;
 import reaction.MessageReaction;
 
@@ -19,4 +20,9 @@ public interface EventPublisher {
      * The user's read marker moved. Goes to that user's devices only, not to other members.
      */
     void publishReadUpdated(String conversationId, String userId, long lastReadSeq);
+
+    /**
+     * A file was stored. Recorded for analytics only: nobody sees an upload until it is sent in a message.
+     */
+    void publishMediaUploaded(Media media);
 }

@@ -2,6 +2,8 @@ package event;
 
 import api.MessageResponse;
 import conversation.Conversation;
+import media.Media;
+import media.MediaLinks;
 import member.ConversationMembers;
 import message.Message;
 import reaction.MessageReaction;
@@ -40,6 +42,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     static final String REACTION_ADDED = "messaging.reaction.added";
     static final String REACTION_REMOVED = "messaging.reaction.removed";
     static final String READ_UPDATED = "messaging.read.updated";
+    static final String MEDIA_UPLOADED = "messaging.media.uploaded";
 
     private static final Logger log = LoggerFactory.getLogger(EnvelopeEventPublisher.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -48,18 +51,26 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ConversationMembers members;
     private final RealtimeBus realtime;
     private final ActivityRecorder activities;
+    private final MediaLinks links;
 
-    public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
-        this(conversations, members, realtime, envelope -> { });
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, MediaLinks links
+    ) {
+        this(conversations, members, realtime, envelope -> { }, links);
     }
 
     public EnvelopeEventPublisher(
-        ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, ActivityRecorder activities
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ActivityRecorder activities,
+        MediaLinks links
     ) {
         this.conversations = conversations;
         this.members = members;
         this.realtime = realtime;
         this.activities = activities;
+        this.links = links;
     }
 
     /**
@@ -70,14 +81,15 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         ConversationRepository conversations,
         ConversationMembers members,
         RealtimeBus realtime,
-        ObjectProvider<ActivityRecorder> activities
+        ObjectProvider<ActivityRecorder> activities,
+        MediaLinks links
     ) {
-        this(conversations, members, realtime, activities.getIfAvailable(() -> envelope -> { }));
+        this(conversations, members, realtime, activities.getIfAvailable(() -> envelope -> { }), links);
     }
 
     @Override
     public void publishMessageCreated(Message message) {
-        emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message));
+        emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message, links));
     }
 
     @Override
@@ -102,6 +114,20 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         log.info(envelope);
         record(envelope);
         push(READ_UPDATED, conversationId, () -> List.of(userId), envelope);
+    }
+
+    /**
+     * Logged and recorded, never pushed: the file is not visible to anyone until a message sends it.
+     */
+    @Override
+    public void publishMediaUploaded(Media media) {
+        Map<String, String> payload = new LinkedHashMap<>();
+        payload.put("senderId", media.uploaderId());
+        payload.put("conversationId", media.conversationId());
+        payload.put("type", media.kind().name());
+        String envelope = envelope(MEDIA_UPLOADED, payload);
+        log.info(envelope);
+        record(envelope);
     }
 
     private void emit(String conversationId, String type, Object payload) {

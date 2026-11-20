@@ -4,10 +4,12 @@ import conversation.Conversation;
 import conversation.ConversationCursor;
 import conversation.ConversationType;
 import conversation.ReadState;
+import media.Media;
 import message.Message;
 import message.MessageContent;
 import message.MessageMetadata;
 import message.MessageStatus;
+import message.MessageType;
 import reaction.MessageReaction;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -64,6 +66,7 @@ class PostgresRepositoriesTest {
     private static PostgresMessageRepository messages;
     private static PostgresReactionRepository reactions;
     private static PostgresReadMarkerRepository readMarkers;
+    private static PostgresMediaRepository media;
 
     private String conversationId;
 
@@ -84,6 +87,7 @@ class PostgresRepositoriesTest {
         messages = new PostgresMessageRepository(jdbc, transaction);
         reactions = new PostgresReactionRepository(jdbc);
         readMarkers = new PostgresReadMarkerRepository(jdbc);
+        media = new PostgresMediaRepository(jdbc);
     }
 
     @AfterAll
@@ -93,7 +97,7 @@ class PostgresRepositoriesTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE read_markers, message_reactions, messages, direct_members, conversations");
+        jdbc.execute("TRUNCATE media, read_markers, message_reactions, messages, direct_members, conversations");
         conversationId = UUID.randomUUID().toString();
         assertTrue(conversations.insert(new Conversation(conversationId, ConversationType.DIRECT, Set.of(ALICE, BOB), 0, NOW)));
     }
@@ -152,13 +156,27 @@ class PostgresRepositoriesTest {
     }
 
     @Test
+    void mediaRowsRoundTripWithAndWithoutImageSize() {
+        Media image = new Media(UUID.randomUUID().toString(), conversationId, ALICE, MessageType.IMAGE, "cat ạ.png",
+            "image/png", 4096L, 640, 480, NOW);
+        Media document = new Media(UUID.randomUUID().toString(), conversationId, BOB, MessageType.DOCUMENT, "a.pdf",
+            "application/pdf", 10L, null, null, NOW);
+        media.insert(image);
+        media.insert(document);
+
+        assertEquals(image, media.findById(image.mediaId()));
+        assertEquals(document, media.findById(document.mediaId()));
+        assertNull(media.findById(UUID.randomUUID().toString()));
+    }
+
+    @Test
     void everyContentTypeAndTheOptionalFieldsSurviveTheRoundTrip() {
         List<MessageContent> contents = List.of(
             new MessageContent.Text("hello \"world\" ạ"),
             new MessageContent.Emotion("love"),
-            new MessageContent.Image("https://cdn/a.png", null, 640, 480, "cat"),
-            new MessageContent.Video("https://cdn/a.mp4", "https://cdn/a.jpg", 1280, 720, 30, null),
-            new MessageContent.Document("https://cdn/a.pdf", "a.pdf", "application/pdf", 2048L));
+            new MessageContent.Image(UUID.randomUUID().toString(), "a.png", "image/png", 4096L, 640, 480, "cat"),
+            new MessageContent.Video(UUID.randomUUID().toString(), "a.mp4", "video/mp4", 8192L, null),
+            new MessageContent.Document(UUID.randomUUID().toString(), "a.pdf", "application/pdf", 2048L, "spec"));
         Message original = messages.append(draft(ALICE, UUID.randomUUID().toString(), contents.get(0)));
         for (MessageContent content : contents) {
             Message stored = messages.append(new Message(UUID.randomUUID().toString(), conversationId, 0, BOB,
@@ -175,7 +193,7 @@ class PostgresRepositoriesTest {
         }
         String imageJson = jdbc.queryForObject("SELECT content::text FROM messages WHERE type = 'IMAGE'", String.class);
         assertFalse(imageJson.contains("type"), imageJson);
-        assertFalse(imageJson.contains("thumbnailUrl"), imageJson);
+        assertFalse(imageJson.contains("url"), imageJson);
     }
 
     @Test

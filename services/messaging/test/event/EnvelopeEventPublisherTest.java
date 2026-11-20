@@ -1,6 +1,8 @@
 package event;
 
 import api.MessageResponse;
+import media.Media;
+import media.TestLinks;
 import member.ConversationMembers;
 import member.StandaloneGroupMembers;
 import conversation.Conversation;
@@ -8,6 +10,7 @@ import conversation.ConversationType;
 import message.Message;
 import message.MessageContent;
 import message.MessageStatus;
+import message.MessageType;
 import org.junit.jupiter.api.Test;
 import reaction.MessageReaction;
 import realtime.RealtimeFrame;
@@ -37,7 +40,7 @@ class EnvelopeEventPublisherTest {
 
     @Test
     void createdEnvelopeCarriesTheContractMessageAsPayload() {
-        String envelope = EnvelopeEventPublisher.envelope(EnvelopeEventPublisher.MESSAGE_CREATED, new MessageResponse(MESSAGE));
+        String envelope = EnvelopeEventPublisher.envelope(EnvelopeEventPublisher.MESSAGE_CREATED, new MessageResponse(MESSAGE, TestLinks.LINKS));
 
         assertEquals("messaging.message.created", JsonPath.read(envelope, "$.type"));
         assertEquals("messaging", JsonPath.read(envelope, "$.producer"));
@@ -85,7 +88,7 @@ class EnvelopeEventPublisherTest {
     @Test
     void everyEventIsPushedToEveryMemberIncludingTheSender() {
         List<RealtimeFrame> pushed = new ArrayList<>();
-        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add);
+        EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add, TestLinks.LINKS);
 
         publisher.publishMessageCreated(MESSAGE);
         publisher.publishMessageDeleted(MESSAGE.softDeleted(Instant.parse("2026-09-28T09:05:00Z")));
@@ -104,7 +107,7 @@ class EnvelopeEventPublisherTest {
     void readUpdatesGoOnlyToTheReadersOwnDevices() {
         List<RealtimeFrame> pushed = new ArrayList<>();
 
-        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add)
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add, TestLinks.LINKS)
             .publishReadUpdated(MESSAGE.getConversationId(), "bob", 7);
 
         assertEquals(1, pushed.size());
@@ -115,9 +118,24 @@ class EnvelopeEventPublisherTest {
     }
 
     @Test
+    void mediaUploadIsRecordedForAnalyticsButPushedToNobody() {
+        List<String> recorded = new ArrayList<>();
+        List<RealtimeFrame> pushed = new ArrayList<>();
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, pushed::add, recorded::add, TestLinks.LINKS)
+            .publishMediaUploaded(new Media("dddddddd-0000-4000-8000-000000000001", MESSAGE.getConversationId(), "alice",
+                MessageType.VIDEO, "a.mp4", "video/mp4", 10, null, null, Instant.parse("2026-09-28T09:00:00Z")));
+
+        assertEquals(List.of(), pushed);
+        assertEquals(1, recorded.size());
+        assertEquals("messaging.media.uploaded", JsonPath.read(recorded.get(0), "$.type"));
+        assertEquals(Map.of("senderId", "alice", "conversationId", MESSAGE.getConversationId(), "type", "VIDEO"),
+            JsonPath.read(recorded.get(0), "$.payload"));
+    }
+
+    @Test
     void createdMessageIsRecordedAfterTheStoreReturns() {
         List<String> recorded = new ArrayList<>();
-        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> { }, recorded::add)
+        new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> { }, recorded::add, TestLinks.LINKS)
             .publishMessageCreated(MESSAGE);
 
         assertEquals(1, recorded.size());
@@ -130,7 +148,7 @@ class EnvelopeEventPublisherTest {
     void aFailedActivityWriteDoesNotFailTheChangeThatIsAlreadyStored() {
         EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> { }, envelope -> {
             throw new IllegalStateException("analytics down");
-        });
+        }, TestLinks.LINKS);
 
         assertDoesNotThrow(() -> publisher.publishMessageCreated(MESSAGE));
     }
@@ -139,7 +157,7 @@ class EnvelopeEventPublisherTest {
     void aFailedPushDoesNotFailTheChangeThatIsAlreadyStored() {
         EnvelopeEventPublisher publisher = new EnvelopeEventPublisher(groupOfThree(), MEMBERS, frame -> {
             throw new IllegalStateException("socket send failed");
-        });
+        }, TestLinks.LINKS);
 
         assertDoesNotThrow(() -> publisher.publishMessageCreated(MESSAGE));
     }
@@ -148,7 +166,7 @@ class EnvelopeEventPublisherTest {
     void anUnknownConversationIsNotPushed() {
         List<RealtimeFrame> pushed = new ArrayList<>();
 
-        new EnvelopeEventPublisher(new MemoryConversations(), MEMBERS, pushed::add).publishMessageCreated(MESSAGE);
+        new EnvelopeEventPublisher(new MemoryConversations(), MEMBERS, pushed::add, TestLinks.LINKS).publishMessageCreated(MESSAGE);
 
         assertEquals(List.of(), pushed);
     }
@@ -167,7 +185,7 @@ class EnvelopeEventPublisherTest {
 
     @Test
     void eachEnvelopeHasItsOwnEventId() {
-        MessageResponse payload = new MessageResponse(MESSAGE);
+        MessageResponse payload = new MessageResponse(MESSAGE, TestLinks.LINKS);
         String first = JsonPath.read(EnvelopeEventPublisher.envelope(EnvelopeEventPublisher.MESSAGE_CREATED, payload), "$.eventId");
         String second = JsonPath.read(EnvelopeEventPublisher.envelope(EnvelopeEventPublisher.MESSAGE_CREATED, payload), "$.eventId");
 

@@ -1,6 +1,9 @@
 package http;
 
 import event.RecordingEvents;
+import media.LocalMediaStore;
+import media.MediaProperties;
+import media.TestLinks;
 import member.ConversationMembers;
 import member.StandaloneGroupController;
 import member.StandaloneGroupMembers;
@@ -11,14 +14,20 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import service.MediaService;
 import service.MessageService;
 import storage.MemoryConversations;
+import storage.MemoryMedia;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
 import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.util.unit.DataSize;
 
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -38,6 +47,9 @@ class MessageControllerTest {
 
     private MockMvc mvc;
 
+    @TempDir
+    Path mediaDir;
+
     @BeforeEach
     void setUp() throws Exception {
         MemoryConversations conversations = new MemoryConversations();
@@ -45,7 +57,12 @@ class MessageControllerTest {
         MemoryMessages messages = new MemoryMessages(conversations);
         MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
             new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service), new StandaloneGroupController(groups))
+        MediaService media = new MediaService(service, new MemoryMedia(), new LocalMediaStore(mediaDir), TestLinks.LINKS,
+            new MediaProperties(mediaDir.toString(), "", Duration.ofHours(1), DataSize.ofMegabytes(10),
+                DataSize.ofMegabytes(25), DataSize.ofMegabytes(10)),
+            new RecordingEvents());
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service, media, TestLinks.LINKS),
+                new StandaloneGroupController(groups))
             .setControllerAdvice(new MessageExceptionHandler())
             .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
@@ -97,7 +114,11 @@ class MessageControllerTest {
     }
 
     @Test
-    void sendRejectsTypesTheContractDoesNotHaveYet() throws Exception {
+    void sendRejectsUnknownTypesAndMediaWithoutAnUpload() throws Exception {
+        send(ALICE, "{\"type\":\"STICKER\",\"body\":\"x\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        // A URL in body is not a file: IMAGE needs the mediaId of an upload.
         send(ALICE, "{\"type\":\"IMAGE\",\"body\":\"https://cdn/a.png\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
