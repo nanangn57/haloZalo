@@ -86,6 +86,34 @@ class UserControllerTest {
             .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
     }
 
+    @Test
+    void lookupReturnsNamesWithoutEmail() throws Exception {
+        String accessToken = registerAndLogin();
+        String userId = accounts.findByUsername("ngoc_anh").getUserId();
+
+        mvc.perform(get("/users/lookup")
+                .param("ids", userId + ",99999999-9999-4999-8999-999999999999")
+                .header("Authorization", "Bearer " + accessToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.users.length()").value(1))
+            .andExpect(jsonPath("$.users[0].userId").value(userId))
+            .andExpect(jsonPath("$.users[0].username").value("ngoc_anh"))
+            .andExpect(jsonPath("$.users[0].email").doesNotExist());
+    }
+
+    @Test
+    void lookupNeedsATokenAndValidIds() throws Exception {
+        mvc.perform(get("/users/lookup").param("ids", "11111111-1111-4111-8111-111111111111"))
+            .andExpect(status().isUnauthorized());
+
+        String accessToken = registerAndLogin();
+        mvc.perform(get("/users/lookup").param("ids", "nope").header("Authorization", "Bearer " + accessToken))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        mvc.perform(get("/users/lookup").header("Authorization", "Bearer " + accessToken))
+            .andExpect(status().isBadRequest());
+    }
+
     private String registerAndLogin() throws Exception {
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)

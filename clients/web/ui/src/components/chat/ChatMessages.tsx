@@ -1,4 +1,4 @@
-import type { Message } from "../../types/message";
+import type { Message } from "@core/types/message";
 import "./ChatMessages.css";
 
 interface ChatMessageProps {

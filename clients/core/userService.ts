@@ -1,8 +1,9 @@
 
 import type { AuthUser, ApiErrorResponse } from './types/auth'
 import { getAuth } from './authSession'
+import { getIdentityApiHeaders } from './apiClient';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_IDENTITY_BASE_URL;
 
 export async function findUserApi(
   query: string,
@@ -41,4 +42,49 @@ export async function findUserApi(
   }
 
   return data as AuthUser
+}
+
+export async function getMyProfileApi(): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE_URL}/me`, {
+    method: 'GET',
+    headers: getIdentityApiHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Cannot load profile: ${response.status}`)
+  }
+
+  return response.json()
+}
+
+export interface UserSummary {
+  userId: string
+  username: string
+  displayName?: string
+}
+
+// Tên của nhiều user theo userId, cho header chat và danh sách hội thoại.
+// Id không có tài khoản bị bỏ qua. Tối đa 100 id một lần.
+export async function lookupUsersApi(
+  userIds: string[],
+): Promise<UserSummary[]> {
+  const ids = [...new Set(userIds)]
+
+  if (ids.length === 0) {
+    return []
+  }
+
+  const params = new URLSearchParams({ ids: ids.join(',') })
+
+  const response = await fetch(`${API_BASE_URL}/users/lookup?${params.toString()}`, {
+    method: 'GET',
+    headers: getIdentityApiHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Cannot load users: ${response.status}`)
+  }
+
+  const data = (await response.json()) as { users: UserSummary[] }
+  return data.users
 }

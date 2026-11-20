@@ -1,0 +1,28 @@
+services:
+  mobile:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-100}"
+    working_dir: /workspace
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      HOME: /home/node
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_SDK_ROOT: /opt/android-sdk
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      ADB_SERVER_SOCKET: tcp:localhost:5037
+    volumes:
+      - ./app:/workspace
+      - mobile_node_modules:/workspace/node_modules
+      - mobile_gradle_cache:/home/node/.gradle
+      - mobile_npm_cache:/home/node/.npm
+    init: true
+    command: sleep infinity
+
+volumes:
+  mobile_node_modules:
+  mobile_gradle_cache:
+  mobile_npm_cache:

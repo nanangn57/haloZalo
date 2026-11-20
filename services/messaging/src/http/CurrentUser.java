@@ -18,6 +18,11 @@ public final class CurrentUser {
      */
     public static final String ATTRIBUTE = "userId";
     public static final String HEADER = "X-User-Id";
+    /**
+     * Query parameter for the WebSocket handshake. A browser cannot set headers on new WebSocket(url),
+     * so while the header is accepted, /ws?userId=... is accepted too. Off together with the header.
+     */
+    public static final String QUERY = "userId";
 
     private final boolean headerEnabled;
 
@@ -33,5 +38,16 @@ public final class CurrentUser {
             return userId;
         }
         return headerEnabled ? request.getHeader(HEADER) : null;
+    }
+
+    /**
+     * Same as {@link #of}, then the userId query parameter, for the WebSocket handshake only.
+     */
+    public String ofHandshake(HttpServletRequest request) {
+        String userId = of(request);
+        if (userId != null || !headerEnabled) {
+            return userId;
+        }
+        return request.getParameter(QUERY);
     }
 }

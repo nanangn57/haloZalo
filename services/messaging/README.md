@@ -58,8 +58,9 @@ Chạy cả service bằng Docker, gồm Postgres riêng: `docker compose up --b
 
 `http.CurrentUser` là nơi duy nhất trả lời câu hỏi này, cho cả HTTP lẫn handshake `/ws`:
 
-1. Request attribute `userId`. Filter session của app gắn attribute này sau khi `AuthService` kiểm access token. Filter này của P1, chưa có trên `dev`.
+1. Request attribute `userId`. Filter session của app gắn attribute này sau khi `AuthService` kiểm access token. Filter này của P1, chưa gắn vào messaging: identity và messaging vẫn chạy hai process.
 2. Nếu không có attribute và `MESSAGING_USER_HEADER_ENABLED=true` thì đọc header `X-User-Id`. Chỉ để chạy messaging riêng lúc chưa có app.
+3. Riêng handshake `/ws`, cùng điều kiện ở bước 2: đọc query `userId`, vì trình duyệt không gắn header được cho `new WebSocket(url)`. Web đặt `VITE_WS_AUTH_MODE=USER_ID_QUERY` rồi mở `ws://localhost:8082/ws?userId=<uuid>`. Tắt cùng lúc với header.
 
 Không có user thì 401, `/ws` không nâng cấp. Trong app phải đặt `MESSAGING_USER_HEADER_ENABLED=false`, nếu không client nào cũng tự xưng là user khác được. User không phải UUID thì coi như không có.
 
