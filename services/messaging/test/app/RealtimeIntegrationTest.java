@@ -24,6 +24,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -238,7 +239,13 @@ class RealtimeIntegrationTest {
         FlywayAutoConfiguration.class
     })
     @ConfigurationPropertiesScan("realtime")
-    @ComponentScan({"api", "event", "http", "member", "realtime", "service"})
+    @ComponentScan(
+        basePackages = {"api", "event", "http", "member", "realtime", "service"},
+        excludeFilters = @ComponentScan.Filter(
+            type = FilterType.ASSIGNABLE_TYPE,
+            classes = {http.SharedSessionFilter.class, member.SharedDbGroupMembers.class}
+        )
+    )
     static class TestApplication {
         @Bean
         MemoryConversations conversations() {

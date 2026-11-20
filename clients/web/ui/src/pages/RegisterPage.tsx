@@ -1,4 +1,3 @@
-
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
@@ -15,9 +14,7 @@ function RegisterPage() {
   const [message, setMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleRegister = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
+  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
     setMessage('')
@@ -43,7 +40,7 @@ function RegisterPage() {
 
       setMessage(
         `Register request sent to ${result.email}. ` +
-        'Please check your email and complete verification before login',
+          'Please check your email and complete verification before login',
       )
     } catch (err: unknown) {
       setError(
@@ -57,36 +54,35 @@ function RegisterPage() {
   }
 
   return (
-    <div className="container">
-      <div className="row justify-content-center mt-5">
-        <div className="col-12 col-sm-8 col-md-6 col-lg-4">
-          <div className="card shadow-sm">
-            <div className="card-body p-4">
-              <h2 className="text-center mb-4">Register</h2>
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <span className="auth-brand-mark" aria-hidden="true">
+            h
+          </span>
+        </div>
+        <h1 className="auth-title">Create account</h1>
+        <p className="auth-description">
+          Join haloZalo to message friends and groups.
+        </p>
 
-              <RegisterForm
-                username={username}
-                email={email}
-                password={password}
-                confirmPassword={confirmPassword}
-                error={error}
-                message={message}
-                onUsernameChange={setUsername}
-                onEmailChange={setEmail}
-                onPasswordChange={setPassword}
-                onConfirmPasswordChange={setConfirmPassword}
-                onSubmit={handleRegister}
-                isLoading={isLoading}
-              />
+        <RegisterForm
+          username={username}
+          email={email}
+          password={password}
+          confirmPassword={confirmPassword}
+          error={error}
+          message={message}
+          onUsernameChange={setUsername}
+          onEmailChange={setEmail}
+          onPasswordChange={setPassword}
+          onConfirmPasswordChange={setConfirmPassword}
+          onSubmit={handleRegister}
+          isLoading={isLoading}
+        />
 
-              <div className="text-center mt-3">
-                Already have an account?{' '}
-                <Link to="/login" className="text-decoration-none">
-                  Login
-                </Link>
-              </div>
-            </div>
-          </div>
+        <div className="auth-footer">
+          Already have an account? <Link to="/login">Login</Link>
         </div>
       </div>
     </div>

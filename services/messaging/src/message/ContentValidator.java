@@ -4,7 +4,9 @@ import java.nio.charset.StandardCharsets;
 
 public final class ContentValidator {
     public static final int TEXT_MAX_BYTES = 4096;
+    public static final long IMAGE_MAX_BYTES = 5L * 1024 * 1024;
     public static final long DOCUMENT_MAX_BYTES = 10L * 1024 * 1024;
+    public static final long VIDEO_MAX_BYTES = 20L * 1024 * 1024;
 
     private ContentValidator() {
     }

@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Starts the PostgreSQL that messaging needs, set up like infra/docker-compose.yml: database halozalo,
-# user halozalo. Flyway creates schema messaging and its tables when messaging starts.
-#   ./local-deps.sh up       start it (data is kept in the halozalo-messaging-pg volume)
-#   ./local-deps.sh down     stop and remove the container, keep the data
-#   ./local-deps.sh reset    stop, remove the container and delete the data
-#   ./local-deps.sh psql     open psql on schema messaging
-# infra/docker-compose.yml uses the same port. Run one of them, not both; either works for messaging.
+# Prefer the shared local stack instead (identity + messaging on one Postgres):
+#   cd ../../infra && ./scripts/local-up.sh
+# This script only starts messaging Postgres alone (legacy). Do not run it alongside
+# infra local-up or identity's own Postgres — same host port 5432.
+#   ./local-deps.sh up|down|reset|psql
 set -euo pipefail
 
 PG=halozalo-messaging-postgres

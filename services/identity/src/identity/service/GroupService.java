@@ -139,10 +139,45 @@ public final class GroupService {
         requireGroup(group);
         GroupAction action = target.equals(caller) ? GroupAction.LEAVE : GroupAction.REMOVE_MEMBER;
         requireAllowed(caller, group, action);
-        if (memberships.find(group, target) == null) {
+        Membership targetMembership = memberships.find(group, target);
+        if (targetMembership == null) {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "User not found");
         }
+        if (targetMembership.getRole() == Role.OWNER) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
+        }
         memberships.delete(group, target);
+    }
+
+    public MembershipResponse assignRole(String callerId, String groupId, String targetUserId, String roleName) {
+        String group = canonical(groupId);
+        String target = canonical(targetUserId);
+        String caller = canonical(callerId);
+        Role role = role(roleName);
+        if (!validUuid(group) || !validUuid(target) || role == null) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid role request");
+        }
+        requireGroup(group);
+        Membership callerMembership = memberships.find(group, caller);
+        if (callerMembership == null || callerMembership.getRole() != Role.OWNER) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
+        }
+        Membership targetMembership = memberships.find(group, target);
+        if (targetMembership == null) {
+            throw new Rejected(Rejected.Reason.NOT_FOUND, "User not found");
+        }
+        if (targetMembership.getRole() == Role.OWNER) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
+        }
+        memberships.updateRole(group, target, role);
+        return new MembershipResponse(group, target, role);
+    }
+
+    private static Role role(String roleName) {
+        if ("ADMIN".equals(roleName) || "MEMBER".equals(roleName)) {
+            return Role.valueOf(roleName);
+        }
+        return null;
     }
 
     private void requireGroup(String groupId) {

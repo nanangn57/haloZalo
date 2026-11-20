@@ -5,7 +5,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@/assets/*": ["./assets/*"],
-      "@core/*": ["./core/*"]
+      "@core/*": ["../../core/*"],
+      "@core": ["../../core"]
     }
   },
   "include": [

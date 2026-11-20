@@ -4,7 +4,6 @@ interface ConversationItemProps {
   conversation: Conversation
   title?: string
   avatar?: string
-  // Shown in the circle when there is no avatar.
   initials?: string
   active: boolean
   onClick: (conversation: Conversation) => void
@@ -25,64 +24,48 @@ function ConversationItem({
       : 'Direct conversation')
 
   const unreadCount = conversation.unreadCount ?? 0
+  const mark =
+    (initials || displayTitle.trim().charAt(0) || '?').slice(0, 2).toUpperCase()
 
   return (
     <button
       type="button"
-      className={`list-group-item list-group-item-action d-flex align-items-center ${
-        active ? 'active' : ''
-      }`}
+      className={`conversation-item ${active ? 'is-active' : ''}`}
       onClick={() => onClick(conversation)}
     >
-      {/* Avatar */}
       {avatar ? (
         <img
           src={avatar}
-          alt={displayTitle}
-          className="rounded-circle me-2"
-          width="48"
-          height="48"
+          alt=""
+          className="conversation-avatar-img"
+          width={48}
+          height={48}
         />
       ) : (
-        <div
-          className="rounded-circle me-2 d-flex align-items-center justify-content-center bg-secondary-subtle"
-          style={{ width: 48, height: 48, flexShrink: 0 }}
+        <span
+          className={`conversation-avatar ${
+            conversation.type === 'GROUP' ? 'is-group' : 'is-direct'
+          }`}
+          aria-hidden="true"
         >
-          {initials ? (
-            <span className="fw-semibold fs-5">{initials}</span>
-          ) : (
-            <i
-              className={
-                conversation.type === 'GROUP'
-                  ? 'bi bi-people fs-4'
-                  : 'bi bi-person fs-4'
-              }
-            />
-          )}
-        </div>
+          {mark}
+        </span>
       )}
 
-      {/* Conversation information */}
-      <div className="flex-grow-1 text-start overflow-hidden">
-        <div className="fw-semibold text-truncate">
-          {displayTitle}
-        </div>
-
-        <div className="small text-truncate">
+      <span className="conversation-copy">
+        <span className="conversation-title">{displayTitle}</span>
+        <span className="conversation-meta">
           {conversation.type === 'GROUP'
-            ? `${conversation.memberIds.length} members`
+            ? `${conversation.memberIds.length} member${
+                conversation.memberIds.length === 1 ? '' : 's'
+              }`
             : 'Direct message'}
-        </div>
-      </div>
+        </span>
+      </span>
 
-      {/* Unread count */}
-      <div style={{ minWidth: 24, textAlign: 'center' }}>
-        {unreadCount > 0 && (
-          <span className="badge text-bg-primary rounded-pill">
-            {unreadCount}
-          </span>
-        )}
-      </div>
+      {unreadCount > 0 ? (
+        <span className="conversation-unread">{unreadCount}</span>
+      ) : null}
     </button>
   )
 }

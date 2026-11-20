@@ -5,10 +5,9 @@ import identity.auth.LoginRequest;
 import identity.auth.RegisterAccepted;
 import identity.auth.RegisterRequest;
 import identity.auth.TokenResponse;
+import identity.account.ProfileView;
 import identity.service.AuthService;
-
-import java.util.LinkedHashMap;
-import java.util.Map;
+import identity.service.ProfileService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public final class AuthController {
     private final AuthService auth;
+    private final ProfileService profiles;
 
-    public AuthController(AuthService auth) {
+    public AuthController(AuthService auth, ProfileService profiles) {
         this.auth = auth;
+        this.profiles = profiles;
     }
 
     @PostMapping("/auth/register")
@@ -34,7 +35,7 @@ public final class AuthController {
     @GetMapping("/auth/verify")
     public TokenResponse.User verify(@RequestParam(value = "token", required = false) String token) {
         Account account = auth.verify(token);
-        return new TokenResponse.User(account.getUserId(), account.getUsername(), account.getEmail());
+        return TokenResponse.User.from(account);
     }
 
     @PostMapping("/auth/login")
@@ -43,12 +44,8 @@ public final class AuthController {
     }
 
     @GetMapping("/me")
-    public Map<String, String> me(@RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId) {
+    public ProfileView me(@RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId) {
         Account account = auth.accountFor(userId);
-        Map<String, String> user = new LinkedHashMap<>();
-        user.put("userId", account.getUserId());
-        user.put("username", account.getUsername());
-        user.put("email", account.getEmail());
-        return user;
+        return profiles.view(account.getUserId());
     }
 }

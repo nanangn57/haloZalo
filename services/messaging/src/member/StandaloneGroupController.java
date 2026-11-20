@@ -9,17 +9,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * TEMPORARY, see {@link StandaloneGroupMembers}: sets who is in a group while identity is not in the same process.
- * PUT /internal/groups/{groupId}/members with { "memberIds": [...] } replaces the members.
+ * Test helper for in-memory membership. Production uses {@link SharedDbGroupMembers}; this controller is not a Spring bean.
  */
-@RestController
 public final class StandaloneGroupController {
     private final StandaloneGroupMembers groups;
 

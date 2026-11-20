@@ -1,10 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useRouter, Link } from 'expo-router';
+import {
+  View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
+import { Link } from 'expo-router';
 import RegisterForm from '../components/auth/RegisterForm';
+import { registerApi } from '@core/authService';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 export default function RegisterPage() {
-  const router = useRouter();
+  const theme = useTheme();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,23 +23,64 @@ export default function RegisterPage() {
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
+    setError('');
+    setMessage('');
+
+    if (password.length < 8 || password.length > 72) {
+      setError('Password must be between 8 and 72 characters');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError('Passwords do not match');
       return;
     }
-    setIsLoading(true);
-    setTimeout(() => {
+
+    try {
+      setIsLoading(true);
+      const result = await registerApi({
+        username: username.trim(),
+        email: email.trim(),
+        password,
+      });
+      setMessage(
+        `Register request sent to ${result.email}. Check email (or identity logs) to verify before login.`,
+      );
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Register failed. Please try again.',
+      );
+    } finally {
       setIsLoading(false);
-      setMessage('Registration successful! Check your email.');
-    }, 1000);
+    }
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.container, { backgroundColor: theme.backgroundElement }]}
+    >
       <ScrollView contentContainerStyle={styles.scroll}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Register</Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.background,
+              borderColor: theme.border,
+              shadowColor: theme.text,
+            },
+          ]}
+        >
+          <View style={[styles.mark, { backgroundColor: theme.primary }]}>
+            <Text style={styles.markText}>h</Text>
+          </View>
+          <Text style={[styles.title, { color: theme.text }]}>Create account</Text>
+          <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+            Join haloZalo to message friends and groups.
+          </Text>
           <RegisterForm
             username={username}
             email={email}
@@ -45,8 +96,12 @@ export default function RegisterPage() {
             onSubmit={handleRegister}
           />
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account? </Text>
-            <Link href="/login" style={styles.link}>Login</Link>
+            <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+              Already have an account?{' '}
+            </Text>
+            <Link href="/login" style={[styles.link, { color: theme.primary }]}>
+              Login
+            </Link>
           </View>
         </View>
       </ScrollView>
@@ -55,11 +110,54 @@ export default function RegisterPage() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  card: { backgroundColor: '#fff', padding: 24, borderRadius: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 3 },
-  title: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginBottom: 24, color: '#1e293b' },
-  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
-  footerText: { color: '#64748b' },
-  link: { color: '#4f46e5', fontWeight: '600' }
+  container: { flex: 1 },
+  scroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: Spacing.four,
+  },
+  card: {
+    padding: Spacing.four,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  mark: {
+    alignSelf: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.two,
+  },
+  markText: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+    marginBottom: 6,
+  },
+  subtitle: {
+    textAlign: 'center',
+    marginBottom: Spacing.four,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: Spacing.three,
+    flexWrap: 'wrap',
+  },
+  footerText: { fontSize: 14 },
+  link: { fontWeight: '600', fontSize: 14 },
 });

@@ -19,10 +19,16 @@ public final class UserSummaryList {
     public static final class UserSummary {
         private final String userId;
         private final String username;
+        private final String displayName;
 
         public UserSummary(String userId, String username) {
+            this(userId, username, null);
+        }
+
+        public UserSummary(String userId, String username, String displayName) {
             this.userId = userId;
             this.username = username;
+            this.displayName = displayName;
         }
 
         public String getUserId() {
@@ -31,6 +37,10 @@ public final class UserSummaryList {
 
         public String getUsername() {
             return username;
+        }
+
+        public String getDisplayName() {
+            return displayName;
         }
     }
 }

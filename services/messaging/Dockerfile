@@ -10,7 +10,7 @@ RUN mvn -q -B -DskipTests -f analytics/pom.xml install && mvn -q -B -DskipTests 
 FROM eclipse-temurin:17-jre
 RUN useradd --system --uid 10001 messaging
 WORKDIR /app
-COPY --from=build /build/messaging/target/messaging-0.1.0.jar app.jar
+COPY --from=build /build/messaging/target/messaging-0.1.0-exec.jar app.jar
 USER messaging
 EXPOSE 8082
 # Size the heap from the container memory limit, not the host.

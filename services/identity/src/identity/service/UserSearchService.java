@@ -1,7 +1,10 @@
 package identity.service;
 
 import identity.account.Account;
+import identity.account.Profile;
+import identity.auth.UserSummaryList;
 import identity.storage.AccountRepository;
+import identity.storage.ProfileRepository;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -18,9 +21,11 @@ public final class UserSearchService {
     public static final int LOOKUP_MAX = 100;
 
     private final AccountRepository accounts;
+    private final ProfileRepository profiles;
 
-    public UserSearchService(AccountRepository accounts) {
+    public UserSearchService(AccountRepository accounts, ProfileRepository profiles) {
         this.accounts = accounts;
+        this.profiles = profiles;
     }
 
     public Account find(String query) {
@@ -39,6 +44,26 @@ public final class UserSearchService {
      * Ids without an account are skipped. 1 to 100 ids, each a UUID.
      */
     public List<Account> lookup(String ids) {
+        return accounts.findByIds(parseIds(ids));
+    }
+
+    /**
+     * Lookup with display names for chat headers and conversation lists.
+     */
+    public List<UserSummaryList.UserSummary> summaries(String ids) {
+        List<UserSummaryList.UserSummary> summaries = new ArrayList<>();
+        for (Account account : accounts.findByIds(parseIds(ids))) {
+            Profile profile = profiles.find(account.getUserId());
+            summaries.add(new UserSummaryList.UserSummary(
+                account.getUserId(),
+                account.getUsername(),
+                profile == null ? null : profile.getDisplayName()
+            ));
+        }
+        return summaries;
+    }
+
+    private List<String> parseIds(String ids) {
         if (ids == null || ids.isBlank()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "ids is required");
         }
@@ -53,7 +78,7 @@ public final class UserSearchService {
         if (unique.isEmpty() || unique.size() > LOOKUP_MAX) {
             throw new Rejected(Rejected.Reason.VALIDATION, "ids must hold 1 to " + LOOKUP_MAX + " user ids");
         }
-        return accounts.findByIds(new ArrayList<>(unique));
+        return new ArrayList<>(unique);
     }
 
     private static String canonicalUuid(String id) {

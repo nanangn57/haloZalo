@@ -1,82 +1,61 @@
-
 import { NavLink } from 'react-router-dom'
 
 function ContactSidebar() {
   return (
-    <div className="w-100">
-      <div className="d-flex align-items-center p-3 gap-2">
-        <div className="flex-grow-1">
-          <form
-            className="d-flex"
-            role="search"
-            onSubmit={(event) => event.preventDefault()}
-          >
-            <input
-              className="form-control me-2"
-              type="search"
-              placeholder="Search"
-              aria-label="Search"
-            />
-
-            <button
-              className="btn btn-outline-success"
-              type="submit"
-            >
-              Search
-            </button>
-          </form>
+    <div className="contact-sidebar-panel">
+      <form
+        className="contact-search"
+        role="search"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <div className="contact-search-field">
+          <i className="bi bi-search" aria-hidden="true" />
+          <input
+            className="app-input"
+            type="search"
+            placeholder="Search friends or groups"
+            aria-label="Search"
+          />
         </div>
+      </form>
 
-        <button
-          type="button"
-          className="btn app-button"
-          title="Add friend"
-        >
-          <i className="bi bi-person-plus fs-4"></i>
-        </button>
-      </div>
-
-      <div className="d-flex align-items-center p-3 gap-2">
+      <nav className="contact-side-nav" aria-label="Contacts">
         <NavLink
           to="/contacts/friends"
           className={({ isActive }) =>
-            `btn app-button w-100 text-start ${
-              isActive ? 'active' : ''
-            }`
+            `contact-side-link ${isActive ? 'active' : ''}`
           }
         >
-          <i className="bi bi-person fs-4"></i>
-          <span> Friend list </span>
+          <span className="contact-side-icon" aria-hidden="true">
+            <i className="bi bi-person" />
+          </span>
+          <span>Friend list</span>
         </NavLink>
-      </div>
 
-      <div className="d-flex align-items-center p-3 gap-2">
         <NavLink
           to="/contacts/groups"
           className={({ isActive }) =>
-            `btn app-button w-100 text-start ${
-              isActive ? 'active' : ''
-            }`
+            `contact-side-link ${isActive ? 'active' : ''}`
           }
         >
-          <i className="bi bi-people fs-4"></i>
-          <span> Group list </span>
+          <span className="contact-side-icon" aria-hidden="true">
+            <i className="bi bi-people" />
+          </span>
+          <span>Group list</span>
         </NavLink>
-      </div>
 
-      <div className="d-flex align-items-center p-3 gap-2">
         <NavLink
           to="/contacts/requests"
           className={({ isActive }) =>
-            `btn app-button w-100 text-start ${
-              isActive ? 'active' : ''
-            }`
+            `contact-side-link ${isActive ? 'active' : ''}`
           }
         >
-          <i className="bi bi-person-plus fs-4"></i>
-          <span> Friend request </span>
+          <span className="contact-side-icon" aria-hidden="true">
+            <i className="bi bi-person-plus" />
+          </span>
+          <span>Friend request</span>
         </NavLink>
-      </div>
+      </nav>
     </div>
   )
 }

@@ -106,6 +106,34 @@ public final class MessageService {
     }
 
     /**
+     * Opens the GROUP conversation whose id is the identity groupId. Caller must be a member.
+     */
+    public Opened openGroupForMember(String userId, String groupId) {
+        String user = user(userId);
+        String id = uuid(groupId, "groupId");
+        if (!members.groupIdsOf(user).contains(id)) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not a member of this conversation");
+        }
+        Conversation existing = conversations.findById(id);
+        if (existing != null) {
+            return new Opened(summary(existing, user), false);
+        }
+        try {
+            Conversation created = openGroup(id, List.of());
+            return new Opened(summary(created, user), true);
+        } catch (Rejected rejected) {
+            if (rejected.getReason() != Rejected.Reason.CONFLICT) {
+                throw rejected;
+            }
+            Conversation winner = conversations.findById(id);
+            if (winner == null) {
+                throw rejected;
+            }
+            return new Opened(summary(winner, user), false);
+        }
+    }
+
+    /**
      * The one DIRECT conversation between the caller and another user, created on first use. Two users opening
      * it at the same moment get the same conversation.
      */

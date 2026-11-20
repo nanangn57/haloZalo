@@ -1,12 +1,17 @@
 package identity.service;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
+import identity.account.Profile;
 import org.junit.jupiter.api.Test;
 import identity.storage.AccountRepository;
+import identity.storage.ProfileRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,7 +21,7 @@ class UserSearchServiceTest {
     void findsByUsernameOrEmail() {
         MemoryAccounts accounts = new MemoryAccounts();
         accounts.save(new Account("user-1", "ngoc_anh", "anh@example.com", "hash", Instant.now()));
-        UserSearchService search = new UserSearchService(accounts);
+        UserSearchService search = new UserSearchService(accounts, new MemoryProfiles());
 
         assertEquals("user-1", search.find("ngoc_anh").getUserId());
         assertEquals("user-1", search.find("anh@example.com").getUserId());
@@ -24,7 +29,7 @@ class UserSearchServiceTest {
 
     @Test
     void missingUserIsNotFound() {
-        UserSearchService search = new UserSearchService(new MemoryAccounts());
+        UserSearchService search = new UserSearchService(new MemoryAccounts(), new MemoryProfiles());
 
         UserSearchService.Rejected rejected = assertThrows(UserSearchService.Rejected.class, () -> search.find("missing"));
 
@@ -33,7 +38,7 @@ class UserSearchServiceTest {
 
     @Test
     void blankQueryIsRejected() {
-        UserSearchService search = new UserSearchService(new MemoryAccounts());
+        UserSearchService search = new UserSearchService(new MemoryAccounts(), new MemoryProfiles());
 
         UserSearchService.Rejected rejected = assertThrows(UserSearchService.Rejected.class, () -> search.find("  "));
 
@@ -45,7 +50,7 @@ class UserSearchServiceTest {
         MemoryAccounts accounts = new MemoryAccounts();
         accounts.save(new Account(A, "ngoc_anh", "anh@example.com", "hash", Instant.now()));
         accounts.save(new Account(B, "huy", "huy@example.com", "hash", Instant.now()));
-        UserSearchService search = new UserSearchService(accounts);
+        UserSearchService search = new UserSearchService(accounts, new MemoryProfiles());
 
         List<Account> found = search.lookup(B + ", " + A.toUpperCase() + "," + MISSING + "," + B);
 
@@ -54,7 +59,7 @@ class UserSearchServiceTest {
 
     @Test
     void lookupRejectsBadIds() {
-        UserSearchService search = new UserSearchService(new MemoryAccounts());
+        UserSearchService search = new UserSearchService(new MemoryAccounts(), new MemoryProfiles());
         String tooMany = String.join(",", java.util.stream.IntStream.range(0, 101)
             .mapToObj(i -> String.format("00000000-0000-4000-8000-%012d", i)).toList());
 
@@ -89,6 +94,32 @@ class UserSearchServiceTest {
         @Override
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
+    }
+
+    private static final class MemoryProfiles implements ProfileRepository {
+        private final Map<String, Profile> rows = new HashMap<>();
+
+        @Override
+        public Profile find(String userId) {
+            return rows.get(userId);
+        }
+
+        @Override
+        public void save(Profile profile) {
+            rows.put(profile.getUserId(), profile);
         }
     }
 }

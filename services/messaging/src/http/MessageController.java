@@ -42,7 +42,10 @@ public final class MessageController {
         @RequestBody SendMessageRequest request) {
         MessageContent content = request.toContent();
         if (content == null) {
-            throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Message type must be TEXT or EMOTION");
+            throw new MessageService.Rejected(
+                MessageService.Rejected.Reason.VALIDATION,
+                "Message type must be TEXT, EMOTION, IMAGE, VIDEO, or DOCUMENT"
+            );
         }
         MessageService.Sent sent = messages.send(
             conversationId, userId, request.getClientMsgId(), content, null, request.getReplyTo());
@@ -145,6 +148,19 @@ public final class MessageController {
         return new ReactionsResponse(messages.reactions(conversationId, messageId, userId));
     }
 
+    /**
+     * Opens a GROUP conversation for a group the caller belongs to (identity membership).
+     * Replaces client use of POST /internal/conversations.
+     */
+    @PostMapping("/conversations/group")
+    public ResponseEntity<ConversationResponse> openGroup(
+        @UserId String userId,
+        @RequestBody OpenGroupRequest request) {
+        MessageService.Opened opened = messages.openGroupForMember(userId, request.groupId());
+        return ResponseEntity.status(opened.created() ? 201 : 200)
+            .body(new ConversationResponse(opened.conversation()));
+    }
+
     @PostMapping("/internal/conversations")
     public ResponseEntity<ConversationResponse> open(@RequestBody OpenConversationRequest request) {
         ConversationType type = Arrays.stream(ConversationType.values())
@@ -153,6 +169,13 @@ public final class MessageController {
             .orElse(null);
         return ResponseEntity.status(201).body(new ConversationResponse(
             messages.openConversation(request.getConversationId(), type, request.getMemberIds())));
+    }
+
+    public record OpenGroupRequest(String groupId) {
+        @com.fasterxml.jackson.annotation.JsonCreator
+        public OpenGroupRequest(@com.fasterxml.jackson.annotation.JsonProperty("groupId") String groupId) {
+            this.groupId = groupId;
+        }
     }
 
     private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {

@@ -18,16 +18,23 @@ public class RealtimeConfig implements WebSocketConfigurer {
     private final RealtimeSessions sessions;
     private final RealtimeProperties properties;
     private final CurrentUser currentUser;
+    private final ClientSignalRelay signals;
 
-    public RealtimeConfig(RealtimeSessions sessions, RealtimeProperties properties, CurrentUser currentUser) {
+    public RealtimeConfig(
+        RealtimeSessions sessions,
+        RealtimeProperties properties,
+        CurrentUser currentUser,
+        ClientSignalRelay signals
+    ) {
         this.sessions = sessions;
         this.properties = properties;
         this.currentUser = currentUser;
+        this.signals = signals;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(new RealtimeHandler(sessions), "/ws")
+        registry.addHandler(new RealtimeHandler(sessions, signals), "/ws")
             .addInterceptors(new UserHandshakeInterceptor(currentUser))
             .setAllowedOriginPatterns(properties.allowedOrigins().toArray(String[]::new));
     }

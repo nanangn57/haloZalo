@@ -2,7 +2,6 @@ package http;
 
 import event.RecordingEvents;
 import member.ConversationMembers;
-import member.StandaloneGroupController;
 import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +18,7 @@ import storage.MemoryReadMarkers;
 
 import com.jayway.jsonpath.JsonPath;
 
+import java.util.Set;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -45,7 +45,8 @@ class MessageControllerTest {
         MemoryMessages messages = new MemoryMessages(conversations);
         MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
             new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
-        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service), new StandaloneGroupController(groups))
+        groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
+        mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
             .setControllerAdvice(new MessageExceptionHandler())
             .setCustomArgumentResolvers(new UserIdResolver(new CurrentUser(true)))
             .build();
@@ -55,10 +56,6 @@ class MessageControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.type").value("DIRECT"))
             .andExpect(jsonPath("$.memberIds.length()").value(2));
-        mvc.perform(put("/internal/groups/" + GROUP + "/members")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"memberIds\":[\"" + ALICE + "\",\"" + BOB + "\",\"" + CAROL + "\"]}"))
-            .andExpect(status().isNoContent());
         mvc.perform(post("/internal/conversations")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"conversationId\":\"" + GROUP + "\",\"type\":\"GROUP\"}"))
@@ -97,8 +94,16 @@ class MessageControllerTest {
     }
 
     @Test
-    void sendRejectsTypesTheContractDoesNotHaveYet() throws Exception {
+    void sendAcceptsImageUrl() throws Exception {
         send(ALICE, "{\"type\":\"IMAGE\",\"body\":\"https://cdn/a.png\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.type").value("IMAGE"))
+            .andExpect(jsonPath("$.body").value("https://cdn/a.png"));
+    }
+
+    @Test
+    void sendRejectsUnknownType() throws Exception {
+        send(ALICE, "{\"type\":\"STICKER\",\"body\":\"x\",\"clientMsgId\":\"" + CLIENT_MSG_ID + "\"}")
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }

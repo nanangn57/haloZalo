@@ -1,10 +1,12 @@
 package identity.http;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 import com.jayway.jsonpath.JsonPath;
 import identity.group.Group;
 import identity.group.Membership;
 import identity.group.OwnerMemberPolicyRegistry;
+import identity.group.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -230,6 +232,10 @@ class GroupControllerTest {
         public List<Membership> listByGroup(String groupId) {
             return rows.stream().filter(row -> row.getGroupId().equals(groupId)).toList();
         }
+
+        @Override
+        public void updateRole(String groupId, String userId, Role role) {
+        }
     }
 
     private static final class MemoryAccounts implements AccountRepository {
@@ -254,5 +260,17 @@ class GroupControllerTest {
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
     }
 }
