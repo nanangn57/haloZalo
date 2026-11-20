@@ -105,8 +105,11 @@ function ChatPage() {
 
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null)
+  // Latest selection for socket callbacks; synced after render, not during it.
   const selectedConversationRef = useRef<Conversation | null>(null)
-  selectedConversationRef.current = selectedConversation
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  }, [selectedConversation])
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -134,7 +137,9 @@ function ChatPage() {
     })
   }
   const messagesRef = useRef<Message[]>([])
-  messagesRef.current = messages
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   const [isLoadingMessages, setIsLoadingMessages] =
     useState(false)
@@ -522,7 +527,7 @@ function ChatPage() {
     const unsubscribeEvent = socketClient.subscribe((event) => {
       console.log('Received WebSocket event:', event)
 
-      setSocketEvents((previous) => [event as MessagingEvent, ...previous])
+      setSocketEvents((previous) => [event as unknown as MessagingEvent, ...previous])
 
       if (event.type === 'messaging.read.updated') {
         const payload = event.payload as {
@@ -788,10 +793,19 @@ function ChatPage() {
     )
   })()
 
-  useEffect(() => {
-    const conversationId = selectedConversation?.conversationId
+  // Typing and presence belong to one conversation: reset them while rendering a
+  // new selection (React's "adjust state when a prop changes"), not in an effect.
+  const [presenceConversationId, setPresenceConversationId] = useState(
+    selectedConversation?.conversationId,
+  )
+  if (presenceConversationId !== selectedConversation?.conversationId) {
+    setPresenceConversationId(selectedConversation?.conversationId)
     setTypingUserId(null)
     setPeerOnline(false)
+  }
+
+  useEffect(() => {
+    const conversationId = selectedConversation?.conversationId
     lastTypingSentRef.current = false
     if (!conversationId) {
       return
