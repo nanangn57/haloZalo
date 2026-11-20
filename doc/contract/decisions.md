@@ -23,6 +23,7 @@ Ba schema nằm trên cùng database PostgreSQL `halozalo`. Không có foreign k
 - **Thứ tự:** server gán `seq` từng hội thoại, bắt đầu từ 1, không để client tự đánh.
 - **Đã đọc:** server giữ mốc đã đọc theo user và hội thoại. Đọc ở một thiết bị thì thiết bị kia hết unread.
 - **Emotion hạng 1:** một tin riêng, `type = EMOTION`, `body` là mã icon. Bộ mã: `like`, `love`, `haha`, `wow`, `sad`, `angry`.
+- **Media:** gửi file hai bước. `POST /conversations/{conversationId}/media` lưu file và trả `mediaId`; sau đó gửi tin `IMAGE`, `VIDEO` hoặc `DOCUMENT` kèm `mediaId` qua API gửi tin như mọi tin khác, nên `seq`, `clientMsgId`, `/ws` và catch-up giữ nguyên. Tin chỉ lưu `mediaId`, không lưu URL. Mỗi lần trả tin, server ký một link tải mới (HMAC, hạn ít nhất 1 giờ), nên `img`/`video` dùng link trực tiếp không cần header và tin cũ không giữ link chết. Giới hạn: ảnh 10MB, video 25MB, tài liệu 10MB. Không nhận SVG, HTML. File nằm trên đĩa của process sau interface `MediaStore`; đổi sang S3 không đổi API. Filter session của app phải cho `GET /media/**` đi qua không cần token: chữ ký là quyền.
 - **Auth:** Access token là session id opaque, không phải JWT, không chứa `userId`. Hết hạn sau 3 ngày (259200 giây) kể từ lúc cấp, không gia hạn khi còn dùng. Identity giữ bảng session trong schema `identity`. Module khác không đọc bảng đó. Bản này chưa có API đăng xuất.
 
 Đăng ký gửi link xác minh về email. Link hết hạn sau 2 phút (120 giây). Bấm link trong hạn thì Identity tạo tài khoản. Hết hạn hoặc không bấm thì chưa có tài khoản, đăng nhập không thành công. Đăng ký lại sau khi hết hạn thì được; link cũ không dùng được.
@@ -35,7 +36,7 @@ Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, 
 
 ## Bản này cố ý chưa có
 
-Upload media, dashboard, refresh token, FCM, avatar.
+Dashboard, refresh token, FCM, avatar. Với media: thumbnail và thời lượng video, dọn file đã upload mà không gửi, store S3.
 
 Tên người trong hội thoại: hội thoại chỉ có `memberIds`, messaging không giữ tên user. Client lấy tên qua `GET /users/lookup?ids=` của identity, một lần cho cả trang hội thoại, rồi cache theo `userId`.
 

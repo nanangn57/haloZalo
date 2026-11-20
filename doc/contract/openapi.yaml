@@ -6,7 +6,7 @@ info:
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
     Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, tìm user, tra tên user theo id, nhóm,
-    hội thoại, tin TEXT hoặc EMOTION, lịch sử, đã đọc, reaction, và thống kê đã gom.
+    hội thoại, tin TEXT hoặc EMOTION, file (IMAGE, VIDEO, DOCUMENT), lịch sử, đã đọc, reaction, và thống kê đã gom.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
   - url: https://api.example.com
@@ -16,6 +16,7 @@ tags:
   - name: Users
   - name: Groups
   - name: Messages
+  - name: Media
   - name: Stats
 paths:
   /auth/register:
@@ -432,10 +433,13 @@ paths:
     post:
       tags: [Messages]
       operationId: sendMessage
-      summary: Gửi một tin TEXT hoặc EMOTION vào hội thoại đã mở
+      summary: Gửi một tin TEXT, EMOTION, IMAGE, VIDEO hoặc DOCUMENT vào hội thoại đã mở
       description: |
         Hội thoại phải được mở trước. Chat 1-1 mở bằng `POST /conversations/direct`.
         Hội thoại nhóm dùng `groupId` làm `conversationId`.
+        Tin file gửi hai bước: upload bằng `POST /conversations/{conversationId}/media`, rồi gửi tin cùng `type`
+        với `kind` của media, kèm `mediaId`. Chỉ người upload gửi được media đó, chỉ trong hội thoại đã upload,
+        và chỉ đúng loại. Sai một trong ba thì 400.
         Ghi tin trước khi phát event `messaging.message.created`.
         Cùng sender và cùng clientMsgId trả lại tin cũ, không tăng seq.
         Người gửi không thuộc hội thoại thì 403.
@@ -675,6 +679,107 @@ paths:
           $ref: "#/components/responses/NotMember"
         "404":
           $ref: "#/components/responses/NotFound"
+  /conversations/{conversationId}/media:
+    post:
+      tags: [Media]
+      operationId: uploadMedia
+      summary: Upload một file vào hội thoại, bước một của gửi tin file
+      description: |
+        Multipart, một part tên `file`. Server lấy loại từ Content-Type của part; khi trình duyệt gửi
+        `application/octet-stream` hoặc không gửi thì lấy theo đuôi file.
+        `kind` suy ra từ MIME:
+        - IMAGE: `image/jpeg`, `image/png`, `image/gif`, `image/webp`. Tối đa 10MB. Byte đầu phải đúng loại ảnh.
+        - VIDEO: `video/mp4`, `video/webm`, `video/quicktime`. Tối đa 25MB.
+        - DOCUMENT: `application/pdf`, `text/plain`, `text/csv`, `application/zip`, Word, Excel, PowerPoint
+          (cả `.doc` lẫn `.docx`...). Tối đa 10MB.
+        Loại khác thì 400, kể cả SVG và HTML.
+        Upload chưa tạo tin và không đẩy gì qua `/ws`. Thành viên khác chỉ thấy file khi có tin gửi `mediaId`.
+        Phát `messaging.media.uploaded` cho analytics.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: File đã lưu. Gửi tin với `mediaId` này.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Media"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/NotMember"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+  /media/{mediaId}:
+    get:
+      tags: [Media]
+      operationId: downloadMedia
+      summary: Tải file qua link đã ký
+      description: |
+        Không cần Authorization: link đã ký là quyền, để thẻ `img`, `video` và link tải dùng thẳng được.
+        Client không tự ghép URL này. Lấy nguyên `media.url` trong tin hoặc trong kết quả upload,
+        resolve theo base URL của API (`new URL(url, apiBase)`).
+        Link hết hạn sau ít nhất 1 giờ. Mỗi lần đọc tin (lịch sử, catch-up, `/ws`, danh sách hội thoại) có link mới,
+        nên tin cũ không bao giờ giữ link chết: gặp 403 thì đọc lại tin.
+        Có hỗ trợ `Range` (206) để video tua được.
+        IMAGE và VIDEO trả `Content-Disposition: inline`; DOCUMENT luôn là `attachment`.
+        Luôn có `X-Content-Type-Options: nosniff`.
+      parameters:
+        - name: mediaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: expires
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Giây Unix. Do server cấp trong `url`.
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Chữ ký do server cấp trong `url`.
+      responses:
+        "200":
+          description: Nội dung file, Content-Type là `mimeType` của media.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Một đoạn file theo header `Range`.
+        "403":
+          description: Thiếu chữ ký, chữ ký sai, hoặc link đã hết hạn.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error:
+                  code: FORBIDDEN
+                  message: Link is not valid or has expired
+        "404":
+          $ref: "#/components/responses/NotFound"
   /stats:
     get:
       tags: [Stats]
@@ -798,6 +903,16 @@ components:
             error:
               code: FORBIDDEN
               message: Not a member of this conversation
+    PayloadTooLarge:
+      description: File lớn hơn giới hạn của loại đó.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: PAYLOAD_TOO_LARGE
+              message: VIDEO files can be at most 26214400 bytes
     NotFound:
       description: Nhóm hoặc user không tồn tại.
       content:
@@ -989,11 +1104,38 @@ components:
       oneOf:
         - $ref: "#/components/schemas/SendTextRequest"
         - $ref: "#/components/schemas/SendEmotionRequest"
+        - $ref: "#/components/schemas/SendMediaRequest"
       discriminator:
         propertyName: type
         mapping:
           TEXT: "#/components/schemas/SendTextRequest"
           EMOTION: "#/components/schemas/SendEmotionRequest"
+          IMAGE: "#/components/schemas/SendMediaRequest"
+          VIDEO: "#/components/schemas/SendMediaRequest"
+          DOCUMENT: "#/components/schemas/SendMediaRequest"
+    SendMediaRequest:
+      type: object
+      additionalProperties: false
+      required: [type, mediaId, clientMsgId]
+      properties:
+        type:
+          type: string
+          enum: [IMAGE, VIDEO, DOCUMENT]
+          description: Phải bằng `kind` của media.
+        mediaId:
+          type: string
+          format: uuid
+          description: Từ `POST /conversations/{conversationId}/media`, do chính người gửi upload vào hội thoại này.
+        body:
+          type: string
+          description: Chú thích, không bắt buộc. Server từ chối khi UTF-8 dài hơn 4096 byte.
+        clientMsgId:
+          type: string
+          format: uuid
+        replyTo:
+          type: string
+          format: uuid
+          description: Tin được trả lời, cùng hội thoại. Không bắt buộc.
     SendTextRequest:
       type: object
       additionalProperties: false
@@ -1175,11 +1317,15 @@ components:
       oneOf:
         - $ref: "#/components/schemas/TextMessage"
         - $ref: "#/components/schemas/EmotionMessage"
+        - $ref: "#/components/schemas/MediaMessage"
       discriminator:
         propertyName: type
         mapping:
           TEXT: "#/components/schemas/TextMessage"
           EMOTION: "#/components/schemas/EmotionMessage"
+          IMAGE: "#/components/schemas/MediaMessage"
+          VIDEO: "#/components/schemas/MediaMessage"
+          DOCUMENT: "#/components/schemas/MediaMessage"
     TextMessage:
       allOf:
         - $ref: "#/components/schemas/MessageBase"
@@ -1205,6 +1351,56 @@ components:
               type: string
               enum: [like, love, haha, wow, sad, angry]
               description: Vắng khi status là DELETED.
+    MediaMessage:
+      allOf:
+        - $ref: "#/components/schemas/MessageBase"
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [IMAGE, VIDEO, DOCUMENT]
+            body:
+              type: string
+              description: Chú thích. Vắng khi không có chú thích hoặc status là DELETED.
+            media:
+              $ref: "#/components/schemas/Media"
+              description: Vắng khi status là DELETED.
+    Media:
+      type: object
+      additionalProperties: false
+      required: [mediaId, kind, url, fileName, mimeType, size]
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [IMAGE, VIDEO, DOCUMENT]
+        url:
+          type: string
+          description: |
+            Link tải đã ký, có hạn. Đường dẫn tương đối với base URL của API, ví dụ
+            `/media/{mediaId}?expires=1795000000&sig=...`. Resolve bằng `new URL(url, apiBase)`.
+            Không lưu lâu dài: lần đọc tin sau có link mới.
+        fileName:
+          type: string
+          description: Tên gốc, chỉ phần cuối của đường dẫn, tối đa 200 ký tự.
+        mimeType:
+          type: string
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Byte.
+        width:
+          type: integer
+          minimum: 1
+          description: Chỉ có ở IMAGE khi server đọc được kích thước. WebP hiện chưa có.
+        height:
+          type: integer
+          minimum: 1
+          description: Chỉ có ở IMAGE khi server đọc được kích thước.
     MessageBase:
       type: object
       required: [messageId, conversationId, seq, senderId, clientMsgId, createdAt]
@@ -1252,6 +1448,6 @@ components:
           properties:
             code:
               type: string
-              enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT]
+              enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, PAYLOAD_TOO_LARGE]
             message:
               type: string

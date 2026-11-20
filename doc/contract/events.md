@@ -48,7 +48,7 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `messaging.read.updated` | Mốc đã đọc của một user tiến lên | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "lastReadSeq": 1 }` |
 | `messaging.media.uploaded` | Upload media đã commit | messaging | `{ "senderId": "<uuid>", "conversationId": "<uuid>", "type": "IMAGE" }` |
 
-`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics chỉ đếm envelope, không đọc payload.
+`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics chỉ đếm envelope, không đọc payload. Event này chỉ ghi log và analytics, không đẩy qua `/ws`: upload chưa phải là tin. Thành viên thấy file qua `messaging.message.created` của tin gửi `mediaId`.
 
 `code` của reaction nằm trong bộ `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 
