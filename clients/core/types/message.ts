@@ -5,6 +5,21 @@ export type MessageType =
   | 'DOCUMENT'
   | 'VIDEO'
 
+export type MediaKind = 'IMAGE' | 'VIDEO' | 'DOCUMENT'
+
+// Media trong openapi.yaml. url từ API là đường dẫn tương đối và có hạn;
+// sau khi map (messageService) url đã là URL đầy đủ, dùng thẳng cho img/video/a.
+export interface MessageMedia {
+  mediaId: string
+  kind: MediaKind
+  url: string
+  fileName: string
+  mimeType: string
+  size: number
+  width?: number
+  height?: number
+}
+
 export type MessageStatus =
   | 'sending'
   | 'sent'
@@ -22,7 +37,11 @@ export interface Message {
   conversationId: string
   senderId: string
   type: MessageType
+  // TEXT/EMOTION: nội dung. IMAGE/VIDEO/DOCUMENT: chú thích, có thể rỗng.
   content: string
+
+  // Chỉ có ở IMAGE, VIDEO, DOCUMENT. Vắng khi tin đã xoá.
+  media?: MessageMedia
 
   seq?: number
   clientMsgId: string

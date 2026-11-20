@@ -30,7 +30,9 @@ import {
   sendMessageApi,
   getMessagesApi,
   createGroupConversationApi,
+  uploadMediaApi,
 } from '@core/messageService'
+import type { MediaKind } from '@core/types/message'
 import { getGroupMembersApi } from '@core/groupService'
 // import { socketClient } from '@core/socketClient'
 
@@ -121,6 +123,12 @@ function ChatPage() {
     useState(false)
 
   const [messageLoadError, setMessageLoadError] =
+    useState<string | null>(null)
+
+  // Attachments: hidden file inputs opened by the toolbar buttons.
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachError, setAttachError] =
     useState<string | null>(null)
 
   const [newMessage, setNewMessage] = useState('')
@@ -712,6 +720,95 @@ function ChatPage() {
   }
 
   // --------------------------------------------------
+  // 10b. SEND FILE: upload, then send a message with the mediaId
+  // --------------------------------------------------
+
+  // Guess only for the optimistic preview; the server decides the real kind.
+  function guessKind(file: File): MediaKind {
+    if (file.type.startsWith('image/')) return 'IMAGE'
+    if (file.type.startsWith('video/')) return 'VIDEO'
+    return 'DOCUMENT'
+  }
+
+  async function handleSendFile(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0]
+    // Reset so picking the same file again still fires onChange.
+    event.target.value = ''
+
+    if (
+      !file ||
+      !selectedConversation ||
+      isLoadingMessages ||
+      messageLoadError
+    ) {
+      return
+    }
+
+    setAttachError(null)
+
+    const conversationId = selectedConversation.conversationId
+    const clientMsgId = crypto.randomUUID()
+    const kind = guessKind(file)
+    const previewUrl = URL.createObjectURL(file)
+
+    setMessages((previous) => [
+      ...previous,
+      {
+        id: clientMsgId,
+        conversationId,
+        senderId: currentUserId,
+        type: kind,
+        content: '',
+        media: {
+          mediaId: '',
+          kind,
+          url: previewUrl,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+        },
+        clientMsgId,
+        sentAt: Math.floor(Date.now() / 1000),
+        status: 'sending',
+      },
+    ])
+
+    try {
+      const media = await uploadMediaApi(conversationId, file)
+      const savedMessage = await sendMessageApi(conversationId, {
+        type: media.kind,
+        mediaId: media.mediaId,
+        clientMsgId,
+      })
+
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.clientMsgId === clientMsgId
+            ? savedMessage
+            : message,
+        ),
+      )
+      URL.revokeObjectURL(previewUrl)
+    } catch (err) {
+      console.error('Cannot send file:', err)
+      setAttachError(
+        err instanceof Error ? err.message : 'Cannot send file.',
+      )
+
+      // Keep the preview so the user sees which file failed.
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.clientMsgId === clientMsgId
+            ? { ...message, status: 'failed' }
+            : message,
+        ),
+      )
+    }
+  }
+
+  // --------------------------------------------------
   // 11. SEARCH USER
   // --------------------------------------------------
 
@@ -1061,7 +1158,39 @@ function ChatPage() {
             onEmojiClick={() => {
               setShowEmojiPicker((previous) => !previous)
             }}
+            onImageClick={
+              selectedConversation
+                ? () => imageInputRef.current?.click()
+                : undefined
+            }
+            onFileClick={
+              selectedConversation
+                ? () => fileInputRef.current?.click()
+                : undefined
+            }
           />
+
+          {/* Types and limits match POST /conversations/{id}/media. */}
+          <input
+            ref={imageInputRef}
+            type="file"
+            hidden
+            accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime"
+            onChange={handleSendFile}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            accept=".pdf,.txt,.csv,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+            onChange={handleSendFile}
+          />
+
+          {attachError && (
+            <div className="small text-danger px-2 pt-1">
+              {attachError}
+            </div>
+          )}
 
           {/* Emoji picker */}
           {showEmojiPicker && (

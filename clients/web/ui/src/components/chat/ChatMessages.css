@@ -20,3 +20,24 @@
   background-color: #f1f3f5;
   color: #212529;
 }
+
+.message-image,
+.message-video {
+  display: block;
+  max-width: 100%;
+  width: 280px;
+  height: auto;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 10px;
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.message-document {
+  min-width: 0;
+  max-width: 280px;
+}
+
+.message-sending {
+  opacity: 0.6;
+}

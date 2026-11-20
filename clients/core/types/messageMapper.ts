@@ -1,20 +1,11 @@
 import type { Message } from '../types/message'
 import type { MessageCreatedPayload } from '../types/event'
+import { mapApiMessage } from '../messageService'
 
+// Payload của messaging.message.created là Message của openapi.yaml,
+// nên map giống hệt tin lấy qua HTTP, kể cả resolve link media.
 export function mapEventToMessage(
   payload: MessageCreatedPayload
 ): Message {
-  return {
-    id: payload.messageId,
-    conversationId: payload.conversationId,
-    senderId: payload.senderId,
-    type: payload.type,
-    content: payload.body,
-    seq: payload.seq,
-    clientMsgId: payload.clientMsgId,
-    sentAt: Math.floor(
-      new Date(payload.createdAt).getTime() / 1000
-    ),
-    status: 'sent',
-  }
+  return mapApiMessage(payload)
 }

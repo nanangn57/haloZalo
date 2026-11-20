@@ -1,7 +1,11 @@
 
 import { getApiHeaders } from './apiClient'
 import { connectionConfig } from './connectionConfig'
-import type { Message } from './types/message'
+import type {
+  MediaKind,
+  Message,
+  MessageMedia,
+} from './types/message'
 
 // =========================
 // CONFIG
@@ -13,7 +17,10 @@ const API_MESSAGE_BASE_URL = connectionConfig.messageBaseUrl
 // TYPES
 // =========================
 
-export type SendableMessageType = 'TEXT' | 'EMOTION'
+export type SendableMessageType =
+  | 'TEXT'
+  | 'EMOTION'
+  | MediaKind
 
 export type SendMessageRequest =
   | {
@@ -28,6 +35,15 @@ export type SendMessageRequest =
       clientMsgId: string
       replyTo?: string
     }
+  | {
+      // Phải bằng kind của media đã upload.
+      type: MediaKind
+      mediaId: string
+      // Chú thích, không bắt buộc.
+      body?: string
+      clientMsgId: string
+      replyTo?: string
+    }
 
 export interface ApiMessage {
   messageId: string
@@ -36,6 +52,8 @@ export interface ApiMessage {
   senderId: string
   type: SendableMessageType
   body?: string
+  // IMAGE, VIDEO, DOCUMENT. url tương đối với API_MESSAGE_BASE_URL.
+  media?: MessageMedia
   clientMsgId: string
   createdAt: string
   replyTo?: string
@@ -77,7 +95,17 @@ async function getErrorMessage(
 // MAP API MESSAGE TO FRONTEND MESSAGE
 // =========================
 
-function mapApiMessage(message: ApiMessage): Message {
+// Link media là đường dẫn tương đối, có hạn. Resolve theo base URL của messaging.
+// Link hết hạn (403) thì tải lại tin là có link mới.
+export function resolveMediaUrl(url: string): string {
+  return new URL(url, API_MESSAGE_BASE_URL).toString()
+}
+
+function mapMedia(media: MessageMedia): MessageMedia {
+  return { ...media, url: resolveMediaUrl(media.url) }
+}
+
+export function mapApiMessage(message: ApiMessage): Message {
   return {
     id: message.messageId,
     messageId: message.messageId,
@@ -85,6 +113,7 @@ function mapApiMessage(message: ApiMessage): Message {
     senderId: message.senderId,
     type: message.type,
     content: message.body ?? '',
+    media: message.media ? mapMedia(message.media) : undefined,
     seq: message.seq,
     clientMsgId: message.clientMsgId,
     sentAt: Math.floor(
@@ -119,6 +148,39 @@ export async function sendMessageApi(
   const data: ApiMessage = await response.json()
 
   return mapApiMessage(data)
+}
+
+// =========================
+// 1b. UPLOAD MEDIA (bước một của gửi file)
+// =========================
+
+// Ảnh 10MB, video 25MB, tài liệu 10MB; server trả 413 khi vượt.
+// Sau khi upload, gửi tin { type: media.kind, mediaId: media.mediaId }.
+export async function uploadMediaApi(
+  conversationId: string,
+  file: File,
+): Promise<MessageMedia> {
+  const url =
+    `${API_MESSAGE_BASE_URL}/conversations/` +
+    `${encodeURIComponent(conversationId)}/media`
+
+  const form = new FormData()
+  form.append('file', file, file.name)
+
+  // Không đặt Content-Type: trình duyệt tự thêm boundary cho multipart.
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getApiHeaders(),
+    body: form,
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data: MessageMedia = await response.json()
+
+  return mapMedia(data)
 }
 
 // =========================
