@@ -7,13 +7,22 @@ public final class ProfileView {
     private final String userId;
     private final String username;
     private final String email;
+    private final PlatformRole platformRole;
     private final String displayName;
     private final String avatar;
 
-    public ProfileView(String userId, String username, String email, String displayName, String avatar) {
+    public ProfileView(
+        String userId,
+        String username,
+        String email,
+        PlatformRole platformRole,
+        String displayName,
+        String avatar
+    ) {
         this.userId = userId;
         this.username = username;
         this.email = email;
+        this.platformRole = platformRole == null ? PlatformRole.USER : platformRole;
         this.displayName = displayName;
         this.avatar = avatar;
     }
@@ -28,6 +37,10 @@ public final class ProfileView {
 
     public String getEmail() {
         return email;
+    }
+
+    public PlatformRole getPlatformRole() {
+        return platformRole;
     }
 
     public String getDisplayName() {

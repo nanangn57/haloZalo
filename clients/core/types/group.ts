@@ -1,4 +1,6 @@
-export type GroupRole = 'OWNER' | 'MEMBER'
+export type GroupRole = 'OWNER' | 'ADMIN' | 'MEMBER'
+
+export type AssignableGroupRole = 'ADMIN' | 'MEMBER'
 
 export interface Group {
   groupId: string
@@ -22,13 +24,17 @@ export interface AddMemberRequest {
 export interface Membership {
   groupId: string
   userId: string
-  role: 'MEMBER'
+  role: GroupRole
 }
 
 export interface Member {
   userId: string
   username: string
   role: GroupRole
+}
+
+export interface SetRoleRequest {
+  role: AssignableGroupRole
 }
 
 export interface MemberListResponse {

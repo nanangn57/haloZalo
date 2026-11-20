@@ -3,6 +3,8 @@ server:
 
 identity:
   public-base-url: ${IDENTITY_PUBLIC_BASE_URL:http://localhost:8080}
+  # Comma-separated usernames promoted to platform ADMIN on startup / account create.
+  platform-admins: ${IDENTITY_PLATFORM_ADMINS:}
   mail:
     # log ghi link ra logger. smtp gửi qua spring.mail. Bí mật nằm ở .env.local, không ghi ở đây.
     mode: ${IDENTITY_MAIL_MODE:log}
@@ -19,9 +21,10 @@ spring:
     host: ${SPRING_MAIL_HOST:localhost}
     port: ${SPRING_MAIL_PORT:1025}
   datasource:
-    url: jdbc:postgresql://postgres:5432/halozalo
-    username: halozalo
-    password: halozalo
+    # Defaults match infra shared Postgres (localhost). Docker compose overrides host to postgres.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/halozalo}
+    username: ${SPRING_DATASOURCE_USERNAME:halozalo}
+    password: ${SPRING_DATASOURCE_PASSWORD:halozalo}
     hikari:
       connection-init-sql: SET search_path TO identity
   sql:

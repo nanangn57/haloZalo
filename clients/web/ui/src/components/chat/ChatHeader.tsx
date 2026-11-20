@@ -1,12 +1,9 @@
-
 interface ChatHeaderProps {
   title: string
   subtitle?: string
   avatar?: string
-  // Shown in the circle when there is no avatar.
   initials?: string
   type?: 'GROUP' | 'DIRECT'
-  // showInfoButton?: boolean
   onInfoClick?: () => void
 }
 
@@ -16,60 +13,39 @@ function ChatHeader({
   avatar,
   initials,
   type = 'DIRECT',
-  // showInfoButton = true,
-  // onInfoClick,
 }: ChatHeaderProps) {
+  const mark =
+    (initials || title.trim().charAt(0) || (type === 'GROUP' ? 'G' : '?'))
+      .slice(0, 2)
+      .toUpperCase()
+
   return (
-    <div className="d-flex align-items-center w-100 gap-2">
+    <div className="chat-header-bar">
       {avatar ? (
         <img
           src={avatar}
-          alt={title}
-          className="rounded-circle flex-shrink-0"
-          width="48"
-          height="48"
+          alt=""
+          className="conversation-avatar-img"
+          width={44}
+          height={44}
         />
       ) : (
-        <div
-          className="rounded-circle d-flex align-items-center justify-content-center bg-secondary-subtle flex-shrink-0"
-          style={{ width: 48, height: 48 }}
+        <span
+          className={`conversation-avatar ${
+            type === 'GROUP' ? 'is-group' : 'is-direct'
+          }`}
+          aria-hidden="true"
         >
-          {initials ? (
-            <span className="fw-semibold fs-5">{initials}</span>
-          ) : (
-            <i
-              className={`bi ${
-                type === 'GROUP' ? 'bi-people' : 'bi-person'
-              } fs-4`}
-            />
-          )}
-        </div>
+          {mark}
+        </span>
       )}
 
-      <div className="flex-grow-1 overflow-hidden">
-        <div className="fw-semibold text-truncate">
-          {title}
-        </div>
-
-        {subtitle && (
-          <div className="small text-muted text-truncate">
-            {subtitle}
-          </div>
-        )}
+      <div className="chat-header-copy">
+        <div className="chat-header-title">{title}</div>
+        {subtitle ? (
+          <div className="chat-header-subtitle">{subtitle}</div>
+        ) : null}
       </div>
-
-      {/* <div className="ms-auto d-flex align-items-center gap-2">
-        {showInfoButton && (
-          <button
-            type="button"
-            className="btn app-button flex-shrink-0"
-            onClick={onInfoClick}
-            aria-label="Show conversation information"
-          >
-            <i className="bi bi-layout-sidebar fs-4" />
-          </button>
-        )}
-      </div> */}
     </div>
   )
 }

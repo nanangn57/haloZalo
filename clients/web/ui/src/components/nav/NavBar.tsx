@@ -1,11 +1,11 @@
-
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import type { User } from '../../types/user'
 import type { AuthUser } from '@core/types/auth'
-import { getMyProfileApi } from '@core/userService'
-import { logout } from '@core/authSession'
+import { getMyProfileApi, updateProfileApi } from '@core/userService'
+import { isPlatformAdmin, logout, updateStoredUser } from '@core/authSession'
+
 interface UserItemProps {
   currentUser: User
 }
@@ -15,6 +15,10 @@ function NavBar({ currentUser }: UserItemProps) {
   const [profile, setProfile] = useState<AuthUser | null>(null)
   const [loadingProfile, setLoadingProfile] = useState(false)
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editAvatar, setEditAvatar] = useState('')
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
   const navigate = useNavigate()
 
@@ -22,7 +26,7 @@ function NavBar({ currentUser }: UserItemProps) {
     logout()
     navigate('/login', { replace: true })
   }
-  // Load profile when popup opens.
+
   useEffect(() => {
     if (!showProfile) return
 
@@ -37,6 +41,9 @@ function NavBar({ currentUser }: UserItemProps) {
 
         if (isMounted) {
           setProfile(data)
+          setEditName(data.displayName || '')
+          setEditAvatar((data as AuthUser & { avatar?: string }).avatar || '')
+          setSaveMessage(null)
         }
       } catch (error) {
         if (isMounted) {
@@ -72,41 +79,39 @@ function NavBar({ currentUser }: UserItemProps) {
 
   return (
     <>
-      <nav className="d-flex flex-column align-items-center vh-100 border-end p-2 flex-shrink-0">
+      <nav className="app-nav-rail" aria-label="Main">
+        <div className="app-nav-rail-top">
+          <button
+            type="button"
+            className="app-icon-button"
+            onClick={() => setShowProfile(true)}
+            title="My Profile"
+            aria-label="Open profile"
+          >
+            <img
+              src={currentUser.avatar}
+              alt=""
+              className="app-nav-avatar"
+            />
+          </button>
+        </div>
 
-        {/* Profile avatar */}
-        <button
-          type="button"
-          className="btn p-0 border-0 bg-transparent mb-4"
-          onClick={() => setShowProfile(true)}
-          title="My Profile"
-        >
-          <img
-            src={currentUser.avatar}
-            alt={currentUser.name}
-            className="rounded-circle"
-            width="48"
-            height="48"
-            style={{ objectFit: 'cover' }}
-          />
-        </button>
-
-        {/* Main navigation */}
-        <div className="d-flex flex-column align-items-center gap-3">
+        <div className="app-nav-rail-mid">
           <NavLink
             to="/chat"
             className={({ isActive }) =>
-              `btn app-button ${isActive ? 'active' : ''}`
+              `app-icon-button ${isActive ? 'active' : ''}`
             }
             title="Chat"
           >
-            <i className="bi bi-chat fs-4"></i>
+            <i className="bi bi-chat-dots" aria-hidden="true" />
+            <span className="visually-hidden">Chat</span>
           </NavLink>
 
           <NavLink
             to="/contacts/friends"
             className={({ isActive }) =>
-              `btn app-button ${
+              `app-icon-button ${
                 isActive ||
                 window.location.pathname.startsWith('/contacts')
                   ? 'active'
@@ -115,163 +120,202 @@ function NavBar({ currentUser }: UserItemProps) {
             }
             title="Contacts"
           >
-            <i className="bi bi-people fs-4"></i>
+            <i className="bi bi-people" aria-hidden="true" />
+            <span className="visually-hidden">Contacts</span>
           </NavLink>
         </div>
 
-        {/* Bottom navigation */}
-        <div className="d-flex flex-column align-items-center gap-3 mt-auto">
+        <div className="app-nav-rail-bottom">
           <NavLink
             to="/dashboard"
             className={({ isActive }) =>
-              `btn app-button ${isActive ? 'active' : ''}`
+              `app-icon-button ${isActive ? 'active' : ''}`
             }
-            title="Dashboard / Statistics"
+            title="Your activity"
           >
-            <i className="bi bi-bar-chart fs-4"></i>
+            <i className="bi bi-person-lines-fill" aria-hidden="true" />
+            <span className="visually-hidden">Your activity</span>
           </NavLink>
+
+          {isPlatformAdmin() ? (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `app-icon-button ${isActive ? 'active' : ''}`
+              }
+              title="Platform stats"
+            >
+              <i className="bi bi-bar-chart" aria-hidden="true" />
+              <span className="visually-hidden">Platform stats</span>
+            </NavLink>
+          ) : null}
 
           <button
             type="button"
-            className="btn app-button"
+            className="app-icon-button"
             title="Logout"
+            aria-label="Log out"
             onClick={handleLogout}
           >
-            <i className="bi bi-box-arrow-right fs-4"></i>
+            <i className="bi bi-box-arrow-right" aria-hidden="true" />
           </button>
         </div>
       </nav>
 
-      {/* ====================================== */}
-      {/* PROFILE POPUP */}
-      {/* ====================================== */}
-
-      {showProfile && (
+      {showProfile ? (
         <div
-          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
-          style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.45)',
-            zIndex: 2000,
-          }}
+          className="app-modal-backdrop"
           onClick={() => setShowProfile(false)}
+          role="presentation"
         >
           <div
-            className="bg-white rounded-4 shadow p-4"
-            style={{
-              width: 'min(420px, calc(100% - 32px))',
-            }}
+            className="app-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-dialog-title"
             onClick={(event) => event.stopPropagation()}
           >
-            {/* Popup header */}
-            <div className="d-flex justify-content-between align-items-center mb-4">
-              <h5 className="mb-0 fw-semibold">
-                My Profile
-              </h5>
-
+            <div className="app-modal-header">
+              <h2 id="profile-dialog-title">My Profile</h2>
               <button
                 type="button"
-                className="btn-close"
+                className="app-icon-button"
                 aria-label="Close"
                 onClick={() => setShowProfile(false)}
-              />
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
             </div>
 
-            {/* Avatar and display name */}
             <div className="d-flex flex-column align-items-center mb-4">
               <img
                 src={currentUser.avatar}
-                alt="Profile avatar"
+                alt=""
                 className="rounded-circle mb-3"
                 width="88"
                 height="88"
                 style={{ objectFit: 'cover' }}
               />
-
-              <h5 className="mb-1">{displayName}</h5>
-
-              <span className="text-muted small">
+              <h3 className="mb-1" style={{ fontSize: 18 }}>
+                {displayName}
+              </h3>
+              <span className="app-text-muted" style={{ fontSize: 13 }}>
                 @{username}
               </span>
             </div>
 
-            {/* Loading */}
-            {loadingProfile && (
-              <div className="text-center text-muted py-3">
-                <div
-                  className="spinner-border spinner-border-sm me-2"
-                  role="status"
-                />
-                Loading profile...
+            {loadingProfile ? (
+              <div className="app-loading" style={{ minHeight: 80 }}>
+                <div className="app-spinner" />
+                <p>Loading profile…</p>
               </div>
-            )}
+            ) : null}
 
-            {/* Error */}
-            {profileError && (
-              <div className="alert alert-danger small">
+            {profileError ? (
+              <div className="auth-alert auth-alert-error" role="alert">
                 {profileError}
               </div>
-            )}
+            ) : null}
 
-            {/* Profile information */}
-            {!loadingProfile && !profileError && profile && (
+            {!loadingProfile && !profileError && profile ? (
               <div className="d-flex flex-column gap-3">
                 <div>
-                  <label className="form-label text-muted small mb-1">
+                  <label className="app-form-label" htmlFor="edit-display-name">
                     Display name
                   </label>
-                  <div className="form-control bg-light">
-                    {profile.displayName || 'Not set'}
-                  </div>
+                  <input
+                    id="edit-display-name"
+                    className="app-input"
+                    value={editName}
+                    onChange={(event) => setEditName(event.target.value)}
+                    maxLength={64}
+                  />
                 </div>
 
                 <div>
-                  <label className="form-label text-muted small mb-1">
-                    Username
+                  <label className="app-form-label" htmlFor="edit-avatar">
+                    Avatar URL
                   </label>
-                  <div className="form-control bg-light">
-                    {username}
-                  </div>
+                  <input
+                    id="edit-avatar"
+                    className="app-input"
+                    value={editAvatar}
+                    onChange={(event) => setEditAvatar(event.target.value)}
+                    placeholder="https://…"
+                  />
                 </div>
 
                 <div>
-                  <label className="form-label text-muted small mb-1">
-                    Email
-                  </label>
-                  <div className="form-control bg-light">
-                    {email}
-                  </div>
+                  <span className="app-form-label">Username</span>
+                  <div className="app-readonly-field">{username}</div>
                 </div>
 
                 <div>
-                  <label className="form-label text-muted small mb-1">
-                    User ID
-                  </label>
+                  <span className="app-form-label">Email</span>
+                  <div className="app-readonly-field">{email}</div>
+                </div>
+
+                <div>
+                  <span className="app-form-label">User ID</span>
                   <div
-                    className="form-control bg-light text-muted"
-                    style={{
-                      fontSize: '0.8rem',
-                      overflowWrap: 'anywhere',
-                    }}
+                    className="app-readonly-field"
+                    style={{ fontSize: '0.8rem' }}
                   >
                     {userId}
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* Footer */}
-            <div className="d-flex justify-content-end mt-4">
+                {saveMessage ? (
+                  <div className="auth-alert auth-alert-success" role="status">
+                    {saveMessage}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="d-flex justify-content-end gap-2 mt-4">
               <button
                 type="button"
-                className="btn btn-outline-secondary"
+                className="app-button"
                 onClick={() => setShowProfile(false)}
               >
                 Close
               </button>
+              <button
+                type="button"
+                className="app-button app-button-primary"
+                disabled={savingProfile || loadingProfile || !profile}
+                onClick={() => {
+                  void (async () => {
+                    setSavingProfile(true)
+                    setProfileError(null)
+                    setSaveMessage(null)
+                    try {
+                      const updated = await updateProfileApi({
+                        displayName: editName.trim() || null,
+                        avatar: editAvatar.trim() || null,
+                      })
+                      setProfile(updated)
+                      updateStoredUser(updated)
+                      setSaveMessage('Profile saved')
+                    } catch (error) {
+                      setProfileError(
+                        error instanceof Error
+                          ? error.message
+                          : 'Cannot save profile',
+                      )
+                    } finally {
+                      setSavingProfile(false)
+                    }
+                  })()
+                }}
+              >
+                {savingProfile ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </>
   )
 }

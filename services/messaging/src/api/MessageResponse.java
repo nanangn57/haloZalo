@@ -46,6 +46,15 @@ public final class MessageResponse {
         if (content instanceof MessageContent.Emotion emotion) {
             return emotion.code();
         }
+        if (content instanceof MessageContent.Image image) {
+            return image.url();
+        }
+        if (content instanceof MessageContent.Video video) {
+            return video.url();
+        }
+        if (content instanceof MessageContent.Document document) {
+            return document.url();
+        }
         throw new IllegalStateException("No contract shape for message type " + content.type());
     }
 

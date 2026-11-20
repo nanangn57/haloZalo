@@ -13,6 +13,8 @@ import ChatPage from './pages/ChatPage'
 import ContactPage from './pages/ContactPage'
 import GroupPage from './pages/GroupPage'
 import DashboardPage from './pages/DashboardPage'
+import AdminStatsPage from './pages/AdminStatsPage'
+import FriendRequestPage from './pages/FriendRequestPage'
 
 import MainLayout from './layouts/MainLayout'
 import ContactLayout from './layouts/ContactLayout'
@@ -43,8 +45,11 @@ function App() {
 
         {/* Protected routes */}
         <Route element={<ProtectedLayout />}>
-          {/* Dashboard */}
+          {/* Personal activity */}
           <Route path="/dashboard" element={<DashboardPage />} />
+
+          {/* Platform admin stats */}
+          <Route path="/admin" element={<AdminStatsPage />} />
 
           {/* Normal chat */}
           <Route path="/chat" element={<ChatPage />} />
@@ -65,7 +70,7 @@ function App() {
               element={<ChatPage />}
             />
 
-            {/* <Route path="requests" element={<FriendRequestPage />} /> */}
+            <Route path="requests" element={<FriendRequestPage />} />
           </Route>
         </Route>
 

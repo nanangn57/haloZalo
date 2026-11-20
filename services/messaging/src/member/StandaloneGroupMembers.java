@@ -1,5 +1,6 @@
 package member;
 
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -8,12 +9,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * TEMPORARY: lets messaging run on its own until the app wires identity's MembershipLookup into
- * {@link GroupMembers}. Held in memory only and filled through StandaloneGroupController, so nothing is copied into
- * the messaging schema. Delete this class and StandaloneGroupController in the same change that adds the real
- * adapter.
+ * In-memory membership for tests / no-DB profiles. Not used in profile {@code app}.
  */
 @Component
+@Profile("!app")
 public final class StandaloneGroupMembers implements GroupMembers {
     private final Map<String, Set<String>> membersByGroup = new ConcurrentHashMap<>();
 

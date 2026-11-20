@@ -1,19 +1,23 @@
-
 import { getApiHeaders } from './apiClient'
 import { connectionConfig } from './connectionConfig'
 import type { Message } from './types/message'
 
-// =========================
-// CONFIG
-// =========================
-
 const API_MESSAGE_BASE_URL = connectionConfig.messageBaseUrl
 
-// =========================
-// TYPES
-// =========================
+export type SendableMessageType =
+  | 'TEXT'
+  | 'EMOTION'
+  | 'IMAGE'
+  | 'VIDEO'
+  | 'DOCUMENT'
 
-export type SendableMessageType = 'TEXT' | 'EMOTION'
+export type EmotionCode =
+  | 'like'
+  | 'love'
+  | 'haha'
+  | 'wow'
+  | 'sad'
+  | 'angry'
 
 export type SendMessageRequest =
   | {
@@ -24,8 +28,38 @@ export type SendMessageRequest =
     }
   | {
       type: 'EMOTION'
-      body: 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry'
+      body: EmotionCode
       clientMsgId: string
+      replyTo?: string
+    }
+  | {
+      type: 'IMAGE'
+      body: string
+      clientMsgId: string
+      thumbnailUrl?: string
+      width?: number
+      height?: number
+      caption?: string
+      replyTo?: string
+    }
+  | {
+      type: 'VIDEO'
+      body: string
+      clientMsgId: string
+      thumbnailUrl?: string
+      width?: number
+      height?: number
+      duration?: number
+      caption?: string
+      replyTo?: string
+    }
+  | {
+      type: 'DOCUMENT'
+      body: string
+      clientMsgId: string
+      fileName: string
+      mimeType: string
+      size: number
       replyTo?: string
     }
 
@@ -56,26 +90,14 @@ interface ApiErrorResponse {
   }
 }
 
-// =========================
-// ERROR HANDLING
-// =========================
-
-async function getErrorMessage(
-  response: Response,
-): Promise<string> {
+async function getErrorMessage(response: Response): Promise<string> {
   const data: unknown = await response.json().catch(() => null)
-
   const errorData = data as ApiErrorResponse | null
-
   return (
     errorData?.error?.message ??
     `Request failed with status ${response.status}`
   )
 }
-
-// =========================
-// MAP API MESSAGE TO FRONTEND MESSAGE
-// =========================
 
 function mapApiMessage(message: ApiMessage): Message {
   return {
@@ -87,16 +109,10 @@ function mapApiMessage(message: ApiMessage): Message {
     content: message.body ?? '',
     seq: message.seq,
     clientMsgId: message.clientMsgId,
-    sentAt: Math.floor(
-      new Date(message.createdAt).getTime() / 1000,
-    ),
+    sentAt: Math.floor(new Date(message.createdAt).getTime() / 1000),
     status: 'sent',
   }
 }
-
-// =========================
-// 1. SEND MESSAGE
-// =========================
 
 export async function sendMessageApi(
   conversationId: string,
@@ -117,13 +133,8 @@ export async function sendMessageApi(
   }
 
   const data: ApiMessage = await response.json()
-
   return mapApiMessage(data)
 }
-
-// =========================
-// 2. GET MESSAGE HISTORY
-// =========================
 
 export async function getMessagesApi(
   conversationId: string,
@@ -175,30 +186,47 @@ export async function getMessagesApi(
 }
 
 export async function createGroupConversationApi(
-  groupId: string
+  groupId: string,
 ): Promise<void> {
   const response = await fetch(
-    `${API_MESSAGE_BASE_URL}/internal/conversations`,
+    `${API_MESSAGE_BASE_URL}/conversations/group`,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        conversationId: groupId,
-        type: 'GROUP',
-      }),
-    }
+      headers: getApiHeaders(true),
+      body: JSON.stringify({ groupId }),
+    },
   )
 
-  // Conversation đã tồn tại thì vẫn có thể tiếp tục mở chat.
-  if (response.status === 409) {
+  if (response.ok || response.status === 409) {
     return
   }
 
+  throw new Error(await getErrorMessage(response))
+}
+
+export interface ReadState {
+  conversationId: string
+  lastReadSeq: number
+  unreadCount: number
+}
+
+export async function markConversationReadApi(
+  conversationId: string,
+  seq: number,
+): Promise<ReadState> {
+  const response = await fetch(
+    `${API_MESSAGE_BASE_URL}/conversations/` +
+      `${encodeURIComponent(conversationId)}/read`,
+    {
+      method: 'PUT',
+      headers: getApiHeaders(true),
+      body: JSON.stringify({ seq }),
+    },
+  )
+
   if (!response.ok) {
-    throw new Error(
-      `Cannot initialize group conversation: ${response.status}`
-    )
+    throw new Error(await getErrorMessage(response))
   }
+
+  return (await response.json()) as ReadState
 }

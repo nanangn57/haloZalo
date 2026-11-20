@@ -3,11 +3,15 @@ export interface LoginRequest {
   password: string
 }
 
+export type PlatformRole = 'USER' | 'ADMIN'
+
 export interface AuthUser {
   userId: string
   username: string
   email: string
+  platformRole?: PlatformRole
   displayName?: string
+  avatar?: string
 }
 
 export interface LoginResponse {

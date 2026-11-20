@@ -5,8 +5,10 @@ import conversation.Conversation;
 import member.ConversationMembers;
 import message.Message;
 import reaction.MessageReaction;
+import push.PushNotifier;
 import realtime.RealtimeBus;
 import realtime.RealtimeFrame;
+import realtime.RealtimeSessions;
 import storage.ConversationRepository;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -16,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +43,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     static final String REACTION_ADDED = "messaging.reaction.added";
     static final String REACTION_REMOVED = "messaging.reaction.removed";
     static final String READ_UPDATED = "messaging.read.updated";
+    static final String MEDIA_UPLOADED = "messaging.media.uploaded";
 
     private static final Logger log = LoggerFactory.getLogger(EnvelopeEventPublisher.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -48,18 +52,36 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ConversationMembers members;
     private final RealtimeBus realtime;
     private final ActivityRecorder activities;
+    private final RealtimeSessions sessions;
+    private final PushNotifier push;
 
     public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
-        this(conversations, members, realtime, envelope -> { });
+        this(conversations, members, realtime, envelope -> { }, null, (ids, conversationId, preview) -> { });
     }
 
     public EnvelopeEventPublisher(
-        ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime, ActivityRecorder activities
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ActivityRecorder activities
+    ) {
+        this(conversations, members, realtime, activities, null, (ids, conversationId, preview) -> { });
+    }
+
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ActivityRecorder activities,
+        RealtimeSessions sessions,
+        PushNotifier push
     ) {
         this.conversations = conversations;
         this.members = members;
         this.realtime = realtime;
         this.activities = activities;
+        this.sessions = sessions;
+        this.push = push == null ? (ids, conversationId, preview) -> { } : push;
     }
 
     /**
@@ -70,14 +92,24 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         ConversationRepository conversations,
         ConversationMembers members,
         RealtimeBus realtime,
-        ObjectProvider<ActivityRecorder> activities
+        ObjectProvider<ActivityRecorder> activities,
+        ObjectProvider<RealtimeSessions> sessions,
+        ObjectProvider<PushNotifier> push
     ) {
-        this(conversations, members, realtime, activities.getIfAvailable(() -> envelope -> { }));
+        this(
+            conversations,
+            members,
+            realtime,
+            activities.getIfAvailable(() -> envelope -> { }),
+            sessions.getIfAvailable(),
+            push.getIfAvailable(() -> (ids, conversationId, preview) -> { })
+        );
     }
 
     @Override
     public void publishMessageCreated(Message message) {
         emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message));
+        notifyOffline(message);
     }
 
     @Override
@@ -102,6 +134,21 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         log.info(envelope);
         record(envelope);
         push(READ_UPDATED, conversationId, () -> List.of(userId), envelope);
+    }
+
+    /**
+     * Upload committed. Analytics counts this; no realtime fan-out required for the demo.
+     */
+    public void publishMediaUploaded(String senderId, String conversationId, String type) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("senderId", senderId);
+        if (conversationId != null && !conversationId.isBlank()) {
+            payload.put("conversationId", conversationId);
+        }
+        payload.put("type", type);
+        String body = envelope(MEDIA_UPLOADED, payload);
+        log.info(body);
+        record(body);
     }
 
     private void emit(String conversationId, String type, Object payload) {
@@ -151,5 +198,51 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Could not write event", ex);
         }
+    }
+
+    private void notifyOffline(Message message) {
+        if (sessions == null) {
+            return;
+        }
+        try {
+            Conversation conversation = conversations.findById(message.getConversationId());
+            if (conversation == null) {
+                return;
+            }
+            List<String> offline = new ArrayList<>();
+            for (String memberId : members.memberIds(conversation)) {
+                if (memberId.equals(message.getSenderId())) {
+                    continue;
+                }
+                if (sessions.count(memberId) == 0) {
+                    offline.add(memberId);
+                }
+            }
+            if (!offline.isEmpty()) {
+                push.notifyNewMessage(offline, message.getConversationId(), previewOf(message));
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Offline push failed for conversation {}", message.getConversationId(), ex);
+        }
+    }
+
+    private static String previewOf(Message message) {
+        if (message.getContent() instanceof message.MessageContent.Text text) {
+            String body = text.text();
+            if (body == null || body.isBlank()) {
+                return "New message";
+            }
+            return body.length() > 80 ? body.substring(0, 77) + "…" : body;
+        }
+        if (message.getType() == null) {
+            return "New message";
+        }
+        return switch (message.getType()) {
+            case IMAGE -> "Sent an image";
+            case VIDEO -> "Sent a video";
+            case DOCUMENT -> "Sent a file";
+            case EMOTION -> "Sent an emotion";
+            case TEXT -> "New message";
+        };
     }
 }

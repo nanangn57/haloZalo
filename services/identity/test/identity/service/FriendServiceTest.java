@@ -1,6 +1,7 @@
 package identity.service;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 import identity.account.Profile;
 import identity.friend.FriendRequest;
 import identity.friend.FriendView;
@@ -98,6 +99,18 @@ class FriendServiceTest {
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemoryProfiles implements ProfileRepository {

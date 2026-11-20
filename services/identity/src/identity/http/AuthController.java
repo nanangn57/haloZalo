@@ -35,7 +35,7 @@ public final class AuthController {
     @GetMapping("/auth/verify")
     public TokenResponse.User verify(@RequestParam(value = "token", required = false) String token) {
         Account account = auth.verify(token);
-        return new TokenResponse.User(account.getUserId(), account.getUsername(), account.getEmail());
+        return TokenResponse.User.from(account);
     }
 
     @PostMapping("/auth/login")

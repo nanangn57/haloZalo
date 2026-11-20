@@ -14,52 +14,40 @@ function GroupListItem({
   onOpenChat,
 }: GroupListItemProps) {
   const isOwner = group.role === 'OWNER'
+  const initial = (group.name?.trim()?.charAt(0) || 'G').toUpperCase()
 
   return (
-    <li className="list-group-item p-0">
-      <div className="d-flex align-items-center">
-        {/* Click vùng thông tin để xem thành viên */}
-        <button
-          type="button"
-          className="btn btn-light rounded-0 text-start p-3
-            flex-grow-1 border-0"
-          onClick={() => onSelect(group)}
-        >
-          <div className="d-flex align-items-center gap-3">
-            <div
-              className="rounded-circle bg-primary-subtle text-primary
-                d-flex align-items-center justify-content-center"
-              style={{ width: 48, height: 48, flexShrink: 0 }}
-            >
-              <i className="bi bi-people fs-4" />
-            </div>
+    <li className="group-row-item">
+      <button
+        type="button"
+        className="group-row-main"
+        onClick={() => onSelect(group)}
+      >
+        <span className="group-avatar" aria-hidden="true">
+          {initial}
+        </span>
 
-            <div className="flex-grow-1 overflow-hidden">
-              <div className="fw-semibold text-truncate">
-                {group.name}
-              </div>
+        <span className="group-row-copy">
+          <span className="group-row-name">{group.name}</span>
+          <span className="group-row-meta">
+            {isOwner ? 'Owner' : 'Member'}
+            {' · '}
+            {memberCount === undefined
+              ? '…'
+              : `${memberCount} members`}
+          </span>
+        </span>
+      </button>
 
-              <small className="text-secondary">
-                {isOwner ? 'Owner' : 'Member'}
-                {' · '}
-                {memberCount === undefined
-                  ? '...'
-                  : `${memberCount} members`}
-              </small>
-            </div>
-          </div>
-        </button>
-
-        {/* Click mũi tên để mở chat */}
-        <button
-          type="button"
-          className="btn btn-light rounded-0 h-100 px-3 border-0"
-          onClick={() => onOpenChat(group)}
-          aria-label={`Open chat ${group.name}`}
-        >
-          <i className="bi bi-chevron-right text-secondary fs-5" />
-        </button>
-      </div>
+      <button
+        type="button"
+        className="app-icon-button group-row-chat"
+        onClick={() => onOpenChat(group)}
+        aria-label={`Open chat ${group.name}`}
+        title="Open chat"
+      >
+        <i className="bi bi-chat-dots" aria-hidden="true" />
+      </button>
     </li>
   )
 }

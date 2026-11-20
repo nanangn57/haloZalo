@@ -77,6 +77,7 @@ public final class ProfileService {
             account.getUserId(),
             account.getUsername(),
             account.getEmail(),
+            account.getPlatformRole(),
             profile == null ? null : profile.getDisplayName(),
             profile == null ? null : profile.getAvatar()
         );

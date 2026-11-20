@@ -1,6 +1,7 @@
 package identity.http;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 import identity.account.Profile;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,7 +51,10 @@ class UserControllerTest {
             Clock.systemUTC(),
             "http://localhost:8080"
         );
-        mvc = MockMvcBuilders.standaloneSetup(new AuthController(auth, new ProfileService(accounts, emptyProfiles())), new UserController(new UserSearchService(accounts)))
+        mvc = MockMvcBuilders.standaloneSetup(
+                new AuthController(auth, new ProfileService(accounts, emptyProfiles())),
+                new UserController(new UserSearchService(accounts, emptyProfiles()))
+            )
             .addFilters(new SessionFilter(auth, new ObjectMapper(), (userId, path) -> { }))
             .setControllerAdvice(new AuthExceptionHandler(), new UserExceptionHandler())
             .build();
@@ -177,6 +181,18 @@ class UserControllerTest {
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemorySessions implements SessionRepository {

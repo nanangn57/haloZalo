@@ -2,6 +2,7 @@ package analytics.autoconfigure;
 
 import javax.sql.DataSource;
 
+import analytics.access.PlatformAdminGate;
 import analytics.record.ActivityRecorder;
 import analytics.record.AggregateActivityRecorder;
 import analytics.query.DashboardQuery;
@@ -14,6 +15,7 @@ import analytics.store.PostgresDashboardQuery;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
@@ -48,5 +50,11 @@ public class AnalyticsAutoConfiguration {
     @Bean
     AnalyticsSchema analyticsSchema(DataSource dataSource) {
         return new AnalyticsSchema(dataSource);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(PlatformAdminGate.class)
+    PlatformAdminGate denyAllPlatformAdminGate() {
+        return userId -> false;
     }
 }

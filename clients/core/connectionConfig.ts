@@ -4,33 +4,41 @@ export type WsAuthMode =
   | 'TOKEN_QUERY'
   | 'USER_ID_QUERY'
 
+/**
+ * Reads Vite (VITE_*) and Expo (EXPO_PUBLIC_*) env without using import.meta,
+ * so the same module works in Vite web and Metro/React Native.
+ */
+type ProcessEnv = { env?: Record<string, string | undefined> }
+
+function readEnv(viteKey: string): string | undefined {
+  // Avoid depending on @types/node so the same file typechecks in Expo and Vite.
+  const env = (globalThis as { process?: ProcessEnv }).process?.env
+  if (!env) {
+    return undefined
+  }
+
+  const expoKey = `EXPO_PUBLIC_${viteKey.replace(/^VITE_/, '')}`
+  const value = env[expoKey] ?? env[viteKey]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
 export const connectionConfig = {
-  // Identity Service: always uses accessToken
   identityHttpAuthMode: 'TOKEN' as const,
 
-  // Messaging Service: supports TOKEN and USER_ID
-  // messageHttpAuthMode: (
-  //   import.meta.env.VITE_MESSAGE_HTTP_AUTH_MODE || 'TOKEN'
-  // ) as HttpAuthMode,
-  // TODO: Change to TOKEN when done testing
   messageHttpAuthMode: (
-    'USER_ID'
+    readEnv('VITE_MESSAGE_HTTP_AUTH_MODE') || 'TOKEN'
   ) as HttpAuthMode,
 
-  // WebSocket authentication
   wsAuthMode: (
-    import.meta.env.VITE_WS_AUTH_MODE || 'TOKEN_QUERY'
+    readEnv('VITE_WS_AUTH_MODE') || 'TOKEN_QUERY'
   ) as WsAuthMode,
 
   messageBaseUrl:
-    import.meta.env.VITE_API_MESSAGE_BASE_URL ||
-    'http://localhost:8082',
+    readEnv('VITE_API_MESSAGE_BASE_URL') || 'http://localhost:8080',
 
   wsBaseUrl:
-    import.meta.env.VITE_WS_BASE_URL ||
-    'ws://localhost:8082',
+    readEnv('VITE_WS_BASE_URL') || 'ws://localhost:8080',
 
   identityBaseUrl:
-    import.meta.env.VITE_API_IDENTITY_BASE_URL ||
-    'http://localhost:8080',
+    readEnv('VITE_API_IDENTITY_BASE_URL') || 'http://localhost:8080',
 }

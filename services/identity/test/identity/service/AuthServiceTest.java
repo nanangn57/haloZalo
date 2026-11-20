@@ -1,6 +1,7 @@
 package identity.service;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 import identity.auth.LoginRequest;
 import identity.auth.RegisterAccepted;
 import identity.auth.RegisterRequest;
@@ -176,12 +177,36 @@ class AuthServiceTest {
 
         assertEquals("ngoc_anh", account.getUsername());
         assertEquals("anh@example.com", account.getEmail());
+        assertEquals(identity.account.PlatformRole.USER, account.getPlatformRole());
         assertEquals(NOW, account.getCreatedAt());
         assertNull(verifications.findByToken(token));
         assertEquals(0, sessions.size());
         AuthService.Rejected reused = assertThrows(AuthService.Rejected.class, () -> auth.verify(token));
         assertEquals(AuthService.Rejected.Reason.VALIDATION, reused.getReason());
         assertTrue(passwordHasher.matches("password1", accounts.findByUsername("ngoc_anh").getPasswordHash()));
+    }
+
+    @Test
+    void verifyAssignsAdminWhenUsernameIsBootstrapAdmin() {
+        AuthService adminAuth = new AuthService(
+            passwordHasher,
+            accounts,
+            sessions,
+            events,
+            verifications,
+            mail,
+            clock,
+            BASE_URL,
+            List.of("ngoc_anh")
+        );
+        adminAuth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
+        String token = verifications.findByEmail("anh@example.com").getToken();
+
+        Account account = adminAuth.verify(token);
+
+        assertEquals(identity.account.PlatformRole.ADMIN, account.getPlatformRole());
+        TokenResponse login = adminAuth.login(new LoginRequest("ngoc_anh", "password1"));
+        assertEquals(identity.account.PlatformRole.ADMIN, login.getUser().getPlatformRole());
     }
 
     @Test
@@ -322,6 +347,18 @@ class AuthServiceTest {
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void updatePlatformRole(String userId, PlatformRole role) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPlatformRole(role));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemorySessions implements SessionRepository {

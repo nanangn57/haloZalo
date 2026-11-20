@@ -1,6 +1,8 @@
 package identity.service;
 
+import identity.access.PlatformAdminBootstrap;
 import identity.account.Account;
+import identity.account.PlatformRole;
 import identity.auth.LoginRequest;
 import identity.auth.RegisterAccepted;
 import identity.auth.RegisterRequest;
@@ -17,6 +19,9 @@ import identity.verification.EmailVerification;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -38,6 +43,31 @@ public final class AuthService {
     private final MailSender mail;
     private final Clock clock;
     private final String publicBaseUrl;
+    private final Set<String> platformAdminUsernames;
+
+    /** Test helper without platform-admin bootstrap list. */
+    public AuthService(
+        PasswordHasher passwordHasher,
+        AccountRepository accounts,
+        SessionRepository sessions,
+        EventPublisher events,
+        VerificationRepository verifications,
+        MailSender mail,
+        Clock clock,
+        String publicBaseUrl
+    ) {
+        this(
+            passwordHasher,
+            accounts,
+            sessions,
+            events,
+            verifications,
+            mail,
+            clock,
+            publicBaseUrl,
+            List.of()
+        );
+    }
 
     public AuthService(
         PasswordHasher passwordHasher,
@@ -47,7 +77,8 @@ public final class AuthService {
         VerificationRepository verifications,
         MailSender mail,
         Clock clock,
-        @Value("${identity.public-base-url}") String publicBaseUrl
+        @Value("${identity.public-base-url}") String publicBaseUrl,
+        @Value("${identity.platform-admins:}") List<String> platformAdmins
     ) {
         this.passwordHasher = passwordHasher;
         this.accounts = accounts;
@@ -57,6 +88,7 @@ public final class AuthService {
         this.mail = mail;
         this.clock = clock;
         this.publicBaseUrl = stripTrailingSlash(publicBaseUrl);
+        this.platformAdminUsernames = PlatformAdminBootstrap.normalize(platformAdmins);
     }
 
     public RegisterAccepted register(RegisterRequest request) {
@@ -96,16 +128,27 @@ public final class AuthService {
         if (accounts.findByUsername(pending.getUsername()) != null || accounts.findByEmail(pending.getEmail()) != null) {
             throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
         }
+        PlatformRole role = isBootstrapAdmin(pending.getUsername())
+            ? PlatformRole.ADMIN
+            : PlatformRole.USER;
         Account account = new Account(
             UUID.randomUUID().toString(),
             pending.getUsername(),
             pending.getEmail(),
             pending.getPasswordHash(),
-            clock.instant()
+            clock.instant(),
+            role
         );
         accounts.save(account);
         verifications.delete(pending.getToken());
         return account;
+    }
+
+    private boolean isBootstrapAdmin(String username) {
+        if (username == null || username.isBlank()) {
+            return false;
+        }
+        return platformAdminUsernames.contains(username.trim().toLowerCase(Locale.ROOT));
     }
 
     public TokenResponse login(LoginRequest request) {

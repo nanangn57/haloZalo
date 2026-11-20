@@ -6,10 +6,14 @@ CREATE TABLE IF NOT EXISTS identity.accounts (
     email VARCHAR(254) NOT NULL,
     password_hash VARCHAR(60) NOT NULL,
     created_at TIMESTAMPTZ(6) NOT NULL,
+    platform_role VARCHAR(16) NOT NULL DEFAULT 'USER',
     PRIMARY KEY (user_id),
     CONSTRAINT accounts_username UNIQUE (username),
     CONSTRAINT accounts_email UNIQUE (email)
 );
+
+ALTER TABLE identity.accounts
+    ADD COLUMN IF NOT EXISTS platform_role VARCHAR(16) NOT NULL DEFAULT 'USER';
 
 CREATE TABLE IF NOT EXISTS identity.verifications (
     token VARCHAR(36) NOT NULL,

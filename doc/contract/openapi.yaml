@@ -6,7 +6,7 @@ info:
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
     Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, profile, bạn bè, tìm user,
-    tra tên user theo id, nhóm với role admin, hội thoại, tin TEXT hoặc EMOTION, lịch sử, đã đọc,
+    tra tên user theo id, nhóm với role admin, hội thoại,     tin TEXT/EMOTION/IMAGE/VIDEO/DOCUMENT, upload media, lịch sử, đã đọc,
     reaction, và thống kê đã gom.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
@@ -17,6 +17,7 @@ tags:
   - name: Users
   - name: Groups
   - name: Messages
+  - name: Media
   - name: Stats
 paths:
   /auth/register:
@@ -506,6 +507,42 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  /conversations/group:
+    post:
+      tags: [Messages]
+      operationId: openGroupConversation
+      summary: Mở hội thoại nhóm theo groupId (caller phải là thành viên)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [groupId]
+              properties:
+                groupId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Hội thoại nhóm vừa tạo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "200":
+          description: Hội thoại đã tồn tại.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/NotMember"
   /conversations/direct:
     post:
       tags: [Messages]
@@ -596,10 +633,12 @@ paths:
     post:
       tags: [Messages]
       operationId: sendMessage
-      summary: Gửi một tin TEXT hoặc EMOTION vào hội thoại đã mở
+      summary: Gửi tin TEXT, EMOTION, IMAGE, VIDEO hoặc DOCUMENT vào hội thoại đã mở
       description: |
         Hội thoại phải được mở trước. Chat 1-1 mở bằng `POST /conversations/direct`.
         Hội thoại nhóm dùng `groupId` làm `conversationId`.
+        Media: upload trước bằng `POST /media/uploads`, rồi gửi tin với `body` là URL trả về.
+        Giới hạn: text 4KB, image 5MB, document 10MB, video 20MB (kiểm tra lúc upload).
         Ghi tin trước khi phát event `messaging.message.created`.
         Cùng sender và cùng clientMsgId trả lại tin cũ, không tăng seq.
         Người gửi không thuộc hội thoại thì 403.
@@ -839,12 +878,69 @@ paths:
           $ref: "#/components/responses/NotMember"
         "404":
           $ref: "#/components/responses/NotFound"
+  /media/uploads:
+    post:
+      tags: [Media]
+      operationId: uploadMedia
+      summary: Upload file media, nhận URL để gửi tin IMAGE/DOCUMENT/VIDEO
+      description: |
+        Multipart field `file`, form field `type` = IMAGE | DOCUMENT | VIDEO.
+        Giới hạn: image 5MB, document 10MB, video 20MB.
+        Trả `url` dùng làm `body` của tin tương ứng. Phát `messaging.media.uploaded`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, type]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                type:
+                  type: string
+                  enum: [IMAGE, DOCUMENT, VIDEO]
+                conversationId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Upload thành công.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mediaId, url, type, contentType, fileName, size]
+                properties:
+                  mediaId:
+                    type: string
+                    format: uuid
+                  url:
+                    type: string
+                  type:
+                    type: string
+                    enum: [IMAGE, DOCUMENT, VIDEO]
+                  contentType:
+                    type: string
+                  fileName:
+                    type: string
+                  size:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
   /stats:
     get:
       tags: [Stats]
       operationId: activityStats
       summary: Số lần đăng nhập, tạo nhóm, tin mới và upload media
-      description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+      description: |
+        Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
+        Không quét schema `messaging`.
       security:
         - bearerAuth: []
       responses:
@@ -856,12 +952,16 @@ paths:
                 $ref: "#/components/schemas/ActivityStats"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /stats/dashboard:
     get:
       tags: [Stats]
       operationId: activityDashboard
       summary: Tin theo ngày, user hoạt động và top nhóm
-      description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+      description: |
+        Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
+        Không quét schema `messaging`.
       security:
         - bearerAuth: []
       responses:
@@ -873,6 +973,65 @@ paths:
                 $ref: "#/components/schemas/Dashboard"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /devices:
+    post:
+      tags: [Messages]
+      operationId: registerDeviceToken
+      summary: Đăng ký device token để nhận push khi offline
+      description: |
+        Mobile gửi Expo/FCM push token sau login. Messaging lưu theo userId.
+        Khi có tin mới mà user không có socket mở, server gửi push summary.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                  description: Expo push token hoặc FCM registration token
+                platform:
+                  type: string
+                  enum: [ios, android, web, unknown]
+                  default: unknown
+      responses:
+        "204":
+          description: Đã lưu token.
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    delete:
+      tags: [Messages]
+      operationId: unregisterDeviceToken
+      summary: Huỷ đăng ký device token
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+      responses:
+        "204":
+          description: Đã xoá token nếu tồn tại.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
   /ws:
     get:
       tags: [Messages]
@@ -882,8 +1041,9 @@ paths:
         Nâng cấp lên WebSocket. Session id truyền query `access_token` vì trình duyệt không gắn header Authorization cho WebSocket.
         Thiếu session, session không tồn tại, hoặc session hết hạn thì đóng kết nối, không nâng cấp.
         Mỗi frame là envelope trong doc/contract/events.md.
-        Bản này đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, và `messaging.read.updated`.
+        Bản này đẩy `messaging.message.created`, `messaging.message.deleted`, `messaging.reaction.added`, `messaging.reaction.removed`, `messaging.read.updated`, `messaging.typing`, và `messaging.presence`.
         `messaging.read.updated` chỉ tới thiết bị của user đã đọc.
+        Client có thể gửi tín hiệu ephemeral `messaging.typing` / `messaging.presence` trên cùng socket; server fan-out cho thành viên hội thoại.
       parameters:
         - name: access_token
           in: query
@@ -1053,7 +1213,7 @@ components:
     User:
       type: object
       additionalProperties: false
-      required: [userId, username, email]
+      required: [userId, username, email, platformRole]
       properties:
         userId:
           type: string
@@ -1063,6 +1223,10 @@ components:
         email:
           type: string
           format: email
+        platformRole:
+          type: string
+          description: Quyền nền tảng trên tài khoản. Khác role trong nhóm.
+          enum: [USER, ADMIN]
         displayName:
           type: string
           maxLength: 64
@@ -1287,11 +1451,17 @@ components:
       oneOf:
         - $ref: "#/components/schemas/SendTextRequest"
         - $ref: "#/components/schemas/SendEmotionRequest"
+        - $ref: "#/components/schemas/SendImageRequest"
+        - $ref: "#/components/schemas/SendVideoRequest"
+        - $ref: "#/components/schemas/SendDocumentRequest"
       discriminator:
         propertyName: type
         mapping:
           TEXT: "#/components/schemas/SendTextRequest"
           EMOTION: "#/components/schemas/SendEmotionRequest"
+          IMAGE: "#/components/schemas/SendImageRequest"
+          VIDEO: "#/components/schemas/SendVideoRequest"
+          DOCUMENT: "#/components/schemas/SendDocumentRequest"
     SendTextRequest:
       type: object
       additionalProperties: false
@@ -1330,6 +1500,82 @@ components:
           type: string
           format: uuid
           description: Tin được trả lời, cùng hội thoại. Không bắt buộc.
+    SendImageRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId]
+      properties:
+        type:
+          type: string
+          enum: [IMAGE]
+        body:
+          type: string
+          description: URL ảnh (từ POST /media/uploads).
+        clientMsgId:
+          type: string
+          format: uuid
+        thumbnailUrl:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        caption:
+          type: string
+        replyTo:
+          type: string
+          format: uuid
+    SendVideoRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId]
+      properties:
+        type:
+          type: string
+          enum: [VIDEO]
+        body:
+          type: string
+          description: URL video (từ POST /media/uploads).
+        clientMsgId:
+          type: string
+          format: uuid
+        thumbnailUrl:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        duration:
+          type: integer
+        caption:
+          type: string
+        replyTo:
+          type: string
+          format: uuid
+    SendDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId, fileName, mimeType, size]
+      properties:
+        type:
+          type: string
+          enum: [DOCUMENT]
+        body:
+          type: string
+          description: URL tài liệu (từ POST /media/uploads).
+        fileName:
+          type: string
+        mimeType:
+          type: string
+        size:
+          type: integer
+          minimum: 1
+        clientMsgId:
+          type: string
+          format: uuid
+        replyTo:
+          type: string
+          format: uuid
     OpenDirectRequest:
       type: object
       additionalProperties: false

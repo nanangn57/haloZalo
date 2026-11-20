@@ -14,4 +14,15 @@ public final class DashboardExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
             .body(new ErrorResponse("UNAUTHENTICATED", missing.getMessage()));
     }
+
+    @ExceptionHandler(StatsController.ForbiddenStats.class)
+    public ResponseEntity<ErrorResponse> forbidden(StatsController.ForbiddenStats forbidden) {
+        String message = forbidden.getMessage();
+        if (message != null && message.startsWith("Missing")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("UNAUTHENTICATED", message));
+        }
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(new ErrorResponse("FORBIDDEN", message));
+    }
 }

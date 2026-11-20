@@ -1,6 +1,7 @@
 package identity.storage;
 
 import identity.account.Account;
+import identity.account.PlatformRole;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -18,6 +19,9 @@ import org.springframework.stereotype.Component;
 
 @Component
 public final class PostgresAccountRepository implements AccountRepository {
+    private static final String SELECT_COLS =
+        "user_id, username, email, password_hash, created_at, platform_role";
+
     private final DataSource dataSource;
 
     public PostgresAccountRepository(DataSource dataSource) {
@@ -26,7 +30,9 @@ public final class PostgresAccountRepository implements AccountRepository {
 
     @Override
     public void save(Account account) {
-        String sql = "INSERT INTO identity.accounts (user_id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)";
+        String sql =
+            "INSERT INTO identity.accounts (user_id, username, email, password_hash, created_at, platform_role) "
+                + "VALUES (?, ?, ?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, account.getUserId());
@@ -34,6 +40,7 @@ public final class PostgresAccountRepository implements AccountRepository {
             statement.setString(3, account.getEmail());
             statement.setString(4, account.getPasswordHash());
             statement.setObject(5, OffsetDateTime.ofInstant(account.getCreatedAt(), ZoneOffset.UTC));
+            statement.setString(6, account.getPlatformRole().name());
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save account", ex);
@@ -42,17 +49,50 @@ public final class PostgresAccountRepository implements AccountRepository {
 
     @Override
     public Account findByUsername(String username) {
-        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE username = ?", username);
+        return findOne(
+            "SELECT " + SELECT_COLS + " FROM identity.accounts WHERE username = ?",
+            username
+        );
+    }
+
+    @Override
+    public Account findByUsernameIgnoreCase(String username) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+        return findOne(
+            "SELECT " + SELECT_COLS + " FROM identity.accounts WHERE LOWER(username) = LOWER(?)",
+            username
+        );
     }
 
     @Override
     public Account findByEmail(String email) {
-        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE email = ?", email);
+        return findOne(
+            "SELECT " + SELECT_COLS + " FROM identity.accounts WHERE email = ?",
+            email
+        );
     }
 
     @Override
     public Account findById(String userId) {
-        return findOne("SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE user_id = ?", userId);
+        return findOne(
+            "SELECT " + SELECT_COLS + " FROM identity.accounts WHERE user_id = ?",
+            userId
+        );
+    }
+
+    @Override
+    public void updatePlatformRole(String userId, PlatformRole role) {
+        String sql = "UPDATE identity.accounts SET platform_role = ? WHERE user_id = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, role.name());
+            statement.setString(2, userId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not update platform role", ex);
+        }
     }
 
     @Override
@@ -60,7 +100,7 @@ public final class PostgresAccountRepository implements AccountRepository {
         if (userIds.isEmpty()) {
             return List.of();
         }
-        String sql = "SELECT user_id, username, email, password_hash, created_at FROM identity.accounts WHERE user_id = ANY (?)";
+        String sql = "SELECT " + SELECT_COLS + " FROM identity.accounts WHERE user_id = ANY (?)";
         Map<String, Account> byId = new HashMap<>();
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -90,7 +130,8 @@ public final class PostgresAccountRepository implements AccountRepository {
             rows.getString("username"),
             rows.getString("email"),
             rows.getString("password_hash"),
-            rows.getObject("created_at", OffsetDateTime.class).toInstant()
+            rows.getObject("created_at", OffsetDateTime.class).toInstant(),
+            PlatformRole.fromStorage(rows.getString("platform_role"))
         );
     }
 
