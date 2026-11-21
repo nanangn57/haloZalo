@@ -62,6 +62,7 @@ class AuthServiceTest {
         RegisterAccepted accepted = auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
 
         assertEquals("anh@example.com", accepted.getEmail());
+        assertEquals(RegisterAccepted.STATUS_PENDING_VERIFICATION, accepted.getStatus());
         assertNull(accounts.findByUsername("ngoc_anh"));
         assertEquals(0, sessions.size());
         assertEquals(0, events.userIds.size());
@@ -74,6 +75,60 @@ class AuthServiceTest {
         assertEquals("HaloZalo - Verify your email", mail.last().subject);
         assertTrue(mail.last().body.endsWith(BASE_URL + "/auth/verify?token=" + pending.getToken()));
         assertFalse(mail.last().body.contains("password1"));
+    }
+
+    @Test
+    void registerImmediateCreatesAccountWithoutMail() {
+        AuthService immediate = new AuthService(
+            passwordHasher,
+            accounts,
+            sessions,
+            events,
+            verifications,
+            mail,
+            clock,
+            BASE_URL,
+            List.of(),
+            AuthService.ACTIVATION_IMMEDIATE
+        );
+
+        RegisterAccepted accepted = immediate.register(
+            new RegisterRequest("ngoc_anh", "anh@example.com", "password1")
+        );
+
+        assertEquals("anh@example.com", accepted.getEmail());
+        assertEquals(RegisterAccepted.STATUS_ACTIVE, accepted.getStatus());
+        assertNull(verifications.findByEmail("anh@example.com"));
+        assertEquals(0, mail.size());
+        Account account = accounts.findByUsername("ngoc_anh");
+        assertEquals("anh@example.com", account.getEmail());
+        assertTrue(passwordHasher.matches("password1", account.getPasswordHash()));
+        TokenResponse login = immediate.login(new LoginRequest("ngoc_anh", "password1"));
+        assertEquals(account.getUserId(), login.getUser().getUserId());
+    }
+
+    @Test
+    void registerImmediateRejectsDuplicateAccount() {
+        AuthService immediate = new AuthService(
+            passwordHasher,
+            accounts,
+            sessions,
+            events,
+            verifications,
+            mail,
+            clock,
+            BASE_URL,
+            List.of(),
+            AuthService.ACTIVATION_IMMEDIATE
+        );
+        immediate.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
+
+        AuthService.Rejected duplicate = assertThrows(
+            AuthService.Rejected.class,
+            () -> immediate.register(new RegisterRequest("ngoc_anh", "other@example.com", "password1"))
+        );
+
+        assertEquals(AuthService.Rejected.Reason.CONFLICT, duplicate.getReason());
     }
 
     @Test
@@ -129,9 +184,11 @@ class AuthServiceTest {
     void registerDropsPendingRowWhenMailFails() {
         mail.failNext = true;
 
-        assertThrows(IllegalStateException.class,
+        AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
             () -> auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1")));
 
+        assertEquals(AuthService.Rejected.Reason.VALIDATION, rejected.getReason());
+        assertEquals("Could not send verification email", rejected.getMessage());
         assertNull(verifications.findByEmail("anh@example.com"));
         assertNull(accounts.findByUsername("ngoc_anh"));
     }

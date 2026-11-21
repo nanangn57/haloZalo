@@ -19,29 +19,41 @@ type EventListener = (event: MessagingEvent) => void
 type StatusListener = (status: SocketStatus) => void
 type ReconnectListener = () => void
 
-function createSocket(): WebSocket {
-  const url = new URL('/ws', connectionConfig.wsBaseUrl)
+/** Join messaging WS path onto base URL without replacing `/api/messaging` with `/ws`. */
+export function buildMessagingWsUrl(
+  wsBaseUrl: string,
+  auth: { mode: typeof connectionConfig.wsAuthMode; accessToken?: string | null; userId?: string | null },
+): string {
+  const base = wsBaseUrl.replace(/\/?$/, '/')
+  const url = new URL('ws', base)
 
-  switch (connectionConfig.wsAuthMode) {
+  switch (auth.mode) {
     case 'TOKEN_QUERY': {
-      const token = getAccessToken()
-      if (!token) {
+      if (!auth.accessToken) {
         throw new Error('Không tìm thấy access token.')
       }
-      url.searchParams.set('access_token', token)
+      url.searchParams.set('access_token', auth.accessToken)
       break
     }
     case 'USER_ID_QUERY': {
-      const userId = getUserId()
-      if (!userId) {
+      if (!auth.userId) {
         throw new Error('Không tìm thấy userId.')
       }
-      url.searchParams.set('userId', userId)
+      url.searchParams.set('userId', auth.userId)
       break
     }
   }
 
-  return new WebSocket(url.toString())
+  return url.toString()
+}
+
+function createSocket(): WebSocket {
+  const href = buildMessagingWsUrl(connectionConfig.wsBaseUrl, {
+    mode: connectionConfig.wsAuthMode,
+    accessToken: getAccessToken(),
+    userId: getUserId(),
+  })
+  return new WebSocket(href)
 }
 
 class SocketClient {

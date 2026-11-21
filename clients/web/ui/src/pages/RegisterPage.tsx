@@ -39,8 +39,10 @@ function RegisterPage() {
       })
 
       setMessage(
-        `Register request sent to ${result.email}. ` +
-          'Please check your email and complete verification before login',
+        result.status === 'ACTIVE'
+          ? `Account created for ${result.email}. You can login now.`
+          : `Register request sent to ${result.email}. ` +
+              'Please check your email and complete verification before login',
       )
     } catch (err: unknown) {
       setError(

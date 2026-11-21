@@ -148,7 +148,7 @@ def run() -> Report:
     )
     report.ok("send EMOTION", status == 201 and emo.get("type") == "EMOTION")
 
-    asyncio.get_event_loop().run_until_complete(_ws_suite(report, tok_a, tok_b, cid))
+    asyncio.run(_ws_suite(report, tok_a, tok_b, cid))
     return report
 
 

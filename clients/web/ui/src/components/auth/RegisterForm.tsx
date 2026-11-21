@@ -30,7 +30,7 @@ function RegisterForm({
   onSubmit,
 }: RegisterFormProps) {
   return (
-    <form className="auth-form" onSubmit={onSubmit}>
+    <form className="auth-form" method="post" onSubmit={onSubmit}>
       <div>
         <label htmlFor="username" className="app-form-label">
           Username

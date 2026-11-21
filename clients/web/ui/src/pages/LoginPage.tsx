@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, useSearchParams } from 'react-router-dom'
 
 import LoginForm from '../components/auth/LoginForm'
 import { loginApi } from '../../../../core/authService'
@@ -8,6 +8,8 @@ import { saveAuth } from '../../../../core/authSession'
 
 function LoginPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const verified = searchParams.get('verified') === '1'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -60,6 +62,11 @@ function LoginPage() {
         <p className="auth-description">
           Sign in to continue chatting on haloZalo.
         </p>
+        {verified && (
+          <p className="auth-description" role="status">
+            Email verified. Sign in with your password.
+          </p>
+        )}
 
         <LoginForm
           email={email}

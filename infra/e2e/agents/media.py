@@ -129,7 +129,7 @@ def run() -> Report:
         report.ok("send DOCUMENT message", status == 201 and msg.get("type") == "DOCUMENT")
 
     if media_url:
-        asyncio.get_event_loop().run_until_complete(_fanout(report, tok_a, tok_b, cid, media_url))
+        asyncio.run(_fanout(report, tok_a, tok_b, cid, media_url))
 
     status, page = req("GET", f"/conversations/{cid}/messages", tok_b)
     types = [m.get("type") for m in page.get("messages", [])]

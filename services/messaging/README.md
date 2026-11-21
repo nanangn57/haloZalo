@@ -1,10 +1,10 @@
 # messaging
 
-Hội thoại, tin, `seq`, file, fan-out. Schema `messaging` trên cùng database PostgreSQL `halozalo`. Kết nối WebSocket nằm trong bộ nhớ của process. Media nằm ở module này.
+Hội thoại, tin, `seq`, file, fan-out. Schema `messaging` trên cùng database PostgreSQL `halozalo` (local: Compose; cloud: Amazon RDS qua `DB_HOST` trong `infra/`). Kết nối WebSocket nằm trong bộ nhớ của process. Media: disk local hoặc S3 trên cloud.
 
 Module này không đọc schema khác. Thành viên nhóm lấy qua interface của identity.
 
-Khi chạy trong monolith (`services/app`) mọi request vào cổng `8080`. Có thể chạy riêng trên cổng `8082` để phát triển. Database và cấu hình WebSocket nằm trong `resources/application.yml`.
+Khi chạy trong monolith (`services/app`) mọi request vào cổng `8080`. Có thể chạy riêng trên cổng `8082` để phát triển. Database và cấu hình WebSocket nằm trong `resources/application.yml`. Ưu tiên stack chung: `infra/scripts/local-up.sh`.
 
 ```
 services/messaging/
@@ -48,8 +48,9 @@ Chạy cả service bằng Docker, gồm Postgres riêng: `docker compose up --b
 
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
-| `POSTGRES_URL` | `jdbc:postgresql://localhost:5432/halozalo` | JDBC URL của database chung. Cloud thường thêm `?sslmode=require` |
-| `POSTGRES_USER`, `POSTGRES_PASSWORD` | `halozalo`, `halozalo` | User và password của database |
+| `POSTGRES_URL` | `jdbc:postgresql://localhost:5432/halozalo` | JDBC URL. Trên cloud, `infra` inject URL trỏ endpoint Amazon RDS |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD` | `halozalo`, `halozalo` | User và password (khớp RDS trên cloud) |
+| `MESSAGING_MEDIA_BACKEND` | `local` | `local` (disk) hoặc `s3` (cloud) |
 | `MESSAGING_USER_HEADER_ENABLED` | `true` | Nhận `X-User-Id` khi messaging chạy riêng. Trong app phải là `false`, xem mục Ai đang gọi |
 
 `.env.local` không được commit. Biến môi trường thật, ví dụ trên AWS, thắng giá trị trong file. File đọc kiểu properties: không đặt dấu nháy, dấu `\` trong giá trị phải viết `\\`.

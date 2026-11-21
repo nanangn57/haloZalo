@@ -14,7 +14,7 @@ import { listFriendsApi } from '@core/friendService'
 import { createDirectConversationApi } from '@core/conversationService'
 
 function toContactUser(found: AuthUser | Friend): User {
-  const username = 'username' in found ? found.username : found.userId
+  const username = found.username
   return {
     id: found.userId,
     name: found.displayName || username,

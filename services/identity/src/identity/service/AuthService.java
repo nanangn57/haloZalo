@@ -25,13 +25,19 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
 public final class AuthService {
     public static final int SESSION_TTL_SECONDS = 259200;
-    public static final int VERIFICATION_TTL_SECONDS = 120;
+    public static final int VERIFICATION_TTL_SECONDS = 900;
+    public static final String ACTIVATION_EMAIL = "email";
+    public static final String ACTIVATION_IMMEDIATE = "immediate";
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final Pattern USERNAME = Pattern.compile("^[a-zA-Z0-9_]{3,32}$");
     private static final String DUMMY_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
@@ -44,8 +50,9 @@ public final class AuthService {
     private final Clock clock;
     private final String publicBaseUrl;
     private final Set<String> platformAdminUsernames;
+    private final String registrationActivation;
 
-    /** Test helper without platform-admin bootstrap list. */
+    /** Test helper: email activation, no platform-admin bootstrap list. */
     public AuthService(
         PasswordHasher passwordHasher,
         AccountRepository accounts,
@@ -56,19 +63,25 @@ public final class AuthService {
         Clock clock,
         String publicBaseUrl
     ) {
-        this(
-            passwordHasher,
-            accounts,
-            sessions,
-            events,
-            verifications,
-            mail,
-            clock,
-            publicBaseUrl,
-            List.of()
-        );
+        this(passwordHasher, accounts, sessions, events, verifications, mail, clock, publicBaseUrl, List.of(), ACTIVATION_EMAIL);
     }
 
+    /** Test helper: email activation with platform-admin bootstrap list. */
+    public AuthService(
+        PasswordHasher passwordHasher,
+        AccountRepository accounts,
+        SessionRepository sessions,
+        EventPublisher events,
+        VerificationRepository verifications,
+        MailSender mail,
+        Clock clock,
+        String publicBaseUrl,
+        List<String> platformAdmins
+    ) {
+        this(passwordHasher, accounts, sessions, events, verifications, mail, clock, publicBaseUrl, platformAdmins, ACTIVATION_EMAIL);
+    }
+
+    @Autowired
     public AuthService(
         PasswordHasher passwordHasher,
         AccountRepository accounts,
@@ -78,7 +91,8 @@ public final class AuthService {
         MailSender mail,
         Clock clock,
         @Value("${identity.public-base-url}") String publicBaseUrl,
-        @Value("${identity.platform-admins:}") List<String> platformAdmins
+        @Value("${identity.platform-admins:}") List<String> platformAdmins,
+        @Value("${identity.registration.activation:email}") String registrationActivation
     ) {
         this.passwordHasher = passwordHasher;
         this.accounts = accounts;
@@ -89,11 +103,28 @@ public final class AuthService {
         this.clock = clock;
         this.publicBaseUrl = stripTrailingSlash(publicBaseUrl);
         this.platformAdminUsernames = PlatformAdminBootstrap.normalize(platformAdmins);
+        this.registrationActivation = normalizeActivation(registrationActivation);
     }
 
     public RegisterAccepted register(RegisterRequest request) {
         validateRegister(request);
         reserve(request.getUsername(), request.getEmail());
+        if (ACTIVATION_IMMEDIATE.equals(registrationActivation)) {
+            return registerImmediate(request);
+        }
+        return registerWithEmailLink(request);
+    }
+
+    private RegisterAccepted registerImmediate(RegisterRequest request) {
+        createAccount(
+            request.getUsername(),
+            request.getEmail(),
+            passwordHasher.hash(request.getPassword())
+        );
+        return RegisterAccepted.active(request.getEmail());
+    }
+
+    private RegisterAccepted registerWithEmailLink(RegisterRequest request) {
         Instant createdAt = clock.instant();
         EmailVerification pending = new EmailVerification(
             UUID.randomUUID().toString(),
@@ -112,9 +143,10 @@ public final class AuthService {
             mail.send(pending.getEmail(), message.getSubject(), message.getBody());
         } catch (RuntimeException ex) {
             verifications.delete(pending.getToken());
-            throw ex;
+            log.warn("Could not send verification email to {}: {}", pending.getEmail(), ex.toString());
+            throw new Rejected(Rejected.Reason.VALIDATION, "Could not send verification email");
         }
-        return new RegisterAccepted(pending.getEmail());
+        return RegisterAccepted.pendingVerification(pending.getEmail());
     }
 
     public Account verify(String token) {
@@ -128,20 +160,38 @@ public final class AuthService {
         if (accounts.findByUsername(pending.getUsername()) != null || accounts.findByEmail(pending.getEmail()) != null) {
             throw new Rejected(Rejected.Reason.CONFLICT, "Username or email already exists");
         }
-        PlatformRole role = isBootstrapAdmin(pending.getUsername())
+        Account account = createAccount(pending.getUsername(), pending.getEmail(), pending.getPasswordHash());
+        verifications.delete(pending.getToken());
+        return account;
+    }
+
+    private Account createAccount(String username, String email, String passwordHash) {
+        PlatformRole role = isBootstrapAdmin(username)
             ? PlatformRole.ADMIN
             : PlatformRole.USER;
         Account account = new Account(
             UUID.randomUUID().toString(),
-            pending.getUsername(),
-            pending.getEmail(),
-            pending.getPasswordHash(),
+            username,
+            email,
+            passwordHash,
             clock.instant(),
             role
         );
         accounts.save(account);
-        verifications.delete(pending.getToken());
         return account;
+    }
+
+    private static String normalizeActivation(String value) {
+        if (value == null || value.isBlank()) {
+            return ACTIVATION_EMAIL;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (ACTIVATION_IMMEDIATE.equals(normalized) || ACTIVATION_EMAIL.equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException(
+            "identity.registration.activation must be 'email' or 'immediate', got: " + value
+        );
     }
 
     private boolean isBootstrapAdmin(String username) {

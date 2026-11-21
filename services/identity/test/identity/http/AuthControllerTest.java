@@ -63,6 +63,7 @@ class AuthControllerTest {
                 .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.email").value("anh@example.com"))
+            .andExpect(jsonPath("$.status").value("PENDING_VERIFICATION"))
             .andExpect(jsonPath("$.accessToken").doesNotExist())
             .andExpect(jsonPath("$.password").doesNotExist())
             .andExpect(jsonPath("$.passwordHash").doesNotExist());

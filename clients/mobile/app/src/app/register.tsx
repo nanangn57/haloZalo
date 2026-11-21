@@ -45,7 +45,9 @@ export default function RegisterPage() {
         password,
       });
       setMessage(
-        `Register request sent to ${result.email}. Check email (or identity logs) to verify before login.`,
+        result.status === 'ACTIVE'
+          ? `Account created for ${result.email}. You can login now.`
+          : `Register request sent to ${result.email}. Check email (or identity logs) to verify before login.`,
       );
     } catch (err: unknown) {
       setError(
