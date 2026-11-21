@@ -24,7 +24,10 @@ paths:
     post:
       tags: [Auth]
       operationId: register
-      summary: Gửi link xác minh để đăng ký
+      summary: Đăng ký tài khoản (email-link hoặc immediate theo cấu hình)
+      description: |
+        `identity.registration.activation=email` (mặc định): gửi link xác minh, `status=PENDING_VERIFICATION`, chưa tạo tài khoản.
+        `identity.registration.activation=immediate`: tạo tài khoản ngay, `status=ACTIVE`, có thể login.
       requestBody:
         required: true
         content:
@@ -33,7 +36,9 @@ paths:
               $ref: "#/components/schemas/RegisterRequest"
       responses:
         "202":
-          description: Đã gửi link xác minh. Tài khoản chưa được tạo.
+          description: |
+            email mode — đã gửi link xác minh, tài khoản chưa tạo (`PENDING_VERIFICATION`).
+            immediate mode — đã tạo tài khoản (`ACTIVE`).
           content:
             application/json:
               schema:
@@ -55,7 +60,7 @@ paths:
       tags: [Auth]
       operationId: verifyEmail
       summary: Xác minh email và tạo tài khoản
-      description: Link trong email trỏ tới đây. Token hết hạn sau 2 phút kể từ lúc đăng ký.
+      description: Link trong email trỏ tới đây (cloud qua trang web /auth/verify). Token hết hạn sau 15 phút kể từ lúc đăng ký.
       parameters:
         - name: token
           in: query
@@ -1172,12 +1177,18 @@ components:
     RegisterAccepted:
       type: object
       additionalProperties: false
-      required: [email]
+      required: [email, status]
       properties:
         email:
           type: string
           format: email
           maxLength: 254
+        status:
+          type: string
+          enum: [PENDING_VERIFICATION, ACTIVE]
+          description: |
+            PENDING_VERIFICATION — chờ bấm link trong email.
+            ACTIVE — tài khoản đã tạo (activation=immediate).
     LoginRequest:
       type: object
       additionalProperties: false

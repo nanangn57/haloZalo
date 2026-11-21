@@ -9,14 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VerificationMailTest {
     @Test
-    void ofStatesTheTwoMinuteLimitAndEndsWithTheLink() {
+    void ofStatesTheMinuteLimitAndEndsWithTheLink() {
         String link = "http://localhost:8080/auth/verify?token=abc";
 
-        VerificationMail mail = VerificationMail.of(link, 120);
+        VerificationMail mail = VerificationMail.of(link, 900);
 
         assertEquals("HaloZalo - Verify your email", mail.getSubject());
         assertTrue(mail.getBody().startsWith(
-            "Hãy xác nhận email của bạn bằng việc click vào đường link này trong thời hạn 2 phút:"
+            "Hãy xác nhận email của bạn bằng việc click vào đường link này trong thời hạn 15 phút:"
         ));
         assertTrue(mail.getBody().endsWith(link));
         assertFalse(mail.getBody().contains("password"));
@@ -24,7 +24,7 @@ class VerificationMailTest {
 
     @Test
     void ofRejectsAMissingLinkOrTime() {
-        assertThrows(IllegalArgumentException.class, () -> VerificationMail.of(" ", 120));
+        assertThrows(IllegalArgumentException.class, () -> VerificationMail.of(" ", 900));
         assertThrows(IllegalArgumentException.class, () -> VerificationMail.of("http://localhost/auth/verify?token=abc", 0));
     }
 }

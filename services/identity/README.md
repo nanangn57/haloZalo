@@ -1,14 +1,16 @@
 # identity
 
-Tài khoản, xác minh email, và session. Schema `identity` trên database PostgreSQL `halozalo` dùng chung. Link xác minh hết hạn sau 2 phút. Session id opaque, hết hạn sau 3 ngày, tính từ lúc cấp. Đăng nhập mới không xóa session cũ. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
+Tài khoản, xác minh email, và session. Schema `identity` trên database PostgreSQL `halozalo` dùng chung (local: Compose; cloud: Amazon RDS). Link xác minh hết hạn sau 15 phút. Session id opaque, hết hạn sau 3 ngày, tính từ lúc cấp. Đăng nhập mới không xóa session cũ. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
 
 Người giữ: P1 Ngọc Anh.
 
-Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào database `halozalo`. Pool đặt `search_path` là schema `identity`.
+Cổng public `8080` khi chạy riêng module này. Database, schema, user và password nằm trong `resources/application.yml`. URL JDBC trỏ vào database `halozalo`. Pool đặt `search_path` là schema `identity`. Stack monolith khuyến nghị: `infra/scripts/local-up.sh` (hoặc cloud qua `infra/scripts/deploy-ec2.sh` + RDS).
 
 Web chạy Vite (thường `http://localhost:5173`) gọi API từ origin khác. `CorsConfig` cho phép origin khớp `identity.cors.allowed-origin-patterns` và trả preflight `OPTIONS` trước `SessionFilter`. Response 401 vẫn có `Access-Control-Allow-Origin`, nên trình duyệt đọc được lỗi thay vì báo CORS. Request không gửi `Origin` (curl, mobile) không đi qua nhánh này.
 
-Chạy bằng Docker, gồm PostgreSQL riêng: `docker compose up --build` trong thư mục này. Context build là `services/` để image gồm cả analytics. App ở `http://localhost:8080`. `docker compose down` giữ dữ liệu. `docker compose down -v` xóa dữ liệu. Trong container, JDBC trỏ vào service `postgres`. Link xác minh vẫn là `http://localhost:8080` vì người dùng mở trên máy mình. Mặc định `identity.mail.mode` là `log`: mail ghi ra log, lấy link bằng `docker compose logs -f identity`. Gmail đặt trong `.env.local` (copy từ `.env.example`), chạy app từ thư mục này để Spring đọc file. File đó không được commit và không vào image. `docker compose` không đọc `.env.local`; muốn gửi từ container thì export cùng các biến trong shell trước khi chạy compose. Cổng 5432 trên máy thuộc `infra/docker-compose.yml`, nên Postgres của compose này mở ở `127.0.0.1:5433`. Image chạy bằng user không phải root.
+**Mail xác minh:** `identity.mail.mode` = `log` (local, in ra log app) hoặc `smtp` (Gmail/SMTP qua `spring.mail` / `SPRING_MAIL_*`). Cloud dùng Gmail app password trong `.env`.
+
+Stack khuyến nghị: `infra/scripts/local-up.sh`. Có thể chạy riêng module bằng Docker trong thư mục này (`docker compose up --build`); Postgres module mở `127.0.0.1:5433` để tránh đụng cổng `infra`. Local lấy link verify từ log (`IDENTITY_MAIL_MODE=log`).
 
 ```
 services/identity/
@@ -25,7 +27,7 @@ services/identity/
     group/            dữ liệu nhóm, quyền theo role
     auth/             JSON request và response
     password/         hash và so khớp bcrypt
-    mail/             gửi mail xác minh
+    mail/             MailSender: LoggingMailSender (log) hoặc SmtpMailSender (smtp)
     storage/          interface lưu, và implementation PostgreSQL
     event/            phát event đăng nhập trong process
     service/          đăng ký, xác minh email, đăng nhập, kiểm tra session, nhóm
@@ -35,7 +37,7 @@ services/identity/
 
 ## API
 
-`POST /auth/register` trả 202 với `email`. Chưa tạo tài khoản và chưa cấp token. Mail chứa link `GET /auth/verify?token=`, hết hạn sau 120 giây. Bấm link trong hạn thì trả `userId`, `username`, `email` và xóa bản chờ. Hết hạn hoặc token lạ thì 400. `POST /auth/login` chỉ thành công sau khi đã verify, trả 200 với `accessToken`, `tokenType`, `expiresIn`, và `user`. Không trả hash mật khẩu.
+`POST /auth/register` trả 202 với `email` và `status`. `IDENTITY_REGISTRATION_ACTIVATION=email` (mặc định): `status=PENDING_VERIFICATION`, chưa tạo tài khoản; mail tạo link `IDENTITY_PUBLIC_BASE_URL/auth/verify?token=` (cloud: trang web gọi `GET /api/identity/auth/verify`), hết hạn 900 giây. Bấm link trong hạn thì trả `userId`, `username`, `email` và xóa bản chờ. `IDENTITY_REGISTRATION_ACTIVATION=immediate`: `status=ACTIVE`, tạo tài khoản ngay (ops). `POST /auth/login` cần tài khoản đã tạo, trả 200 với `accessToken`, `tokenType`, `expiresIn`, và `user`. Không trả hash mật khẩu.
 
 `GET /me` cần `Authorization: Bearer`. Trả `userId`, `username`, `email`. `GET /users?q=` tìm đúng một user theo username, hoặc theo email khi `q` có `@`. Thiếu session thì 401, không trả user. Không có thì 404. `GET /users/lookup?ids=a,b` trả `{ users: [{ userId, username }] }` theo thứ tự id gửi lên, bỏ id trùng và id không có tài khoản, không trả email. 1 đến 100 UUID, sai thì 400. Client dùng để hiện tên thành viên hội thoại.
 

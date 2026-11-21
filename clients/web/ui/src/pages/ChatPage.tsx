@@ -18,8 +18,6 @@ import type { AuthUser } from '@core/types/auth'
 import type { User } from '../types/user'
 import type { Message } from '@core/types/message'
 import type { Member } from '@core/types/group'
-import type { MessagingEvent } from '@core/types/event'
-
 import ConversationItem from '../components/chat/ConversationItem'
 import ChatHeader from '../components/chat/ChatHeader'
 import ChatMessages from '../components/chat/ChatMessages'
@@ -36,7 +34,7 @@ import {
 import { uploadMediaApi, type MediaUploadType } from '@core/mediaService'
 import { getGroupMembersApi, getGroupsApi } from '@core/groupService'
 import { socketClient } from '@core/socketClient'
-import type { SocketStatus } from '@core/socketClient'
+import type { MessagingEvent, SocketStatus } from '@core/socketClient'
 
 import EmojiPicker, {
   type EmojiClickData,
@@ -105,7 +103,6 @@ function ChatPage() {
   const [selectedConversation, setSelectedConversation] =
     useState<Conversation | null>(null)
   const selectedConversationRef = useRef<Conversation | null>(null)
-  selectedConversationRef.current = selectedConversation
 
   const [isLoading, setIsLoading] = useState(true)
 
@@ -117,7 +114,14 @@ function ChatPage() {
   // Messages
   const [messages, setMessages] = useState<Message[]>([])
   const messagesRef = useRef<Message[]>([])
-  messagesRef.current = messages
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation
+  }, [selectedConversation])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
 
   const [isLoadingMessages, setIsLoadingMessages] =
     useState(false)
@@ -520,7 +524,7 @@ function ChatPage() {
     const unsubscribeEvent = socketClient.subscribe((event) => {
       console.log('Received WebSocket event:', event)
 
-      setSocketEvents((previous) => [event as MessagingEvent, ...previous])
+      setSocketEvents((previous) => [event, ...previous])
 
       if (event.type === 'messaging.read.updated') {
         const payload = event.payload as {
@@ -811,14 +815,18 @@ function ChatPage() {
 
   useEffect(() => {
     const conversationId = selectedConversation?.conversationId
-    setTypingUserId(null)
-    setPeerOnline(false)
     lastTypingSentRef.current = false
     if (!conversationId) {
       return
     }
+    // Reset ephemeral UI after paint so we do not sync-setState in the effect body.
+    const reset = window.setTimeout(() => {
+      setTypingUserId(null)
+      setPeerOnline(false)
+    }, 0)
     socketClient.sendPresence(conversationId, 'online')
     return () => {
+      window.clearTimeout(reset)
       socketClient.sendPresence(conversationId, 'offline')
       socketClient.sendTyping(conversationId, false)
     }

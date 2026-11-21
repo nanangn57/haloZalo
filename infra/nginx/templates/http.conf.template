@@ -3,6 +3,9 @@ server {
     listen [::]:80;
     server_name __DOMAIN__;
 
+    # Docker embedded DNS — re-resolve `app` after container recreate.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     root /usr/share/nginx/html;
     index index.html;
     client_max_body_size 20m;
@@ -13,12 +16,21 @@ server {
         try_files $uri =404;
     }
 
+    location = /actuator/health {
+        set $app_upstream http://app:8080;
+        proxy_pass $app_upstream/actuator/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
     location = /api/identity {
         return 301 /api/identity/;
     }
 
     location ^~ /api/identity/ {
-        proxy_pass http://identity:8080/;
+        set $app_upstream http://app:8080;
+        rewrite ^/api/identity/(.*)$ /$1 break;
+        proxy_pass $app_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -30,8 +42,11 @@ server {
         return 301 /api/messaging/;
     }
 
+    # Variable proxy_pass with a URI drops $args unless appended ($is_args$args).
+    # Without access_token the session filter returns 401 and the browser WS stays offline.
     location ^~ /api/messaging/ws {
-        proxy_pass http://messaging:8082/ws;
+        set $app_upstream http://app:8080;
+        proxy_pass $app_upstream/ws$is_args$args;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -44,7 +59,9 @@ server {
     }
 
     location ^~ /api/messaging/ {
-        proxy_pass http://messaging:8082/;
+        set $app_upstream http://app:8080;
+        rewrite ^/api/messaging/(.*)$ /$1 break;
+        proxy_pass $app_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -57,7 +74,9 @@ server {
     }
 
     location ^~ /api/auth/ {
-        proxy_pass http://identity:8080/auth/;
+        set $app_upstream http://app:8080;
+        rewrite ^/api/auth/(.*)$ /auth/$1 break;
+        proxy_pass $app_upstream;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

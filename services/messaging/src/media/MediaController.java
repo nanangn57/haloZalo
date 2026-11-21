@@ -5,12 +5,10 @@ import http.UserId;
 import service.MessageService;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 
-import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Local media upload for demo. Returns a URL the client puts into an IMAGE/DOCUMENT/VIDEO message body.
+ * Media upload/download. Returns a URL the client puts into an IMAGE/DOCUMENT/VIDEO message body.
  */
 @RestController
 public final class MediaController {
@@ -32,10 +30,10 @@ public final class MediaController {
     private static final Set<String> IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
     private static final Set<String> VIDEO_TYPES = Set.of("video/mp4", "video/webm");
 
-    private final LocalMediaStore store;
+    private final MediaStore store;
     private final EnvelopeEventPublisher events;
 
-    public MediaController(LocalMediaStore store, EnvelopeEventPublisher events) {
+    public MediaController(MediaStore store, EnvelopeEventPublisher events) {
         this.store = store;
         this.events = events;
     }
@@ -70,7 +68,7 @@ public final class MediaController {
         if ("VIDEO".equals(mediaType) && !VIDEO_TYPES.contains(contentType)) {
             throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Unsupported video content type");
         }
-        LocalMediaStore.Stored stored = store.store(file.getBytes(), contentType, file.getOriginalFilename());
+        MediaStore.Stored stored = store.store(file.getBytes(), contentType, file.getOriginalFilename());
         events.publishMediaUploaded(userId, conversationId, mediaType);
         return Map.of(
             "mediaId", stored.id(),
@@ -83,23 +81,22 @@ public final class MediaController {
     }
 
     @GetMapping("/media/{mediaId}")
-    public ResponseEntity<FileSystemResource> download(@PathVariable String mediaId) {
-        Path path;
+    public ResponseEntity<InputStreamResource> download(@PathVariable String mediaId) {
+        MediaStore.Opened opened;
         try {
-            path = store.resolve(mediaId);
+            opened = store.open(mediaId);
         } catch (IOException ex) {
             return ResponseEntity.notFound().build();
         }
-        String probe;
-        try {
-            probe = Files.probeContentType(path);
-        } catch (IOException ex) {
-            probe = null;
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + opened.fileName() + "\"");
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
+            .headers(headers)
+            .contentType(MediaType.parseMediaType(opened.contentType()));
+        if (opened.size() >= 0) {
+            builder.contentLength(opened.size());
         }
-        return ResponseEntity.ok()
-            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + path.getFileName() + "\"")
-            .contentType(MediaType.parseMediaType(probe == null ? "application/octet-stream" : probe))
-            .body(new FileSystemResource(path));
+        return builder.body(new InputStreamResource(opened.stream()));
     }
 
     private static String normalizeType(String type) {

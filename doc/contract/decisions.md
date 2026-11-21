@@ -2,7 +2,7 @@
 
 Chốt cho tuần 1, phục vụ [#2](https://github.com/nanangn57/haloZalo/issues/2). Hợp đồng gọi được nằm ở [openapi.yaml](openapi.yaml). Sự kiện nằm ở [events.md](events.md).
 
-Người giữ hợp đồng: P1 (Ngọc Anh). Một process Spring Boot, một database PostgreSQL, mỗi module một schema. Module không đọc bảng schema khác. Muốn dữ liệu của nhau thì gọi interface trong cùng process, hoặc nhận event phát trong process. Thư mục mỗi người sửa nằm ở [README](../../README.md).
+Người giữ hợp đồng: P1 (Ngọc Anh). Một process Spring Boot, một database PostgreSQL `halozalo` (ba schema). Local: Postgres trong Compose. Cloud: Amazon RDS for PostgreSQL. Module không đọc bảng schema khác. Muốn dữ liệu của nhau thì gọi interface trong cùng process, hoặc nhận event phát trong process. Thư mục mỗi người sửa nằm ở [README](../../README.md).
 
 ## Bounded context
 
@@ -13,7 +13,7 @@ Người giữ hợp đồng: P1 (Ngọc Anh). Một process Spring Boot, một 
 | Messaging & Media | Hội thoại, tin, `seq`, file, fan-out | Schema `messaging`. Socket nằm trong bộ nhớ của process | P2 |
 | Client | Web và mobile dùng chung một client-core | Cache trên thiết bị | P3 giữ core, P4 gắn mobile |
 
-Ba schema nằm trên cùng database PostgreSQL `halozalo`. Không có foreign key xuyên schema. Client chỉ gọi HTTP và WebSocket của app, không gọi vào từng module.
+Ba schema nằm trên cùng database PostgreSQL `halozalo` (Compose local hoặc Amazon RDS trên cloud). Không có foreign key xuyên schema. Client chỉ gọi HTTP và WebSocket của app, không gọi vào từng module.
 
 ## Đã chốt
 
@@ -25,7 +25,10 @@ Ba schema nằm trên cùng database PostgreSQL `halozalo`. Không có foreign k
 - **Emotion hạng 1:** một tin riêng, `type = EMOTION`, `body` là mã icon. Bộ mã: `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 - **Auth:** Access token là session id opaque, không phải JWT, không chứa `userId`. Hết hạn sau 3 ngày (259200 giây) kể từ lúc cấp, không gia hạn khi còn dùng. Identity giữ bảng session trong schema `identity`. Module khác không đọc bảng đó. Bản này chưa có API đăng xuất.
 
-Đăng ký gửi link xác minh về email. Link hết hạn sau 2 phút (120 giây). Bấm link trong hạn thì Identity tạo tài khoản. Hết hạn hoặc không bấm thì chưa có tài khoản, đăng nhập không thành công. Đăng ký lại sau khi hết hạn thì được; link cũ không dùng được.
+Đăng ký theo `identity.registration.activation` (`IDENTITY_REGISTRATION_ACTIVATION`):
+
+- `email` (mặc định): gửi link xác minh. Link công khai là `https://$DOMAIN/auth/verify?token=` (trang web gọi `GET /api/identity/auth/verify`). Link hết hạn sau 15 phút (900 giây). Bấm link trong hạn thì Identity tạo tài khoản. Hết hạn hoặc không bấm thì chưa có tài khoản, đăng nhập không thành công. Đăng ký lại sau khi hết hạn thì được; link cũ không dùng được. `RegisterAccepted.status = PENDING_VERIFICATION`. Local: `IDENTITY_MAIL_MODE=log` (link in ra log). Cloud: `IDENTITY_MAIL_MODE=smtp` qua Spring JavaMail (`SPRING_MAIL_*`, thường Gmail app password) — gửi được tới mọi địa chỉ người nhận; bí mật nằm trong `.env` trên máy/EC2, không commit.
+- `immediate` (ops hiếm): Identity tạo tài khoản ngay trong `POST /auth/register`, không gửi mail. `RegisterAccepted.status = ACTIVE`.
 
 Mỗi lần đăng nhập, Identity thêm một dòng (`sessionId`, `userId`, `expiresAt`) và trả `sessionId` trong `accessToken`. Dòng cũ giữ đến khi hết hạn, để web và mobile cùng đăng nhập.
 
@@ -34,12 +37,15 @@ Request có `Authorization: Bearer`, hoặc WebSocket có query `access_token`, 
 - **Profile và bạn bè:** `GET /me` và `PATCH /me` đọc và sửa tên hiển thị cùng avatar tuỳ chọn. Lời mời bạn đi qua `POST /friends/requests`, chấp nhận qua `POST /friends/requests/{userId}/accept`, danh sách qua `GET /friends`.
 - **Platform role:** Identity giữ `platformRole` trên tài khoản (`USER` | `ADMIN`), mặc định `USER`, khác role nhóm. Login và `GET /me` trả field này. Bootstrap admin qua config username `identity.platform-admins`, không có API promote trong bản này. Analytics hỏi quyền qua interface `PlatformRoleLookup` trong process, không đọc schema `identity`.
 - **Dashboard:** `GET /me/activity` mọi user đăng nhập. `GET /stats` và `GET /stats/dashboard` chỉ `platformRole = ADMIN` (403 nếu không phải). Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`. Client: trang personal chỉ `/me/activity`; chart nền tảng ở trang admin.
-- **Release:** AWS. Mỗi tuần một URL public. Deploy bằng một lệnh từ repo: một process và một PostgreSQL. P4 giữ lệnh đó.
+- **Media:** Upload qua `POST /media/uploads`, tải qua `GET /media/{mediaId}`. Local lưu disk; cloud lưu S3. Tin `IMAGE` / `DOCUMENT` / `VIDEO` dùng URL trả về làm `body`. Giới hạn: text 4KB, image 5MB, document 10MB, video 20MB.
+- **Hội thoại:** Phải mở trước khi gửi tin. Chat 1-1: `POST /conversations/direct`. Nhóm: `groupId` là `conversationId`. Client không tự sinh `conversationId` rồi gửi khi hội thoại chưa mở.
+- **Tên trong hội thoại:** Hội thoại chỉ có `memberIds`; messaging không giữ tên user. Client lấy tên qua `GET /users/lookup?ids=` của identity, rồi cache theo `userId`.
+- **Push khi offline:** Mobile đăng ký device token (`POST` device token trong OpenAPI). Server gửi qua Expo Push API khi user không có socket mở. Token Expo hoặc FCM đều lưu được.
+- **Release:** AWS. Mỗi tuần một URL public. Deploy bằng một lệnh từ repo: một process `app` trên EC2, database Amazon RDS for PostgreSQL, media trên S3, mail xác minh qua SMTP Gmail (`SPRING_MAIL_*`), nginx + HTTPS. Local dùng Postgres trong Compose và mail `log`. P4 giữ lệnh deploy.
 
 ## Bản này cố ý chưa có
 
-Upload media, refresh token, FCM.
-
-Tên người trong hội thoại: hội thoại chỉ có `memberIds`, messaging không giữ tên user. Client lấy tên qua `GET /users/lookup?ids=` của identity, một lần cho cả trang hội thoại, rồi cache theo `userId`.
-
-Hội thoại phải được mở trước khi gửi tin. Chat 1-1 mở bằng `POST /conversations/direct`. Hội thoại nhóm dùng `groupId` làm `conversationId`. Client không tự sinh `conversationId` rồi gửi tin khi hội thoại chưa mở.
+- Refresh token / gia hạn session khi còn dùng.
+- Đăng xuất (xoá session phía server).
+- FCM native đầy đủ ngoài đường Expo Push (project Firebase riêng, không qua Expo).
+- Promote `platformRole` bằng API (admin bootstrap chỉ qua config).

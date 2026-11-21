@@ -14,7 +14,7 @@ export async function loginApi(
     body: JSON.stringify(credentials),
   })
 
-  const data = await response.json()
+  const data = await readJsonBody(response)
 
   if (!response.ok) {
     const error = new Error(
@@ -27,7 +27,7 @@ export async function loginApi(
     throw error
   }
 
-  return data as LoginResponse
+  return data as unknown as LoginResponse
 }
 
 export interface RegisterRequest {
@@ -38,6 +38,7 @@ export interface RegisterRequest {
 
 export interface RegisterAccepted {
   email: string
+  status: 'PENDING_VERIFICATION' | 'ACTIVE'
 }
 
 export async function registerApi(
@@ -51,7 +52,7 @@ export async function registerApi(
     body: JSON.stringify(credentials),
   })
 
-  const data = await response.json()
+  const data = await readJsonBody(response)
 
   if (!response.ok) {
     const error = new Error(
@@ -63,5 +64,52 @@ export async function registerApi(
     throw error
   }
 
-  return data as RegisterAccepted
+  return data as unknown as RegisterAccepted
+}
+
+export interface VerifyResponse {
+  userId: string
+  username: string
+  email: string
+  platformRole?: string
+}
+
+export async function verifyEmailApi(token: string): Promise<VerifyResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/auth/verify?token=${encodeURIComponent(token)}`,
+  )
+
+  const data = await readJsonBody(response)
+
+  if (!response.ok) {
+    const error = new Error(
+      data?.error?.message ?? 'Xác minh email thất bại',
+    ) as Error & { code?: string; status?: number }
+
+    error.code = data?.error?.code
+    error.status = response.status
+    throw error
+  }
+
+  return data as unknown as VerifyResponse
+}
+
+async function readJsonBody(
+  response: Response,
+): Promise<{ error?: { code?: string; message?: string } } & Record<string, unknown>> {
+  const text = await response.text()
+  if (!text) {
+    return {}
+  }
+  try {
+    return JSON.parse(text) as {
+      error?: { code?: string; message?: string }
+    } & Record<string, unknown>
+  } catch {
+    throw new Error(
+      response.ok
+        ? 'Phản hồi máy chủ không phải JSON.'
+        : `Máy chủ lỗi (${response.status}). Thử lại sau.`,
+    )
+  }
 }

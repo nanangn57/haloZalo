@@ -1,25 +1,23 @@
 # infra
 
-Monolith `app` + PostgreSQL + nginx edge. Một lệnh deploy local hoặc cloud.
-
-Người giữ: P4 Thành.
+Monolith `app` + PostgreSQL + nginx edge. Local: Postgres Compose + mail log. Cloud: Amazon RDS + EC2 + S3 + SMTP Gmail. Một lệnh deploy cho mỗi môi trường.
 
 ## Local stack
 
-Identity/messaging/analytics chạy trong một process `app` trên `:8080`, cùng database `halozalo` trên `:5432`. Không chạy `services/*/docker-compose` song song.
+Identity / messaging / analytics chạy trong một process `app` trên `:8080`, database `halozalo`. Local dùng Postgres trong Compose (`--profile local-db`). Không chạy `services/*/docker-compose` song song.
 
 ```bash
 cd infra
-cp .env.local.example .env   # lần đầu (nếu có); hoặc dùng .env.example
+cp .env.local.example .env   # lần đầu
 chmod +x scripts/local-up.sh
 ./scripts/local-up.sh        # hoặc: ./scripts/local-up.sh reset
 ```
 
 | Service  | Host port | Notes |
 |----------|-----------|-------|
-| Postgres | 5432      | DB `halozalo` |
+| Postgres | 5432      | Compose profile `local-db`, DB `halozalo` |
 | app      | 8080      | Monolith: identity + messaging + analytics |
-| Edge     | 8088      | Tuỳ local compose overlay: `/api/identity/*`, `/api/messaging/*` |
+| Edge     | 8088      | Tuỳ chọn (`--profile edge`): `/api/identity/*`, `/api/messaging/*` |
 
 Tắt: `./scripts/local-up.sh down`.
 
@@ -31,24 +29,47 @@ VITE_API_MESSAGE_BASE_URL=http://localhost:8080
 VITE_WS_BASE_URL=ws://localhost:8080
 ```
 
-Mobile (`EXPO_PUBLIC_*`) tương tự. Media local: `MESSAGING_MEDIA_BACKEND=local` (mặc định trong profile local).
+Mobile (`EXPO_PUBLIC_*`) tương tự. Media local: `MESSAGING_MEDIA_BACKEND=local`.
 
-## Cloud (EC2 + S3 + HTTPS)
+## Cloud (EC2 + RDS + S3 + HTTPS)
 
-Stack mặc định trong `docker-compose.yml`: `postgres` + `app` + `nginx` (+ profile `tools` cho certbot). Profile `split` giữ identity/messaging tách chỉ khi cần debug cũ.
+Trên AWS: EC2 chạy `app` + `nginx`; database **Amazon RDS for PostgreSQL**; media S3; mail **SMTP Gmail**; HTTPS Let's Encrypt.
 
 ### Yêu cầu trên máy chủ
 
 - Docker Compose v2
-- `infra/.env` từ `.env.example` (password mạnh, `ACME_EMAIL`, S3 bucket/region)
-- Instance role có quyền SSM + S3 media (Put/Get trên bucket media)
-- SG mở 80/443; domain DNS trỏ về IP public
+- `infra/.env` từ `.env.example` (password mạnh, `ACME_EMAIL`, S3, **`DB_HOST` = endpoint RDS**)
+- RDS cùng VPC với EC2; security group RDS cho phép EC2 vào cổng `5432`
+- Instance role có quyền SSM + S3 media (Put/Get). Mail qua SMTP Gmail (app password trong `infra/.env`).
+- SG EC2 mở 80/443; DNS domain trỏ về IP public
+
+### Biến database (cloud)
+
+| Biến | Cloud | Local |
+|---|---|---|
+| `DB_HOST` | Endpoint RDS (vd. `xxx.ap-southeast-1.rds.amazonaws.com`) | `postgres` |
+| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Khớp RDS | Khớp Compose Postgres |
+
+Khi `DB_HOST` không phải `postgres` / `localhost`, `deploy-ec2.sh` chỉ `up app nginx` và không chạy container Postgres.
+
+### Mail (SMTP / Gmail)
+
+| Biến | Cloud | Local |
+|---|---|---|
+| `IDENTITY_MAIL_MODE` | `smtp` | `log` (link verify in ra log container/app) |
+| `IDENTITY_MAIL_FROM` | Địa chỉ Gmail gửi đi | `noreply@halozalo.local` |
+| `SPRING_MAIL_HOST` | `smtp.gmail.com` | (không dùng khi `log`) |
+| `SPRING_MAIL_PORT` | `587` | |
+| `SPRING_MAIL_USERNAME` | Cùng Gmail | |
+| `SPRING_MAIL_PASSWORD` | Gmail **app password** (không commit) | |
+
+Cloud gửi qua SMTP Gmail (`SmtpMailSender`).
 
 ### Deploy
 
 ```bash
 cd infra
-cp .env.example .env   # lần đầu — sửa DOMAIN, ACME_EMAIL, DB_PASSWORD, S3
+cp .env.example .env   # lần đầu — sửa DOMAIN, ACME_EMAIL, DB_HOST, DB_*, S3
 chmod +x scripts/deploy-ec2.sh scripts/renew-cert.sh
 ALLOW_DIRTY=1 ./scripts/deploy-ec2.sh   # ALLOW_DIRTY=1 nếu tree không clean
 ```
@@ -56,8 +77,16 @@ ALLOW_DIRTY=1 ./scripts/deploy-ec2.sh   # ALLOW_DIRTY=1 nếu tree không clean
 Script sẽ:
 
 1. Bake nginx config HTTP hoặc HTTPS theo cert hiện có
-2. `compose up -d --build postgres app nginx`
+2. `compose up -d --build app nginx` (RDS) — hoặc thêm `postgres` nếu `DB_HOST=postgres`
 3. Xin/renew Let's Encrypt nếu cần, rồi reload nginx
+
+**Chuyển dữ liệu từ Postgres Docker cũ sang RDS** (một lần, nếu còn volume local trên EC2):
+
+```bash
+DB_HOST_RDS=<rds-endpoint> ./scripts/migrate-to-rds.sh
+ALLOW_DIRTY=1 ./scripts/deploy-ec2.sh
+docker compose --profile local-db stop postgres
+```
 
 Public URL (ví dụ):
 
@@ -69,13 +98,13 @@ Public URL (ví dụ):
 | Messaging API / media | `https://$DOMAIN/api/messaging/...` |
 | WebSocket | `wss://$DOMAIN/api/messaging/ws` |
 
-Vite bake-time keys (bắt buộc khớp `clients/core/connectionConfig.ts`):
+Vite bake-time keys (khớp `clients/core/connectionConfig.ts`):
 
 - `VITE_API_IDENTITY_BASE_URL`
 - `VITE_API_MESSAGE_BASE_URL`
 - `VITE_WS_BASE_URL`
 
-Media cloud: `MESSAGING_MEDIA_BACKEND=s3` — upload vẫn `POST /media/uploads`; object nằm S3; `GET /media/{id}` stream từ S3. Bucket giữ Block Public Access; CORS origin = domain.
+Media cloud: `MESSAGING_MEDIA_BACKEND=s3` — upload `POST /media/uploads`; object trên S3; `GET /media/{id}` stream từ S3.
 
 Renew cert định kỳ: `./scripts/renew-cert.sh` (cron).
 
@@ -95,7 +124,7 @@ Hoặc smoke HTTP public: health, login `POST /api/identity/auth/login`, upload 
 
 `GET /stats` cần user `platformRole=ADMIN` — seed `ngoc_anh`/`huy` là USER nên E2E dashboard stats có thể FAIL dù stack ổn.
 
-### Tài khoản mẫu (volume Postgres mới)
+### Tài khoản mẫu (DB mới / seed)
 
 | username | email | password |
 |---|---|---|
@@ -104,6 +133,6 @@ Hoặc smoke HTTP public: health, login `POST /api/identity/auth/login`, upload 
 
 ## Ghi chú
 
-- Client chỉ đi qua nginx/gateway; không expose cổng app ra ngoài.
+- Client chỉ đi qua nginx; không expose cổng app ra ngoài.
 - Đổi hợp đồng API/event: sửa `doc/contract/` trước.
 - Chi tiết E2E: [e2e/README.md](e2e/README.md).

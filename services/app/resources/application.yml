@@ -7,6 +7,18 @@ spring:
     default: app
   config:
     import: optional:file:./.env.local[.properties]
+  mail:
+    host: ${SPRING_MAIL_HOST:localhost}
+    port: ${SPRING_MAIL_PORT:1025}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
   servlet:
     multipart:
       max-file-size: 20MB
@@ -26,14 +38,14 @@ spring:
     schemas: messaging
     default-schema: messaging
     locations: classpath:db/migration
-  mail:
-    host: ${SPRING_MAIL_HOST:localhost}
-    port: ${SPRING_MAIL_PORT:1025}
 
 identity:
   public-base-url: ${IDENTITY_PUBLIC_BASE_URL:http://localhost:8080}
   platform-admins: ${IDENTITY_PLATFORM_ADMINS:}
+  registration:
+    activation: ${IDENTITY_REGISTRATION_ACTIVATION:email}
   mail:
+    # log (local) | smtp (Gmail/SMTP via spring.mail)
     mode: ${IDENTITY_MAIL_MODE:log}
     from: ${IDENTITY_MAIL_FROM:noreply@halozalo.local}
   cors:
@@ -43,8 +55,13 @@ messaging:
   user-header-enabled: false
   session-auth-enabled: false
   media:
+    backend: ${MESSAGING_MEDIA_BACKEND:local}
     storage-dir: ${MESSAGING_MEDIA_STORAGE_DIR:./data/media}
     public-base-url: ${MESSAGING_MEDIA_PUBLIC_BASE_URL:http://localhost:8080}
+    s3:
+      bucket: ${MESSAGING_MEDIA_S3_BUCKET:}
+      region: ${MESSAGING_MEDIA_S3_REGION:ap-southeast-1}
+      key-prefix: ${MESSAGING_MEDIA_S3_KEY_PREFIX:media/}
   cors:
     allowed-origins: ${MESSAGING_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081,http://127.0.0.1:8081,http://192.168.*:*}
   realtime:

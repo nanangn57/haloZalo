@@ -4,7 +4,7 @@ App Expo (React Native) dùng lại `clients/core` cho HTTP, WebSocket và sync.
 
 ## Backend
 
-Chạy monolith local trước (Postgres + app `:8080`):
+Chạy monolith local trước (Compose Postgres + app `:8080`):
 
 ```bash
 cd infra
