@@ -1,26 +1,19 @@
-# mobile
+# Mobile
 
-Expo app (React Native) dùng lại `clients/core`.
+App Expo (React Native) dùng lại `clients/core` cho HTTP, WebSocket và sync.
 
-## Local stack (backend chung)
+## Backend
 
-Một Postgres + identity + messaging (không tách `:5432` / `:5433`):
+Chạy monolith local trước (Postgres + app `:8080`):
 
 ```bash
 cd infra
-cp -n .env.local.example .env
 ./scripts/local-up.sh
 ```
 
-Chi tiết: `infra/README.md` mục **Local stack**.
+Chi tiết: [infra/README.md](../../infra/README.md).
 
-## Chạy trên máy (để agent / browser test)
-
-Backend phải đang chạy (sau `infra/scripts/local-up.sh`):
-
-- Identity `http://localhost:8080`
-- Messaging `http://localhost:8082`
-- Postgres chung `localhost:5432` / DB `halozalo`
+## Chạy trên máy (Expo web)
 
 ```bash
 cd clients/mobile/app
@@ -33,9 +26,9 @@ Mở `http://localhost:8081`.
 
 ## Chạy trên điện thoại (Expo Go)
 
-1. Cài **Expo Go** trên iOS/Android.
-2. Máy Mac và điện thoại cùng Wi‑Fi.
-3. Lấy IP LAN của Mac, ví dụ `192.168.1.9`:
+1. Cài Expo Go trên iOS/Android.
+2. Máy và điện thoại cùng Wi‑Fi.
+3. Lấy IP LAN của máy host, ví dụ `192.168.1.9`:
 
 ```bash
 ipconfig getifaddr en0
@@ -45,30 +38,20 @@ ipconfig getifaddr en0
 
 ```env
 EXPO_PUBLIC_API_IDENTITY_BASE_URL=http://192.168.1.9:8080
-EXPO_PUBLIC_API_MESSAGE_BASE_URL=http://192.168.1.9:8082
-EXPO_PUBLIC_WS_BASE_URL=ws://192.168.1.9:8082
-EXPO_PUBLIC_MESSAGE_HTTP_AUTH_MODE=USER_ID
-EXPO_PUBLIC_WS_AUTH_MODE=USER_ID_QUERY
+EXPO_PUBLIC_API_MESSAGE_BASE_URL=http://192.168.1.9:8080
+EXPO_PUBLIC_WS_BASE_URL=ws://192.168.1.9:8080
 ```
 
-5. Identity CORS đã cho phép `http://localhost:*`. Với Expo Go native thì không bị CORS; nếu dùng tunnel web thì thêm origin nếu cần.
-6. Khởi động:
+5. Khởi động và quét QR:
 
 ```bash
 cd clients/mobile/app
 npx expo start
 ```
 
-7. Quét QR bằng Expo Go (Android) hoặc Camera (iOS).
+Cloud: đặt `EXPO_PUBLIC_*` trỏ `https://$DOMAIN/api/...` và `wss://$DOMAIN/api/messaging`.
 
-## Tài khoản test sẵn
+## Tài khoản mẫu
 
-Sau khi verify email (link trong `docker logs` của identity):
-
-- `flow_a@example.com` / `password1`
-- `flow_b@example.com` / `password1`
-
-## Ghi chú
-
-- Login/Register/Chat/Dashboard/Groups/Contacts gọi API thật qua `@core`.
-- Với local stack chung DB, dashboard `messagesCreated` / groups tăng trên cùng analytics.
+- `anh@example.com` / `password1`
+- `huy@example.com` / `password1`

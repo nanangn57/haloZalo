@@ -1,4 +1,4 @@
-"""Shared HTTP/WS helpers for haloZalo real E2E agents."""
+"""Shared HTTP/WS helpers for haloZalo E2E suites."""
 
 from __future__ import annotations
 
