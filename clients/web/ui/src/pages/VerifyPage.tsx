@@ -5,17 +5,19 @@ import { verifyEmailApi } from '../../../../core/authService'
 
 type Status = 'pending' | 'success' | 'error'
 
+type VerifyResult = {
+  status: Exclude<Status, 'pending'>
+  message: string
+}
+
 function VerifyPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [status, setStatus] = useState<Status>('pending')
-  const [message, setMessage] = useState('Verifying your email…')
+  const token = searchParams.get('token')?.trim() ?? ''
+  const [result, setResult] = useState<VerifyResult | null>(null)
 
   useEffect(() => {
-    const token = searchParams.get('token')?.trim() ?? ''
     if (!token) {
-      setStatus('error')
-      setMessage('Verification link is invalid or expired')
       return
     }
 
@@ -26,10 +28,10 @@ function VerifyPage() {
         if (cancelled) {
           return
         }
-        setStatus('success')
-        setMessage(
-          `Email ${user.email} verified. You can sign in as ${user.username}.`,
-        )
+        setResult({
+          status: 'success',
+          message: `Email ${user.email} verified. You can sign in as ${user.username}.`,
+        })
         window.setTimeout(() => {
           navigate('/login?verified=1', { replace: true })
         }, 1200)
@@ -38,18 +40,24 @@ function VerifyPage() {
         if (cancelled) {
           return
         }
-        setStatus('error')
-        setMessage(
-          err instanceof Error
-            ? err.message
-            : 'Verification link is invalid or expired',
-        )
+        setResult({
+          status: 'error',
+          message:
+            err instanceof Error
+              ? err.message
+              : 'Verification link is invalid or expired',
+        })
       })
 
     return () => {
       cancelled = true
     }
-  }, [navigate, searchParams])
+  }, [navigate, token])
+
+  const status: Status = !token ? 'error' : (result?.status ?? 'pending')
+  const message = !token
+    ? 'Verification link is invalid or expired'
+    : (result?.message ?? 'Verifying your email…')
 
   return (
     <div className="auth-page">
