@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrator: run all haloZalo E2E agents against the live monolith."""
+"""Orchestrator: run all haloZalo E2E suites against the live monolith."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from lib import BASE  # noqa: E402
 
-AGENTS = [
+SUITES = [
     "agents.auth_profile",
     "agents.friends",
     "agents.chat_sync",
@@ -25,18 +25,18 @@ AGENTS = [
 
 
 def main() -> int:
-    print(f"haloZalo E2E orchestrator → {BASE}")
+    print(f"haloZalo E2E → {BASE}")
     started = time.time()
     reports = []
-    failed_agents = []
+    failed_suites = []
 
-    for module_name in AGENTS:
+    for module_name in SUITES:
         module = importlib.import_module(module_name)
         report = module.run()
         reports.append(report)
         print(report.summary())
         if report.failed:
-            failed_agents.append(report.agent)
+            failed_suites.append(report.agent)
 
     elapsed = time.time() - started
     total_checks = sum(len(r.checks) for r in reports)
@@ -45,13 +45,13 @@ def main() -> int:
     summary = {
         "base": BASE,
         "elapsedSec": round(elapsed, 2),
-        "agents": len(reports),
+        "suites": len(reports),
         "checksPassed": total_pass,
         "checksTotal": total_checks,
-        "failedAgents": failed_agents,
-        "perAgent": [
+        "failedSuites": failed_suites,
+        "perSuite": [
             {
-                "agent": r.agent,
+                "suite": r.agent,
                 "passed": r.passed_count,
                 "total": len(r.checks),
                 "failures": [{"name": c.name, "detail": c.detail} for c in r.failed],
@@ -62,10 +62,10 @@ def main() -> int:
 
     out = ROOT / "last-report.json"
     out.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"\n=== TOTAL {total_pass}/{total_checks} checks, {len(failed_agents)} agent(s) failed, {elapsed:.1f}s ===")
+    print(f"\n=== TOTAL {total_pass}/{total_checks} checks, {len(failed_suites)} suite(s) failed, {elapsed:.1f}s ===")
     print(f"Report: {out}")
-    if failed_agents:
-        print("Failed:", ", ".join(failed_agents))
+    if failed_suites:
+        print("Failed:", ", ".join(failed_suites))
         return 1
     return 0
 

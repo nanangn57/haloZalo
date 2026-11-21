@@ -2,9 +2,9 @@
 
 Hội thoại, tin, `seq`, file, fan-out. Schema `messaging` trên cùng database PostgreSQL `halozalo`. Kết nối WebSocket nằm trong bộ nhớ của process. Media nằm ở module này.
 
-Người giữ: P2 Huy. Module này không đọc schema khác. Hỏi thành viên nhóm qua interface của identity.
+Module này không đọc schema khác. Thành viên nhóm lấy qua interface của identity.
 
-Cổng `8082` khi chạy riêng. Database và cấu hình WebSocket nằm trong `resources/application.yml`.
+Khi chạy trong monolith (`services/app`) mọi request vào cổng `8080`. Có thể chạy riêng trên cổng `8082` để phát triển. Database và cấu hình WebSocket nằm trong `resources/application.yml`.
 
 ```
 services/messaging/
@@ -56,24 +56,22 @@ Chạy cả service bằng Docker, gồm Postgres riêng: `docker compose up --b
 
 ## Ai đang gọi
 
-`http.CurrentUser` là nơi duy nhất trả lời câu hỏi này, cho cả HTTP lẫn handshake `/ws`:
+`http.CurrentUser` trả lời cho cả HTTP lẫn handshake `/ws`:
 
-1. Request attribute `userId`. Filter session của app gắn attribute này sau khi `AuthService` kiểm access token. Filter này của P1, chưa gắn vào messaging: identity và messaging vẫn chạy hai process.
-2. Nếu không có attribute và `MESSAGING_USER_HEADER_ENABLED=true` thì đọc header `X-User-Id`. Chỉ để chạy messaging riêng lúc chưa có app.
-3. Riêng handshake `/ws`, cùng điều kiện ở bước 2: đọc query `userId`, vì trình duyệt không gắn header được cho `new WebSocket(url)`. Web đặt `VITE_WS_AUTH_MODE=USER_ID_QUERY` rồi mở `ws://localhost:8082/ws?userId=<uuid>`. Tắt cùng lúc với header.
+1. Request attribute `userId` — trong monolith, filter session gắn attribute này sau khi `AuthService` kiểm access token (query `access_token` với WebSocket).
+2. Nếu không có attribute và `MESSAGING_USER_HEADER_ENABLED=true` thì đọc header `X-User-Id` (chỉ khi chạy messaging riêng).
+3. Handshake `/ws` khi chạy riêng: đọc query `userId` vì trình duyệt không gắn header cho `new WebSocket(url)`.
 
-Không có user thì 401, `/ws` không nâng cấp. Trong app phải đặt `MESSAGING_USER_HEADER_ENABLED=false`, nếu không client nào cũng tự xưng là user khác được. User không phải UUID thì coi như không có.
+Không có user thì 401, `/ws` không nâng cấp. Trong monolith phải đặt `MESSAGING_USER_HEADER_ENABLED=false`.
 
 ## Thành viên
 
 `member.ConversationMembers` trả lời ai thuộc một hội thoại:
 
-- DIRECT: hai người được lưu trong bảng `direct_members`. Messaging sở hữu hội thoại 1-1 nên giữ hai người đó.
-- GROUP: `conversationId` là id nhóm trong identity. Thành viên hỏi qua interface `member.GroupMembers` ngay lúc cần, không lưu bản sao. Người bị owner xoá khỏi nhóm thì lần gọi tiếp theo đã bị 403, không nhận event nữa, và hội thoại biến khỏi danh sách của họ.
+- DIRECT: hai người lưu trong bảng `direct_members`.
+- GROUP: `conversationId` là id nhóm identity. Thành viên hỏi qua `member.GroupMembers` lúc cần, không lưu bản sao.
 
-`GroupMembers` cần ba việc: `isMember`, `memberIds` (để đẩy event cho cả nhóm), `groupIdsOf` (để lấy danh sách hội thoại). Trong app, P1 gắn interface này vào `MembershipLookup` của identity.
-
-Tạm thời: `StandaloneGroupMembers` giữ thành viên nhóm trong bộ nhớ, để messaging chạy riêng được. Đặt thành viên bằng `PUT /internal/groups/{groupId}/members` với `{ "memberIds": [...] }`. Không ghi vào database, mất khi tắt process. Xoá `StandaloneGroupMembers` và `StandaloneGroupController` cùng lúc thêm adapter thật.
+`GroupMembers` gồm `isMember`, `memberIds`, `groupIdsOf`. Trong monolith, adapter gọi `MembershipLookup` của identity.
 
 ## Mô hình
 
@@ -167,7 +165,7 @@ Catch-up chỉ trả tin mới hơn `afterSeq`. Tin cũ hơn bị xoá, hoặc r
 
 `PUT /conversations/{conversationId}/messages/{messageId}/reactions/{code}` thêm reaction, trả 204. Thêm lại cùng mã vẫn 204, không tạo dòng mới. `DELETE` cùng path bỏ reaction, trả 204 kể cả khi chưa có. `GET .../messages/{messageId}/reactions` trả `{ "reactions": [{ userId, code, createdAt }] }`, cũ trước. Mã ngoài bộ emotion thì 400. Tin đã xoá không nhận reaction mới.
 
-Lỗi: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409. Hội thoại không tồn tại cũng trả 403, giống người ngoài, để không dò được id. Đề xuất đổi hợp đồng nằm ở [contract-proposal.md](contract-proposal.md).
+Lỗi: `VALIDATION_ERROR` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `CONFLICT` 409. Hội thoại không tồn tại cũng trả 403, giống người ngoài, để không dò được id. Shape HTTP/event khớp [doc/contract/](../../doc/contract/).
 
 ## Event
 

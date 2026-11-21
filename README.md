@@ -17,7 +17,7 @@ Một process monolith (`services/app`), một PostgreSQL, mỗi module một sc
 - Đồng bộ web với mobile qua WebSocket + catch-up `seq`
 - Push device token (Expo / demo local); FCM thật cần thiết bị + project Expo
 - Ghi hoạt động và trang thống kê
-- Media local qua `/media/{id}` (S3/cloud để khi deploy)
+- Media qua `/media/{id}` (local disk hoặc S3 khi `MESSAGING_MEDIA_BACKEND=s3`)
 
 Phạm vi đầy đủ nằm ở [doc/requirement.md](doc/requirement.md).
 
@@ -40,17 +40,17 @@ Lịch 8 tuần: [doc/timeline.md](doc/timeline.md).
 
 ## Cấu trúc thư mục
 
-| Thư mục | Việc | Người |
+| Thư mục | Việc | Người giữ |
 |---|---|---|
-| `doc/contract/` | OpenAPI, envelope event, quyết định kiến trúc | P1 Ngọc Anh |
-| `services/app/` | Monolith Spring Boot (cửa public) | P1 Ngọc Anh |
-| `services/identity/` | Tài khoản, token, nhóm, thành viên | P1 Ngọc Anh |
-| `services/analytics/` | Ghi event, đọc bảng tổng hợp | P1 Ngọc Anh |
-| `services/messaging/` | Hội thoại, tin, `seq`, file, fan-out, media | P2 Huy |
-| `clients/core/` | SDK, WebSocket, reconnect, catch-up, outbox | P3 Khanh |
-| `clients/web/` | Màn hình web, gồm dashboard | P3 Khanh |
-| `clients/mobile/` | App Expo dùng lại `clients/core`, push | P4 Thành |
-| `infra/` | Compose local, E2E, CI, deploy cloud | P4 Thành |
+| `doc/contract/` | OpenAPI, envelope event, quyết định kiến trúc | Ngọc Anh |
+| `services/app/` | Monolith Spring Boot (cửa public) | Ngọc Anh |
+| `services/identity/` | Tài khoản, token, nhóm, thành viên | Ngọc Anh |
+| `services/analytics/` | Ghi event, đọc bảng tổng hợp | Ngọc Anh |
+| `services/messaging/` | Hội thoại, tin, `seq`, file, fan-out, media | Huy |
+| `clients/core/` | SDK, WebSocket, reconnect, catch-up, outbox | Khanh |
+| `clients/web/` | Màn hình web, gồm dashboard | Khanh |
+| `clients/mobile/` | App Expo dùng lại `clients/core`, push | Thành |
+| `infra/` | Compose local, E2E, CI, deploy cloud | Thành |
 
 ## Chạy local
 
@@ -96,15 +96,14 @@ npx expo start --clear
 
 Mở Expo web `http://localhost:8081`, hoặc quét QR trên thiết bị. Trên thiết bị thật, đặt `EXPO_PUBLIC_API_*` / `EXPO_PUBLIC_WS_BASE_URL` trỏ IP máy host (không dùng `localhost`).
 
-### 4. E2E API (tuỳ chọn)
+### 4. E2E (tuỳ chọn)
 
 ```bash
 cd infra/e2e
-npm install
-npm test
+python3 run_all.py
 ```
 
-Chi tiết UI: [infra/e2e/UI_TEST.md](infra/e2e/UI_TEST.md).
+Chi tiết: [infra/e2e/README.md](infra/e2e/README.md).
 
 ### Biến môi trường client (tuỳ chọn)
 
@@ -123,21 +122,25 @@ cd infra
 
 ## Cloud / AWS
 
-Deploy tuần, S3 signed URL, URL public — nằm ở `infra/` khi sẵn sàng. Phần này **không bắt buộc** để phát triển và demo local.
+Monolith trên EC2 (`postgres` + `app` + `nginx`), media S3, HTTPS Let's Encrypt.
 
-## Đóng góp
+- Domain hiện tại: `https://halozalo.nltuanthanh.io.vn`
+- Health: `https://halozalo.nltuanthanh.io.vn/actuator/health`
+- Deploy: `infra/scripts/deploy-ec2.sh` (xem [infra/README.md](infra/README.md))
+- Env mẫu: [infra/.env.example](infra/.env.example) — `DOMAIN`, S3 bucket/region, ba key `VITE_*`
+- Mobile cloud: đặt `EXPO_PUBLIC_API_*` / `EXPO_PUBLIC_WS_BASE_URL` trỏ `https://$DOMAIN/api/...` và `wss://$DOMAIN/api/messaging`
 
-Sửa trong thư mục mình giữ. Một pull request không trộn thư mục của hai người.
+Local vẫn đủ để phát triển; cloud chỉ cần khi demo public.
 
-Đổi API hoặc event thì P1 sửa `doc/contract/` trước. Người còn lại sinh type và SDK từ file đó, không chép schema bằng tay.
+## Hợp đồng
 
-Mẫu mô tả task: [doc/taskTemplate.md](doc/taskTemplate.md).
+Đổi API hoặc event thì sửa `doc/contract/` trước, rồi mới đổi code và client.
 
 ## Nhóm
 
-| Người | Phần |
+| Thành viên | Phần |
 |---|---|
-| P1 Ngọc Anh | Hợp đồng, app, identity, analytics |
-| P2 Huy | Messaging và media |
-| P3 Khanh | client-core và web |
-| P4 Thành | Mobile và phát hành |
+| Nguyễn Ngọc Anh | Hợp đồng, app, identity, analytics |
+| La Quang Huy | Messaging và media |
+| Nguyễn Đan Thục Khanh | client-core và web |
+| Nguyễn Lê Tuấn Thành | Mobile và phát hành |
