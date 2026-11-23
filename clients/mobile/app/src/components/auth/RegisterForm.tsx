@@ -4,14 +4,14 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type RegisterFormProps = {
-  username: string;
+  displayName: string;
   email: string;
   password: string;
   confirmPassword: string;
   error: string;
   message: string;
   isLoading: boolean;
-  onUsernameChange: (value: string) => void;
+  onDisplayNameChange: (value: string) => void;
   onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onConfirmPasswordChange: (value: string) => void;
@@ -19,14 +19,14 @@ type RegisterFormProps = {
 };
 
 export default function RegisterForm({
-  username,
+  displayName,
   email,
   password,
   confirmPassword,
   error,
   message,
   isLoading,
-  onUsernameChange,
+  onDisplayNameChange,
   onEmailChange,
   onPasswordChange,
   onConfirmPasswordChange,
@@ -47,20 +47,21 @@ export default function RegisterForm({
     <View style={styles.formContainer}>
       <TextInput
         style={inputStyle}
-        placeholder="Username"
-        placeholderTextColor={theme.textMuted}
-        value={username}
-        onChangeText={onUsernameChange}
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={inputStyle}
         placeholder="Email"
         placeholderTextColor={theme.textMuted}
         value={email}
         onChangeText={onEmailChange}
         keyboardType="email-address"
         autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <TextInput
+        style={inputStyle}
+        placeholder="Display name"
+        placeholderTextColor={theme.textMuted}
+        value={displayName}
+        onChangeText={onDisplayNameChange}
+        maxLength={64}
       />
       <TextInput
         style={inputStyle}

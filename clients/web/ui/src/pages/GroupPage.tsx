@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import GroupHeader from '../components/group/GroupHeader'
 
-import type { AssignableGroupRole, Group, Member } from '@core/types/group'
+import type { Group, Member } from '@core/types/group'
 
 import { findUserApi } from '@core/userService'
 import {
@@ -13,10 +13,13 @@ import {
   getGroupMembersApi,
   addGroupMemberApi,
   removeGroupMemberApi,
-  assignGroupMemberRoleApi,
+  transferGroupOwnerApi,
+  dissolveGroupApi,
+  updateGroupApi,
 } from '@core/groupService'
 
 import { getAuth } from '@core/authSession'
+import { getInitials } from '@core/avatar'
 
 function GroupPage() {
   const authUser = getAuth()?.user
@@ -50,7 +53,13 @@ function GroupPage() {
   const [loadingMembers, setLoadingMembers] = useState(false)
   const [membersError, setMembersError] = useState('')
   const [removingUserId, setRemovingUserId] = useState<string | null>(null)
-  const [roleUpdatingUserId, setRoleUpdatingUserId] = useState<string | null>(null)
+  const [transferringUserId, setTransferringUserId] = useState<string | null>(null)
+
+  // Owner: edit name / dissolve
+  const [editingName, setEditingName] = useState(false)
+  const [editNameValue, setEditNameValue] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [dissolving, setDissolving] = useState(false)
 
   // Find and add user
   const [searchQuery, setSearchQuery] = useState('')
@@ -451,29 +460,115 @@ function GroupPage() {
     void loadGroups()
   }
 
-  async function handleAssignRole(
-    userId: string,
-    role: AssignableGroupRole,
-  ) {
-    if (!selectedGroup || roleUpdatingUserId) return
+  // Owner chuyển quyền owner cho một member. Sau đó mình thành MEMBER.
+  async function handleTransferOwner(member: Member) {
+    if (!selectedGroup || transferringUserId) return
 
-    setRoleUpdatingUserId(userId)
+    if (
+      !window.confirm(
+        `Transfer ownership of "${selectedGroup.name}" to ${member.username}? You will become a member.`,
+      )
+    ) {
+      return
+    }
+
+    setTransferringUserId(member.userId)
     setMemberError('')
     setMemberSuccess('')
 
     try {
-      await assignGroupMemberRoleApi(selectedGroup.groupId, userId, role)
-      setMemberSuccess(
-        role === 'ADMIN' ? 'Member promoted to ADMIN.' : 'Member set to MEMBER.',
+      await transferGroupOwnerApi(selectedGroup.groupId, member.userId)
+      setSelectedGroup({
+        ...selectedGroup,
+        ownerId: member.userId,
+        role: 'MEMBER',
+      })
+      setGroups((previous) =>
+        previous.map((group) =>
+          group.groupId === selectedGroup.groupId
+            ? { ...group, ownerId: member.userId, role: 'MEMBER' }
+            : group,
+        ),
       )
+      setMemberSuccess(`${member.username} is now the owner.`)
       setLoadingMembers(true)
       await loadGroupMembers(selectedGroup.groupId)
     } catch (err) {
       setMemberError(
-        err instanceof Error ? err.message : 'Cannot update role',
+        err instanceof Error ? err.message : 'Cannot transfer ownership',
       )
     } finally {
-      setRoleUpdatingUserId(null)
+      setTransferringUserId(null)
+    }
+  }
+
+  // Owner sửa tên nhóm.
+  async function handleSaveGroupName(event: React.FormEvent) {
+    event.preventDefault()
+    if (!selectedGroup || savingName) return
+
+    const name = editNameValue.trim()
+    if (!name || name === selectedGroup.name) {
+      setEditingName(false)
+      return
+    }
+
+    setSavingName(true)
+    setMemberError('')
+    setMemberSuccess('')
+
+    try {
+      const updated = await updateGroupApi(selectedGroup.groupId, { name })
+      const next = { ...selectedGroup, ...updated }
+      setSelectedGroup(next)
+      setGroups((previous) =>
+        previous.map((group) =>
+          group.groupId === next.groupId ? { ...group, name: next.name } : group,
+        ),
+      )
+      setEditingName(false)
+      setMemberSuccess('Group name updated.')
+    } catch (err) {
+      setMemberError(
+        err instanceof Error ? err.message : 'Cannot update group',
+      )
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  // Owner giải tán nhóm.
+  async function handleDissolveGroup() {
+    if (!selectedGroup || dissolving) return
+
+    if (
+      !window.confirm(
+        `Dissolve "${selectedGroup.name}"? This removes the group for everyone and cannot be undone.`,
+      )
+    ) {
+      return
+    }
+
+    setDissolving(true)
+    setMemberError('')
+    setMemberSuccess('')
+
+    try {
+      await dissolveGroupApi(selectedGroup.groupId)
+      setSuccessMessage(`Group "${selectedGroup.name}" was dissolved.`)
+      setSelectedGroup(null)
+      setMembers([])
+      setLoadingMembers(false)
+      setMembersError('')
+      setLoading(true)
+      setLoadError('')
+      await loadGroups()
+    } catch (err) {
+      setMemberError(
+        err instanceof Error ? err.message : 'Cannot dissolve group',
+      )
+    } finally {
+      setDissolving(false)
     }
   }
 
@@ -507,13 +602,59 @@ function GroupPage() {
         <div className="border-bottom p-3">
           <div className="d-flex justify-content-between align-items-center mb-3">
             <div>
-              <h5 className="mb-1">{selectedGroup.name}</h5>
+              {editingName ? (
+                <form
+                  className="d-flex gap-2 mb-1"
+                  onSubmit={(event) => void handleSaveGroupName(event)}
+                >
+                  <input
+                    className="form-control form-control-sm"
+                    value={editNameValue}
+                    maxLength={64}
+                    autoFocus
+                    disabled={savingName}
+                    onChange={(event) => setEditNameValue(event.target.value)}
+                    aria-label="Group name"
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={savingName || !editNameValue.trim()}
+                  >
+                    {savingName ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    disabled={savingName}
+                    onClick={() => setEditingName(false)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <h5 className="mb-1 d-flex align-items-center gap-2">
+                  {selectedGroup.name}
+                  {selectedGroup.role === 'OWNER' && (
+                    <button
+                      type="button"
+                      className="btn btn-link btn-sm p-0"
+                      title="Edit group name"
+                      aria-label="Edit group name"
+                      onClick={() => {
+                        setEditNameValue(selectedGroup.name)
+                        setEditingName(true)
+                      }}
+                    >
+                      <i className="bi bi-pencil" aria-hidden="true" />
+                    </button>
+                  )}
+                </h5>
+              )}
               <small className="text-secondary">
                 {selectedGroup.role === 'OWNER'
                   ? 'You are the owner'
-                  : selectedGroup.role === 'ADMIN'
-                    ? 'You are an admin'
-                    : 'You are a member'}
+                  : 'You are a member'}
               </small>
             </div>
 
@@ -525,8 +666,8 @@ function GroupPage() {
                 setMembers([])
                 setLoadingMembers(false)
                 setMembersError('')
-              }
-              }
+                setEditingName(false)
+              }}
             >
               Close
             </button>
@@ -563,18 +704,15 @@ function GroupPage() {
                   const isCurrentUser =
                     member.userId === authUser.userId
 
-                  const canManageMembers =
-                    selectedGroup.role === 'OWNER' ||
-                    selectedGroup.role === 'ADMIN'
+                  const isOwnerViewer = selectedGroup.role === 'OWNER'
 
                   const canRemove =
-                    canManageMembers &&
+                    isOwnerViewer &&
                     !isCurrentUser &&
-                    member.role !== 'OWNER' &&
-                    !(selectedGroup.role === 'ADMIN' && member.role === 'ADMIN')
+                    member.role !== 'OWNER'
 
-                  const canAssignRole =
-                    selectedGroup.role === 'OWNER' &&
+                  const canTransfer =
+                    isOwnerViewer &&
                     !isCurrentUser &&
                     member.role !== 'OWNER'
 
@@ -600,32 +738,16 @@ function GroupPage() {
                       </div>
 
                       <div className="d-flex gap-2 flex-wrap justify-content-end">
-                        {canAssignRole && member.role !== 'ADMIN' && (
+                        {canTransfer && (
                           <button
                             type="button"
                             className="btn btn-outline-primary btn-sm"
-                            disabled={roleUpdatingUserId !== null}
-                            onClick={() =>
-                              void handleAssignRole(member.userId, 'ADMIN')
-                            }
+                            disabled={transferringUserId !== null}
+                            onClick={() => void handleTransferOwner(member)}
                           >
-                            {roleUpdatingUserId === member.userId
+                            {transferringUserId === member.userId
                               ? '…'
-                              : 'Make admin'}
-                          </button>
-                        )}
-                        {canAssignRole && member.role === 'ADMIN' && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-secondary btn-sm"
-                            disabled={roleUpdatingUserId !== null}
-                            onClick={() =>
-                              void handleAssignRole(member.userId, 'MEMBER')
-                            }
-                          >
-                            {roleUpdatingUserId === member.userId
-                              ? '…'
-                              : 'Make member'}
+                              : 'Make owner'}
                           </button>
                         )}
                         {canRemove && (
@@ -650,9 +772,8 @@ function GroupPage() {
             )}
           </div>
 
-          {/* Owner / admin adds members */}
-          {(selectedGroup.role === 'OWNER' ||
-            selectedGroup.role === 'ADMIN') && (
+          {/* Owner adds members */}
+          {selectedGroup.role === 'OWNER' && (
             <>
               <form
                 onSubmit={handleSearchUser}
@@ -709,9 +830,8 @@ function GroupPage() {
             </>
           )}
 
-          {/* Member / admin leaves group */}
-          {(selectedGroup.role === 'MEMBER' ||
-            selectedGroup.role === 'ADMIN') && (
+          {/* Member leaves group */}
+          {selectedGroup.role === 'MEMBER' && (
             <button
               type="button"
               className="btn btn-outline-danger btn-sm mt-3"
@@ -724,6 +844,22 @@ function GroupPage() {
                 ? 'Leaving...'
                 : 'Leave group'}
             </button>
+          )}
+
+          {selectedGroup.role === 'OWNER' && (
+            <div className="mt-3 pt-3 border-top">
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                disabled={dissolving}
+                onClick={() => void handleDissolveGroup()}
+              >
+                {dissolving ? 'Dissolving…' : 'Dissolve group'}
+              </button>
+              <div className="form-text">
+                Owners can leave only after transferring ownership, or dissolve the group.
+              </div>
+            </div>
           )}
 
           {memberError && (
@@ -896,7 +1032,7 @@ function GroupPage() {
                 selectedGroup?.groupId === group.groupId
 
               const count = memberCounts[group.groupId]
-              const initial = (group.name?.trim()?.charAt(0) || 'G').toUpperCase()
+              const initial = group.name?.trim() ? getInitials(group.name) : 'G'
 
               return (
                 <li

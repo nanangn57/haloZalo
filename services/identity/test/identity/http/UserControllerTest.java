@@ -44,6 +44,7 @@ class UserControllerTest {
         AuthService auth = new AuthService(
             new BcryptPasswordHasher(),
             accounts,
+            emptyProfiles(),
             new MemorySessions(),
             userId -> { },
             new MemoryVerifications(),
@@ -121,14 +122,14 @@ class UserControllerTest {
     private String registerAndLogin() throws Exception {
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
+                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\",\"displayName\":\"Ngoc Anh\"}"))
             .andExpect(status().isAccepted());
         String token = mail.body.substring(mail.body.indexOf("token=") + "token=".length());
-        mvc.perform(get("/auth/verify").param("token", token)).andExpect(status().isOk());
+        mvc.perform(get("/auth/verify").param("token", token).param("deviceId", "test-device-1")).andExpect(status().isOk());
         return com.jayway.jsonpath.JsonPath.read(
             mvc.perform(post("/auth/login")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+                    .content("{\"login\":\"anh@example.com\",\"password\":\"password1\",\"deviceId\":\"test-device-1\"}"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -193,6 +194,28 @@ class UserControllerTest {
             }
         }
 
+        @Override
+        public void updateBannedAt(String userId, Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemorySessions implements SessionRepository {
@@ -206,6 +229,47 @@ class UserControllerTest {
         @Override
         public Session findById(String sessionId) {
             return rows.stream().filter(row -> row.getSessionId().equals(sessionId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public Session findByUserIdAndDeviceId(String userId, String deviceId) {
+            if (deviceId == null) {
+                return null;
+            }
+            return rows.stream()
+                .filter(row -> row.getUserId().equals(userId) && deviceId.equals(row.getDeviceId()))
+                .findFirst()
+                .orElse(null);
+        }
+
+        @Override
+        public List<Session> findByUserId(String userId) {
+            return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
+        }
+
+        @Override
+        public void delete(String sessionId) {
+            rows.removeIf(row -> row.getSessionId().equals(sessionId));
+        }
+
+        @Override
+        public void touch(String sessionId, Instant lastSeenAt, Instant expiresAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Session row = rows.get(i);
+                if (row.getSessionId().equals(sessionId)) {
+                    rows.set(i, new Session(
+                        row.getSessionId(),
+                        row.getUserId(),
+                        row.getCreatedAt(),
+                        expiresAt,
+                        row.getDeviceId(),
+                        row.getDeviceLabel(),
+                        row.getUserAgent(),
+                        lastSeenAt
+                    ));
+                    return;
+                }
+            }
         }
     }
 

@@ -7,6 +7,10 @@ interface MesToolbarProps {
   onImageClick?: () => void
   onFileClick?: () => void
   onVideoClick?: () => void
+  // Giữ nút mic để ghi, nhả ra để gửi.
+  recording?: boolean
+  onVoiceStart?: () => void
+  onVoiceStop?: () => void
 }
 
 function MesToolbar({
@@ -18,6 +22,9 @@ function MesToolbar({
   onImageClick,
   onFileClick,
   onVideoClick,
+  recording,
+  onVoiceStart,
+  onVoiceStop,
 }: MesToolbarProps) {
   return (
     <div className="chat-composer-toolbar" role="toolbar" aria-label="Message tools">
@@ -85,6 +92,42 @@ function MesToolbar({
           title="Video"
         >
           <i className="bi bi-camera-video" aria-hidden="true" />
+        </button>
+      ) : null}
+
+      {onVoiceStart && onVoiceStop ? (
+        <button
+          type="button"
+          className={`app-icon-button ${recording ? 'active text-danger' : ''}`}
+          disabled={disabled}
+          aria-label={recording ? 'Recording… release to send' : 'Hold to record voice message'}
+          aria-pressed={recording}
+          title="Hold to record"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return
+            event.currentTarget.setPointerCapture(event.pointerId)
+            onVoiceStart()
+          }}
+          onPointerUp={onVoiceStop}
+          onPointerCancel={onVoiceStop}
+          onKeyDown={(event) => {
+            if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) {
+              event.preventDefault()
+              onVoiceStart()
+            }
+          }}
+          onKeyUp={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault()
+              onVoiceStop()
+            }
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <i
+            className={`bi ${recording ? 'bi-mic-fill' : 'bi-mic'}`}
+            aria-hidden="true"
+          />
         </button>
       ) : null}
     </div>

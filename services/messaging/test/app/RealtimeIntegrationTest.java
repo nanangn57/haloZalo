@@ -5,6 +5,7 @@ import http.CurrentUser;
 import realtime.RealtimeSessions;
 import service.MessageService;
 import storage.MemoryConversations;
+import storage.MemoryPrefs;
 import storage.MemoryMessages;
 import storage.MemoryReactions;
 import storage.MemoryReadMarkers;
@@ -243,13 +244,23 @@ class RealtimeIntegrationTest {
         basePackages = {"api", "event", "http", "member", "realtime", "service"},
         excludeFilters = @ComponentScan.Filter(
             type = FilterType.ASSIGNABLE_TYPE,
-            classes = {http.SharedSessionFilter.class, member.SharedDbGroupMembers.class}
+            classes = {
+                http.SharedSessionFilter.class,
+                member.SharedDbGroupMembers.class,
+                member.SharedDbFriendshipChecker.class,
+                member.SharedDbBlockChecker.class
+            }
         )
     )
     static class TestApplication {
         @Bean
-        MemoryConversations conversations() {
-            return new MemoryConversations();
+        MemoryPrefs prefs() {
+            return new MemoryPrefs();
+        }
+
+        @Bean
+        MemoryConversations conversations(MemoryPrefs prefs) {
+            return new MemoryConversations(prefs);
         }
 
         @Bean

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import Avatar from '../components/common/Avatar'
 import ContactHeader from '../components/contact/ContactHeader'
 import ContactFriendlist from '../components/contact/ContactFriendList'
 
@@ -10,17 +11,28 @@ import type { AuthUser } from '@core/types/auth'
 import type { Friend } from '@core/friendService'
 
 import { findUserApi } from '@core/userService'
-import { listFriendsApi } from '@core/friendService'
+import {
+  blockUserApi,
+  listBlocksApi,
+  listFriendsApi,
+  unblockUserApi,
+  unfriendApi,
+} from '@core/friendService'
 import { createDirectConversationApi } from '@core/conversationService'
+import { getPresenceApi } from '@core/presenceService'
+
+const PRESENCE_POLL_MS = 30_000
 
 function toContactUser(found: AuthUser | Friend): User {
   const username = found.username
   return {
     id: found.userId,
     name: found.displayName || username,
-    avatar: `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(username)}`,
+    // Không có URL avatar: UI hiện chữ cái viết tắt (Avatar component).
+    avatar: 'avatar' in found && found.avatar ? found.avatar : '',
+    // Presence nạp riêng qua GET /presence (xem ContactPage), mặc định offline.
     online: false,
-    lastSeen: Math.floor(Date.now() / 1000),
+    lastSeen: 0,
     unread: 0,
   }
 }
@@ -30,7 +42,10 @@ function ContactPage() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<User[]>([])
   const [friends, setFriends] = useState<User[]>([])
+  const [onlineById, setOnlineById] = useState<Record<string, boolean>>({})
   const [searching, setSearching] = useState(false)
+  const [blocked, setBlocked] = useState<User[]>([])
+  const [showBlocked, setShowBlocked] = useState(false)
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
@@ -52,10 +67,84 @@ function ContactPage() {
           setError(err instanceof Error ? err.message : 'Cannot load friends')
         }
       })
+    void listBlocksApi()
+      .then((items) => {
+        if (mounted) {
+          setBlocked(items.map(toContactUser))
+        }
+      })
+      .catch(() => undefined)
     return () => {
       mounted = false
     }
   }, [])
+
+  // Presence của bạn bè: nạp khi có danh sách, rồi mỗi 30 giây và khi tab được focus lại.
+  const friendIdsKey = friends.map((friend) => friend.id).join(',')
+  useEffect(() => {
+    if (!friendIdsKey) {
+      return
+    }
+    const ids = friendIdsKey.split(',')
+    let cancelled = false
+
+    const refresh = () => {
+      void getPresenceApi(ids)
+        .then((result) => {
+          if (cancelled) return
+          const next: Record<string, boolean> = {}
+          Object.values(result).forEach((item) => {
+            next[item.userId] = item.online
+          })
+          setOnlineById(next)
+        })
+        .catch(() => undefined)
+    }
+
+    refresh()
+    const timer = window.setInterval(refresh, PRESENCE_POLL_MS)
+    window.addEventListener('focus', refresh)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [friendIdsKey])
+
+  async function handleUnfriend(user: User) {
+    if (!window.confirm(`Unfriend ${user.name}?`)) return
+    setError('')
+    try {
+      await unfriendApi(user.id)
+      setFriends((previous) => previous.filter((item) => item.id !== user.id))
+      setResults((previous) => previous.filter((item) => item.id !== user.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot unfriend')
+    }
+  }
+
+  async function handleBlock(user: User) {
+    if (!window.confirm(`Block ${user.name}? They will not be able to message you.`)) return
+    setError('')
+    try {
+      await blockUserApi(user.id)
+      setFriends((previous) => previous.filter((item) => item.id !== user.id))
+      setResults((previous) => previous.filter((item) => item.id !== user.id))
+      setBlocked((previous) => [user, ...previous.filter((item) => item.id !== user.id)])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot block user')
+    }
+  }
+
+  async function handleUnblock(user: User) {
+    setError('')
+    try {
+      await unblockUserApi(user.id)
+      setBlocked((previous) => previous.filter((item) => item.id !== user.id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot unblock user')
+    }
+  }
 
   async function handleSearch(event: React.FormEvent) {
     event.preventDefault()
@@ -96,7 +185,14 @@ function ContactPage() {
     }
   }
 
-  const shown = results.length > 0 ? results : friends
+  const shown = useMemo(
+    () =>
+      (results.length > 0 ? results : friends).map((user) => ({
+        ...user,
+        online: onlineById[user.id] ?? false,
+      })),
+    [results, friends, onlineById],
+  )
 
   return (
     <main
@@ -137,11 +233,46 @@ function ContactPage() {
               key={user.id}
               user={user}
               onSelect={() => void openDirect(user)}
+              onUnfriend={() => void handleUnfriend(user)}
+              onBlock={() => void handleBlock(user)}
               disabled={openingId === user.id}
             />
           ))
         )}
       </ul>
+
+      {blocked.length > 0 ? (
+        <div className="border-top">
+          <button
+            type="button"
+            className="btn btn-link text-decoration-none w-100 text-start px-3 py-2"
+            onClick={() => setShowBlocked((open) => !open)}
+            aria-expanded={showBlocked}
+          >
+            Blocked users ({blocked.length})
+          </button>
+          {showBlocked ? (
+            <ul className="list-group list-group-flush">
+              {blocked.map((user) => (
+                <li
+                  key={user.id}
+                  className="list-group-item d-flex align-items-center gap-2"
+                >
+                  <Avatar name={user.name} src={user.avatar} size={36} />
+                  <span className="flex-grow-1 text-truncate">{user.name}</span>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => void handleUnblock(user)}
+                  >
+                    Unblock
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </main>
   )
 }

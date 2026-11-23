@@ -6,6 +6,8 @@ import analytics.record.AggregateActivityRecorder;
 import analytics.store.ActivityRepository;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -49,7 +51,76 @@ class LoggingEventPublisherTest {
         assertTrue(envelope.contains("\"producer\":\"identity\""));
         assertTrue(envelope.contains("\"groupId\":\"11111111-2222-4333-8444-555555555555\""));
         assertTrue(envelope.contains("\"ownerId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\""));
+        assertTrue(envelope.contains("\"memberCount\":1"));
         assertFalse(envelope.contains("name"));
+    }
+
+    @Test
+    void memberEnvelopesCarryTheContract() {
+        String group = "11111111-2222-4333-8444-555555555555";
+        String alice = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+        String bob = "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+        String added = LoggingEventPublisher.memberAddedEnvelope(group, alice, bob);
+        String removed = LoggingEventPublisher.memberRemovedEnvelope(group, alice, bob);
+        String left = LoggingEventPublisher.memberLeftEnvelope(group, bob);
+        String transferred = LoggingEventPublisher.ownerTransferredEnvelope(group, alice, bob);
+        String dissolved = LoggingEventPublisher.dissolvedEnvelope(group, alice);
+
+        assertTrue(added.contains("\"type\":\"identity.group.member_added\""));
+        assertTrue(added.contains("\"payload\":{\"groupId\":\"" + group + "\",\"actorId\":\"" + alice + "\",\"userId\":\"" + bob + "\"}"));
+        assertTrue(removed.contains("\"type\":\"identity.group.member_removed\""));
+        assertTrue(removed.contains("\"actorId\":\"" + alice + "\",\"userId\":\"" + bob + "\""));
+        assertTrue(left.contains("\"type\":\"identity.group.member_left\""));
+        assertTrue(left.contains("\"payload\":{\"groupId\":\"" + group + "\",\"userId\":\"" + bob + "\"}"));
+        assertTrue(transferred.contains("\"type\":\"identity.group.owner_transferred\""));
+        assertTrue(transferred.contains("\"fromUserId\":\"" + alice + "\",\"toUserId\":\"" + bob + "\""));
+        assertTrue(dissolved.contains("\"type\":\"identity.group.dissolved\""));
+        assertTrue(dissolved.contains("\"payload\":{\"groupId\":\"" + group + "\",\"actorId\":\"" + alice + "\"}"));
+        for (String envelope : List.of(added, removed, left, transferred, dissolved)) {
+            assertTrue(envelope.contains("\"producer\":\"identity\""));
+            assertTrue(envelope.contains("\"eventId\":\""));
+            assertTrue(envelope.contains("\"occurredAt\":\""));
+        }
+    }
+
+    @Test
+    void everyMembershipChangeReachesTheListenersAndAFailingListenerStopsNobody() {
+        String group = "11111111-2222-4333-8444-555555555555";
+        String alice = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+        String bob = "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+        List<GroupMembershipChange> heard = new ArrayList<>();
+        GroupMembershipListener failing = change -> {
+            throw new IllegalStateException("boom");
+        };
+        LoggingEventPublisher publisher = new LoggingEventPublisher(
+            envelope -> { }, List.of(failing, heard::add));
+
+        publisher.publishMemberAdded(group, alice, bob);
+        publisher.publishMemberRemoved(group, alice, bob);
+        publisher.publishMemberLeft(group, bob);
+        publisher.publishOwnerTransferred(group, alice, bob);
+        publisher.publishGroupDissolved(group, alice);
+
+        assertEquals(List.of(
+            new GroupMembershipChange(GroupMembershipChange.Type.MEMBER_ADDED, group, alice, bob),
+            new GroupMembershipChange(GroupMembershipChange.Type.MEMBER_REMOVED, group, alice, bob),
+            new GroupMembershipChange(GroupMembershipChange.Type.MEMBER_LEFT, group, bob, bob),
+            new GroupMembershipChange(GroupMembershipChange.Type.OWNER_TRANSFERRED, group, alice, bob),
+            new GroupMembershipChange(GroupMembershipChange.Type.GROUP_DISSOLVED, group, alice, null)), heard);
+    }
+
+    @Test
+    void membershipEnvelopesAreRecordedButDoNotChangeTheCounters() {
+        MemoryActivities stored = new MemoryActivities();
+        LoggingEventPublisher publisher = new LoggingEventPublisher(new AggregateActivityRecorder(stored));
+
+        publisher.publishMemberAdded("11111111-2222-4333-8444-555555555555", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+
+        ActivityStats stats = new StatsService(stored).current();
+        assertEquals(0, stats.getLogins());
+        assertEquals(0, stats.getGroupsCreated());
     }
 
     @Test

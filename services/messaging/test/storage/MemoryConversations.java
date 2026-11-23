@@ -2,6 +2,7 @@ package storage;
 
 import conversation.Conversation;
 import conversation.ConversationCursor;
+import conversation.ConversationFilter;
 import conversation.ConversationType;
 
 import java.time.Instant;
@@ -9,7 +10,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class MemoryConversations implements ConversationRepository {
@@ -19,6 +19,22 @@ public final class MemoryConversations implements ConversationRepository {
         .reversed();
 
     private final Map<String, Conversation> rows = new ConcurrentHashMap<>();
+    private final MemoryPrefs prefs;
+
+    public MemoryConversations() {
+        this(new MemoryPrefs());
+    }
+
+    /**
+     * Reads the prefs of the same user to order and filter the list, as the Postgres query joins them.
+     */
+    public MemoryConversations(MemoryPrefs prefs) {
+        this.prefs = prefs;
+    }
+
+    public MemoryPrefs prefs() {
+        return prefs;
+    }
 
     @Override
     public synchronized boolean insert(Conversation conversation) {
@@ -41,13 +57,30 @@ public final class MemoryConversations implements ConversationRepository {
     }
 
     @Override
-    public List<Conversation> findForMember(String userId, Collection<String> groupIds, ConversationCursor after, int limit) {
+    public synchronized boolean acceptRequest(String conversationId, String userId) {
+        Conversation row = rows.get(conversationId);
+        if (row == null || !row.isPendingFor(userId)) {
+            return false;
+        }
+        rows.put(conversationId, row.accepted());
+        return true;
+    }
+
+    @Override
+    public List<Conversation> findForMember(
+        String userId, Collection<String> groupIds, ConversationFilter filter, ConversationCursor after, int limit) {
+        Comparator<Conversation> order = Comparator
+            .comparing((Conversation row) -> prefs.of(userId, row.getConversationId()).pinned())
+            .thenComparing(Conversation::getActivityAt)
+            .thenComparing(Conversation::getConversationId)
+            .reversed();
         return rows.values().stream()
             .filter(row -> row.getType() == ConversationType.DIRECT
-                ? row.hasMember(userId)
-                : groupIds.contains(row.getConversationId()))
-            .filter(row -> after == null || NEWEST_FIRST.compare(row, cursorRow(after)) > 0)
-            .sorted(NEWEST_FIRST)
+                ? row.hasMember(userId) && row.isPendingFor(userId) == filter.requests()
+                : !filter.requests() && groupIds.contains(row.getConversationId()))
+            .filter(row -> prefs.of(userId, row.getConversationId()).archived() == filter.archived())
+            .sorted(order)
+            .filter(row -> after == null || isAfter(userId, row, after))
             .limit(limit)
             .toList();
     }
@@ -57,10 +90,21 @@ public final class MemoryConversations implements ConversationRepository {
      */
     void touch(String conversationId, long seq, Instant at) {
         rows.computeIfPresent(conversationId, (id, old) -> new Conversation(
-            id, old.getType(), old.getMemberIds(), seq, old.getCreatedAt(), at));
+            id, old.getType(), old.getMemberIds(), seq, old.getCreatedAt(), at, old.getPendingFor()));
     }
 
-    private static Conversation cursorRow(ConversationCursor cursor) {
-        return new Conversation(cursor.conversationId(), ConversationType.GROUP, Set.of(), 0, cursor.activityAt());
+    /**
+     * Strictly after the cursor in (pinned DESC, activity DESC, id DESC) order.
+     */
+    private boolean isAfter(String userId, Conversation row, ConversationCursor cursor) {
+        boolean pinned = prefs.of(userId, row.getConversationId()).pinned();
+        if (pinned != cursor.pinned()) {
+            return !pinned;
+        }
+        int byActivity = row.getActivityAt().compareTo(cursor.activityAt());
+        if (byActivity != 0) {
+            return byActivity < 0;
+        }
+        return row.getConversationId().compareTo(cursor.conversationId()) < 0;
     }
 }

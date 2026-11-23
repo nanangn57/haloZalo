@@ -14,6 +14,7 @@ public final class Conversation {
     private final long lastSeq;
     private final Instant createdAt;
     private final Instant lastMessageAt;
+    private final String pendingFor;
 
     public Conversation(String conversationId, ConversationType type, Set<String> memberIds, long lastSeq, Instant createdAt) {
         this(conversationId, type, memberIds, lastSeq, createdAt, null);
@@ -26,12 +27,52 @@ public final class Conversation {
         long lastSeq,
         Instant createdAt,
         Instant lastMessageAt) {
+        this(conversationId, type, memberIds, lastSeq, createdAt, lastMessageAt, null);
+    }
+
+    /**
+     * pendingFor is the member of a DIRECT conversation whose side is still a stranger's request, or null.
+     */
+    public Conversation(
+        String conversationId,
+        ConversationType type,
+        Set<String> memberIds,
+        long lastSeq,
+        Instant createdAt,
+        Instant lastMessageAt,
+        String pendingFor) {
         this.conversationId = conversationId;
         this.type = type;
         this.memberIds = Set.copyOf(memberIds);
         this.lastSeq = lastSeq;
         this.createdAt = createdAt;
         this.lastMessageAt = lastMessageAt;
+        this.pendingFor = pendingFor;
+    }
+
+    /**
+     * The same conversation with the request accepted.
+     */
+    public Conversation accepted() {
+        return new Conversation(conversationId, type, memberIds, lastSeq, createdAt, lastMessageAt, null);
+    }
+
+    public boolean isPendingFor(String userId) {
+        return pendingFor != null && pendingFor.equals(userId);
+    }
+
+    public String getPendingFor() {
+        return pendingFor;
+    }
+
+    /**
+     * DIRECT only: the member who is not userId, or null when userId is not a member.
+     */
+    public String otherMember(String userId) {
+        if (!memberIds.contains(userId)) {
+            return null;
+        }
+        return memberIds.stream().filter(member -> !member.equals(userId)).findFirst().orElse(null);
     }
 
     /**

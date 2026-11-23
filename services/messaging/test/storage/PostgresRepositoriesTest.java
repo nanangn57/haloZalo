@@ -2,12 +2,16 @@ package storage;
 
 import conversation.Conversation;
 import conversation.ConversationCursor;
+import conversation.ConversationFilter;
+import conversation.ConversationPrefs;
+import conversation.ConversationPrefsPatch;
 import conversation.ConversationType;
 import conversation.ReadState;
 import message.Message;
 import message.MessageContent;
 import message.MessageMetadata;
 import message.MessageStatus;
+import message.MessageType;
 import reaction.MessageReaction;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -64,6 +68,7 @@ class PostgresRepositoriesTest {
     private static PostgresMessageRepository messages;
     private static PostgresReactionRepository reactions;
     private static PostgresReadMarkerRepository readMarkers;
+    private static PostgresConversationPrefsRepository prefs;
 
     private String conversationId;
 
@@ -84,6 +89,7 @@ class PostgresRepositoriesTest {
         messages = new PostgresMessageRepository(jdbc, transaction);
         reactions = new PostgresReactionRepository(jdbc);
         readMarkers = new PostgresReadMarkerRepository(jdbc);
+        prefs = new PostgresConversationPrefsRepository(jdbc);
     }
 
     @AfterAll
@@ -93,7 +99,7 @@ class PostgresRepositoriesTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE read_markers, message_reactions, messages, direct_members, conversations");
+        jdbc.execute("TRUNCATE notification_prefs, conversation_prefs, read_markers, message_reactions, messages, direct_members, conversations");
         conversationId = UUID.randomUUID().toString();
         assertTrue(conversations.insert(new Conversation(conversationId, ConversationType.DIRECT, Set.of(ALICE, BOB), 0, NOW)));
     }
@@ -239,9 +245,9 @@ class PostgresRepositoriesTest {
         messages.append(draftIn(busy, NOW.plusSeconds(20)));
         Message newest = messages.append(draftIn(busy, NOW.plusSeconds(30)));
 
-        List<Conversation> all = conversations.findForMember(ALICE, Set.of(quiet, busy), null, 10);
-        List<Conversation> firstPage = conversations.findForMember(ALICE, Set.of(quiet, busy), null, 2);
-        List<Conversation> rest = conversations.findForMember(ALICE, Set.of(quiet, busy), ConversationCursor.after(firstPage.get(1)), 2);
+        List<Conversation> all = conversations.findForMember(ALICE, Set.of(quiet, busy), ConversationFilter.DEFAULT, null, 10);
+        List<Conversation> firstPage = conversations.findForMember(ALICE, Set.of(quiet, busy), ConversationFilter.DEFAULT, null, 2);
+        List<Conversation> rest = conversations.findForMember(ALICE, Set.of(quiet, busy), ConversationFilter.DEFAULT, ConversationCursor.after(firstPage.get(1)), 2);
 
         assertEquals(List.of(busy, quiet, conversationId), all.stream().map(Conversation::getConversationId).toList());
         assertEquals(NOW.plusSeconds(30), all.get(0).getLastMessageAt());
@@ -249,7 +255,7 @@ class PostgresRepositoriesTest {
         assertEquals(Set.of(), all.get(0).getMemberIds());
         assertEquals(Set.of(ALICE, BOB), all.get(2).getMemberIds());
         assertEquals(List.of(conversationId), rest.stream().map(Conversation::getConversationId).toList());
-        assertEquals(List.of(quiet), conversations.findForMember(BOB, Set.of(quiet), null, 10).stream()
+        assertEquals(List.of(quiet), conversations.findForMember(BOB, Set.of(quiet), ConversationFilter.DEFAULT, null, 10).stream()
             .map(Conversation::getConversationId).filter(id -> !id.equals(conversationId)).toList());
 
         Map<String, Message> latest = messages.findLatest(List.of(busy, quiet, conversationId));
@@ -308,6 +314,121 @@ class PostgresRepositoriesTest {
         assertEquals(20, readMarkers.advance(conversationId, BOB, 0, NOW).lastReadSeq());
     }
 
+    @Test
+    void prefsPatchKeepsUntouchedFieldsAndAreKeptPerUser() {
+        assertEquals(new ConversationPrefs(true, false, false),
+            prefs.update(ALICE, conversationId, new ConversationPrefsPatch(true, null, null), NOW));
+        assertEquals(new ConversationPrefs(true, true, false),
+            prefs.update(ALICE, conversationId, new ConversationPrefsPatch(null, true, null), NOW));
+        assertEquals(new ConversationPrefs(false, true, true),
+            prefs.update(ALICE, conversationId, new ConversationPrefsPatch(false, null, true), NOW));
+
+        assertEquals(Map.of(conversationId, new ConversationPrefs(false, true, true)),
+            prefs.find(ALICE, List.of(conversationId, UUID.randomUUID().toString())));
+        assertEquals(Map.of(), prefs.find(BOB, List.of(conversationId)));
+        assertEquals(Map.of(), prefs.find(ALICE, List.of()));
+        assertEquals(Set.of(ALICE), prefs.mutedAmong(conversationId, List.of(ALICE, BOB)));
+        assertEquals(Set.of(), prefs.mutedAmong(conversationId, List.of(BOB)));
+        assertEquals(Set.of(), prefs.mutedAmong(conversationId, List.of()));
+    }
+
+    @Test
+    void listPutsPinnedFirstHidesArchivedAndPagesAcrossThePinnedBoundary() {
+        String quiet = UUID.randomUUID().toString();
+        String busy = UUID.randomUUID().toString();
+        conversations.insert(new Conversation(quiet, ConversationType.GROUP, Set.of(), 0, NOW.plusSeconds(10)));
+        conversations.insert(new Conversation(busy, ConversationType.GROUP, Set.of(), 0, NOW.plusSeconds(20)));
+        Set<String> groups = Set.of(quiet, busy);
+        prefs.update(ALICE, conversationId, new ConversationPrefsPatch(true, null, null), NOW);
+
+        List<Conversation> pinnedFirst = conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT, null, 10);
+        assertEquals(List.of(conversationId, busy, quiet), ids(pinnedFirst));
+
+        List<Conversation> first = conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT, null, 1);
+        ConversationCursor afterPinned = ConversationCursor.after(first.get(0), true);
+        List<Conversation> second = conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT, afterPinned, 1);
+        List<Conversation> third = conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT,
+            ConversationCursor.after(second.get(0), false), 1);
+        List<Conversation> none = conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT,
+            ConversationCursor.after(third.get(0), false), 1);
+        assertEquals(List.of(conversationId), ids(first));
+        assertEquals(List.of(busy), ids(second));
+        assertEquals(List.of(quiet), ids(third));
+        assertEquals(List.of(), ids(none));
+
+        prefs.update(ALICE, busy, new ConversationPrefsPatch(null, null, true), NOW);
+        assertEquals(List.of(conversationId, quiet),
+            ids(conversations.findForMember(ALICE, groups, ConversationFilter.DEFAULT, null, 10)));
+        assertEquals(List.of(busy),
+            ids(conversations.findForMember(ALICE, groups, new ConversationFilter(false, true), null, 10)));
+        // Prefs are Alice's: Bob still sees his direct chat as an ordinary, unpinned, unarchived one.
+        assertEquals(List.of(conversationId),
+            ids(conversations.findForMember(BOB, Set.of(), ConversationFilter.DEFAULT, null, 10)));
+    }
+
+    @Test
+    void pendingRequestsAreListedOnlyForTheRecipientAndAcceptMovesThem() {
+        String stranger = UUID.randomUUID().toString();
+        String strangerChat = UUID.randomUUID().toString();
+        assertTrue(conversations.insert(new Conversation(
+            strangerChat, ConversationType.DIRECT, Set.of(ALICE, stranger), 0, NOW, null, stranger)));
+        ConversationFilter requests = new ConversationFilter(true, false);
+
+        assertEquals(stranger, conversations.findById(strangerChat).getPendingFor());
+        assertEquals(List.of(strangerChat), ids(conversations.findForMember(stranger, Set.of(), requests, null, 10)));
+        assertEquals(List.of(), ids(conversations.findForMember(ALICE, Set.of(), requests, null, 10)));
+        assertEquals(List.of(conversationId, strangerChat).stream().sorted().toList(),
+            ids(conversations.findForMember(ALICE, Set.of(), ConversationFilter.DEFAULT, null, 10)).stream().sorted().toList());
+        assertEquals(List.of(), ids(conversations.findForMember(stranger, Set.of(), ConversationFilter.DEFAULT, null, 10)));
+
+        assertFalse(conversations.acceptRequest(strangerChat, ALICE));
+        assertTrue(conversations.acceptRequest(strangerChat, stranger));
+        assertFalse(conversations.acceptRequest(strangerChat, stranger));
+
+        assertNull(conversations.findById(strangerChat).getPendingFor());
+        assertEquals(List.of(), ids(conversations.findForMember(stranger, Set.of(), requests, null, 10)));
+        assertEquals(List.of(strangerChat), ids(conversations.findForMember(stranger, Set.of(), ConversationFilter.DEFAULT, null, 10)));
+    }
+
+    @Test
+    void searchMatchesTextIgnoringCaseTakesWildcardsLiterallySkipsDeletedAndPages() {
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("Họp lúc NOON")));
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("100% chắc")));
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("a_b")));
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("axb")));
+        messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("back\\slash")));
+        Message gone = messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("noon deleted")));
+        messages.append(draft(BOB, UUID.randomUUID().toString(),
+            new MessageContent.Image("https://cdn/noon.png", null, null, null, "noon")));
+        messages.append(draft(BOB, UUID.randomUUID().toString(), new MessageContent.Text("noon again")));
+        messages.markDeleted(gone.softDeleted(NOW));
+
+        assertEquals(List.of(1L, 8L), seqs(messages.searchAfterSeq(conversationId, 0, "noon", 10)));
+        assertEquals(List.of(8L), seqs(messages.searchAfterSeq(conversationId, 1, "NOON", 10)));
+        assertEquals(List.of(1L), seqs(messages.searchAfterSeq(conversationId, 0, "noon", 1)));
+        assertEquals(List.of(8L), seqs(messages.searchBeforeSeq(conversationId, Long.MAX_VALUE, "noon", 1)));
+        assertEquals(List.of(1L), seqs(messages.searchBeforeSeq(conversationId, 8, "noon", 5)));
+        assertEquals(List.of(2L), seqs(messages.searchAfterSeq(conversationId, 0, "100%", 10)));
+        assertEquals(List.of(3L), seqs(messages.searchAfterSeq(conversationId, 0, "a_b", 10)));
+        assertEquals(List.of(5L), seqs(messages.searchAfterSeq(conversationId, 0, "k\\s", 10)));
+        assertEquals(List.of(2L), seqs(messages.searchAfterSeq(conversationId, 0, "%", 10)));
+        assertEquals(List.of(), seqs(messages.searchAfterSeq(UUID.randomUUID().toString(), 0, "noon", 10)));
+    }
+
+    @Test
+    void audioMessagesAreStoredAndReadBack() {
+        Message stored = messages.append(draft(ALICE, UUID.randomUUID().toString(),
+            new MessageContent.Audio("https://cdn/v.m4a", "audio/mp4", 2048, 7, "v.m4a")));
+
+        assertEquals(MessageType.AUDIO, messages.findById(stored.getMessageId()).getType());
+        assertEquals(new MessageContent.Audio("https://cdn/v.m4a", "audio/mp4", 2048, 7, "v.m4a"),
+            messages.findById(stored.getMessageId()).getContent());
+    }
+
+    private static List<String> ids(List<Conversation> rows) {
+        return rows.stream().map(Conversation::getConversationId).toList();
+    }
+
     private Message draftIn(String conversation, Instant at) {
         return new Message(UUID.randomUUID().toString(), conversation, 0, ALICE, UUID.randomUUID().toString(),
             new MessageContent.Text("hi"), null, null, null, MessageStatus.SENT, at, at, null);
@@ -328,6 +449,46 @@ class PostgresRepositoriesTest {
         } finally {
             pool.shutdown();
         }
+    }
+
+    @Test
+    void aSystemMessageHasNoSenderTakesASeqAndIsNeverUnread() {
+        Message text = messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.Text("one")));
+        Message notice = messages.append(draft(null, UUID.randomUUID().toString(), new MessageContent.System("Alice added Bob")));
+        Message another = messages.append(draft(null, UUID.randomUUID().toString(), new MessageContent.System("Alice added Bob")));
+
+        assertEquals(2, notice.getSeq());
+        assertEquals(3, another.getSeq());
+        Message stored = messages.findById(notice.getMessageId());
+        assertNull(stored.getSenderId());
+        assertEquals(MessageType.SYSTEM, stored.getType());
+        assertEquals(new MessageContent.System("Alice added Bob"), stored.getContent());
+        assertEquals(another.getMessageId(), messages.findLatest(List.of(conversationId)).get(conversationId).getMessageId());
+        // Bob has read nothing: only Alice's text counts, the two notices do not.
+        assertEquals(1, readMarkers.readStates(BOB, List.of(conversationId)).get(conversationId).unreadCount());
+        assertEquals(text.getMessageId(), messages.findAfterSeq(conversationId, 0, 10).get(0).getMessageId());
+    }
+
+    @Test
+    void theDatabaseRefusesASystemMessageWithASenderAndATextMessageWithout() {
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+            () -> messages.append(draft(ALICE, UUID.randomUUID().toString(), new MessageContent.System("x"))));
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+            () -> messages.append(draft(null, UUID.randomUUID().toString(), new MessageContent.Text("x"))));
+    }
+
+    @Test
+    void notificationPrefsDefaultToOnAndPatchKeepsTheFieldsItLeavesOut() {
+        push.PostgresNotificationPrefsRepository repository = new push.PostgresNotificationPrefsRepository(jdbc);
+
+        assertEquals(push.NotificationPrefs.DEFAULT, repository.find(ALICE));
+
+        assertEquals(new push.NotificationPrefs(true, false), repository.update(ALICE, null, false, NOW));
+        assertEquals(new push.NotificationPrefs(false, false), repository.update(ALICE, false, null, NOW));
+        assertEquals(new push.NotificationPrefs(false, true), repository.update(ALICE, null, true, NOW));
+        assertEquals(new push.NotificationPrefs(false, true), repository.find(ALICE));
+        assertEquals(Map.of(ALICE, new push.NotificationPrefs(false, true)), repository.findAll(List.of(ALICE, BOB)));
+        assertEquals(Map.of(), repository.findAll(List.of()));
     }
 
     private Message draft(String sender, String clientMsgId, MessageContent content) {

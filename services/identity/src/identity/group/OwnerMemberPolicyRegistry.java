@@ -9,7 +9,6 @@ public final class OwnerMemberPolicyRegistry implements RolePolicyRegistry {
         return switch (role) {
             case OWNER -> owner;
             case MEMBER -> member;
-            case ADMIN -> throw new IllegalArgumentException("Unknown role");
         };
     }
 }

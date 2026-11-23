@@ -7,10 +7,10 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useRouter, Link } from 'expo-router';
+import { useRouter, Link, Redirect } from 'expo-router';
 import LoginForm from '../components/auth/LoginForm';
 import { loginApi } from '@core/authService';
-import { saveAuth } from '@core/authSession';
+import { hasSession, saveAuth } from '@core/authSession';
 import { registerPushForCurrentUser } from '../lib/pushRegistration';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -22,6 +22,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  if (hasSession()) {
+    return <Redirect href="/(tabs)/chat" />;
+  }
 
   const handleLogin = async () => {
     setError('');
@@ -83,7 +87,7 @@ export default function LoginPage() {
             email={email}
             password={password}
             error={error}
-            onUsernameChange={setEmail}
+            onEmailChange={setEmail}
             onPasswordChange={setPassword}
             onSubmit={handleLogin}
             isLoading={isLoading}

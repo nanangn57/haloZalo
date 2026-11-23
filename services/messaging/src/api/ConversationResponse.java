@@ -9,7 +9,8 @@ import java.util.List;
 
 /**
  * One conversation. lastMessage and lastMessageAt are left out before the first message.
- * lastReadSeq and unreadCount are the caller's, and left out on internal calls that have no caller.
+ * lastReadSeq, unreadCount, pinned, muted, archived and pendingRequest are the caller's, and left out on internal
+ * calls that have no caller.
  */
 public final class ConversationResponse {
     private final String conversationId;
@@ -21,6 +22,10 @@ public final class ConversationResponse {
     private final MessageResponse lastMessage;
     private final Long lastReadSeq;
     private final Long unreadCount;
+    private final Boolean pinned;
+    private final Boolean muted;
+    private final Boolean archived;
+    private final Boolean pendingRequest;
 
     public ConversationResponse(ConversationSummary summary) {
         Conversation conversation = summary.conversation();
@@ -33,6 +38,10 @@ public final class ConversationResponse {
         this.lastMessage = summary.lastMessage() == null ? null : new MessageResponse(summary.lastMessage());
         this.lastReadSeq = summary.read() == null ? null : summary.read().lastReadSeq();
         this.unreadCount = summary.read() == null ? null : summary.read().unreadCount();
+        this.pinned = summary.prefs() == null ? null : summary.prefs().pinned();
+        this.muted = summary.prefs() == null ? null : summary.prefs().muted();
+        this.archived = summary.prefs() == null ? null : summary.prefs().archived();
+        this.pendingRequest = summary.prefs() == null ? null : summary.pendingRequest();
     }
 
     public String getConversationId() {
@@ -73,5 +82,25 @@ public final class ConversationResponse {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public Long getUnreadCount() {
         return unreadCount;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Boolean getPinned() {
+        return pinned;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Boolean getMuted() {
+        return muted;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Boolean getArchived() {
+        return archived;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Boolean getPendingRequest() {
+        return pendingRequest;
     }
 }

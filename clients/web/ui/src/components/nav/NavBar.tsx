@@ -5,6 +5,8 @@ import type { User } from '../../types/user'
 import type { AuthUser } from '@core/types/auth'
 import { getMyProfileApi, updateProfileApi } from '@core/userService'
 import { isPlatformAdmin, logout, updateStoredUser } from '@core/authSession'
+import { socketClient } from '@core/socketClient'
+import Avatar from '../common/Avatar'
 
 interface UserItemProps {
   currentUser: User
@@ -22,9 +24,18 @@ function NavBar({ currentUser }: UserItemProps) {
 
   const navigate = useNavigate()
 
-  const handleLogout = () => {
-    logout()
-    navigate('/login', { replace: true })
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  // Gọi server xoá session rồi mới xoá token local.
+  const handleLogout = async () => {
+    setLoggingOut(true)
+    try {
+      socketClient.disconnect()
+      await logout()
+    } finally {
+      setLoggingOut(false)
+      navigate('/login', { replace: true })
+    }
   }
 
   useEffect(() => {
@@ -42,7 +53,7 @@ function NavBar({ currentUser }: UserItemProps) {
         if (isMounted) {
           setProfile(data)
           setEditName(data.displayName || '')
-          setEditAvatar((data as AuthUser & { avatar?: string }).avatar || '')
+          setEditAvatar(data.avatar || '')
           setSaveMessage(null)
         }
       } catch (error) {
@@ -88,9 +99,10 @@ function NavBar({ currentUser }: UserItemProps) {
             title="My Profile"
             aria-label="Open profile"
           >
-            <img
-              src={currentUser.avatar}
-              alt=""
+            <Avatar
+              name={profile?.displayName || currentUser.name}
+              src={profile?.avatar || currentUser.avatar}
+              size={44}
               className="app-nav-avatar"
             />
           </button>
@@ -150,12 +162,24 @@ function NavBar({ currentUser }: UserItemProps) {
             </NavLink>
           ) : null}
 
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `app-icon-button ${isActive ? 'active' : ''}`
+            }
+            title="Settings"
+          >
+            <i className="bi bi-gear" aria-hidden="true" />
+            <span className="visually-hidden">Settings</span>
+          </NavLink>
+
           <button
             type="button"
             className="app-icon-button"
             title="Logout"
             aria-label="Log out"
-            onClick={handleLogout}
+            disabled={loggingOut}
+            onClick={() => void handleLogout()}
           >
             <i className="bi bi-box-arrow-right" aria-hidden="true" />
           </button>
@@ -188,13 +212,11 @@ function NavBar({ currentUser }: UserItemProps) {
             </div>
 
             <div className="d-flex flex-column align-items-center mb-4">
-              <img
-                src={currentUser.avatar}
-                alt=""
-                className="rounded-circle mb-3"
-                width="88"
-                height="88"
-                style={{ objectFit: 'cover' }}
+              <Avatar
+                name={displayName}
+                src={editAvatar.trim() || profile?.avatar || currentUser.avatar}
+                size={88}
+                className="mb-3"
               />
               <h3 className="mb-1" style={{ fontSize: 18 }}>
                 {displayName}

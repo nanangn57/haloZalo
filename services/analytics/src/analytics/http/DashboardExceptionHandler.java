@@ -1,6 +1,7 @@
 package analytics.http;
 
 import analytics.query.DashboardService;
+import analytics.query.DateRange;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,12 @@ public final class DashboardExceptionHandler {
     public ResponseEntity<ErrorResponse> missing(DashboardService.MissingSession missing) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
             .body(new ErrorResponse("UNAUTHENTICATED", missing.getMessage()));
+    }
+
+    @ExceptionHandler(DateRange.InvalidRange.class)
+    public ResponseEntity<ErrorResponse> invalidRange(DateRange.InvalidRange invalid) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(new ErrorResponse("VALIDATION_ERROR", invalid.getMessage()));
     }
 
     @ExceptionHandler(StatsController.ForbiddenStats.class)

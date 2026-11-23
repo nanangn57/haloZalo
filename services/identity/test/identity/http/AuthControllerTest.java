@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,6 +44,7 @@ class AuthControllerTest {
         AuthService auth = new AuthService(
             new BcryptPasswordHasher(),
             accounts,
+            emptyProfiles(),
             new MemorySessions(),
             userId -> { },
             new MemoryVerifications(),
@@ -60,7 +62,7 @@ class AuthControllerTest {
     void registerAcceptsEmailWithoutToken() throws Exception {
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
+                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\",\"displayName\":\"Ngoc Anh\"}"))
             .andExpect(status().isAccepted())
             .andExpect(jsonPath("$.email").value("anh@example.com"))
             .andExpect(jsonPath("$.status").value("PENDING_VERIFICATION"))
@@ -73,7 +75,7 @@ class AuthControllerTest {
     void registerRejectsShortPassword() throws Exception {
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"short\"}"))
+                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"short\",\"displayName\":\"Ngoc Anh\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }
@@ -84,7 +86,7 @@ class AuthControllerTest {
 
         mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"ngoc_anh\",\"email\":\"other@example.com\",\"password\":\"password1\"}"))
+                .content("{\"username\":\"ngoc_anh\",\"email\":\"other@example.com\",\"password\":\"password1\",\"displayName\":\"Ngoc Anh\"}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.error.code").value("CONFLICT"))
             .andExpect(jsonPath("$.error.message").value("Username or email already exists"));
@@ -94,18 +96,19 @@ class AuthControllerTest {
     void verifyReturnsUserWithoutPasswordHash() throws Exception {
         registerNgocAnh();
 
-        mvc.perform(get("/auth/verify").param("token", verificationToken()))
+        mvc.perform(get("/auth/verify").param("token", verificationToken()).param("deviceId", "test-device-1"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.username").value("ngoc_anh"))
-            .andExpect(jsonPath("$.email").value("anh@example.com"))
-            .andExpect(jsonPath("$.userId").isNotEmpty())
+            .andExpect(jsonPath("$.accessToken").isNotEmpty())
+            .andExpect(jsonPath("$.user.username").value("ngoc_anh"))
+            .andExpect(jsonPath("$.user.email").value("anh@example.com"))
+            .andExpect(jsonPath("$.user.userId").isNotEmpty())
             .andExpect(jsonPath("$.passwordHash").doesNotExist())
-            .andExpect(jsonPath("$.accessToken").doesNotExist());
+            .andExpect(jsonPath("$.user.passwordHash").doesNotExist());
     }
 
     @Test
     void verifyRejectsUnknownToken() throws Exception {
-        mvc.perform(get("/auth/verify").param("token", "missing"))
+        mvc.perform(get("/auth/verify").param("token", "missing").param("deviceId", "test-device-1"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
             .andExpect(jsonPath("$.error.message").value("Verification link is invalid or expired"));
@@ -117,7 +120,7 @@ class AuthControllerTest {
 
         mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+                .content("{\"login\":\"anh@example.com\",\"password\":\"password1\",\"deviceId\":\"test-device-1\"}"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("UNAUTHENTICATED"))
             .andExpect(jsonPath("$.error.message").value("Invalid login or password"));
@@ -130,7 +133,7 @@ class AuthControllerTest {
 
         mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"login\":\"ngoc_anh\",\"password\":\"wrong-password\"}"))
+                .content("{\"login\":\"anh@example.com\",\"password\":\"wrong-password\",\"deviceId\":\"test-device-1\"}"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("UNAUTHENTICATED"))
             .andExpect(jsonPath("$.error.message").value("Invalid login or password"));
@@ -148,10 +151,10 @@ class AuthControllerTest {
     void meReturnsTheVerifiedUser() throws Exception {
         registerNgocAnh();
         MvcResult verified = verifyNgocAnh();
-        String userId = JsonPath.read(verified.getResponse().getContentAsString(), "$.userId");
+        String userId = JsonPath.read(verified.getResponse().getContentAsString(), "$.user.userId");
         MvcResult loggedIn = mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+                .content("{\"login\":\"anh@example.com\",\"password\":\"password1\",\"deviceId\":\"test-device-1\"}"))
             .andExpect(status().isOk())
             .andReturn();
         String token = JsonPath.read(loggedIn.getResponse().getContentAsString(), "$.accessToken");
@@ -170,7 +173,7 @@ class AuthControllerTest {
         verifyNgocAnh();
         MvcResult loggedIn = mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+                .content("{\"login\":\"anh@example.com\",\"password\":\"password1\",\"deviceId\":\"test-device-1\"}"))
             .andExpect(status().isOk())
             .andReturn();
         String token = JsonPath.read(loggedIn.getResponse().getContentAsString(), "$.accessToken");
@@ -182,13 +185,13 @@ class AuthControllerTest {
     private MvcResult registerNgocAnh() throws Exception {
         return mvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\"}"))
+                .content("{\"username\":\"ngoc_anh\",\"email\":\"anh@example.com\",\"password\":\"password1\",\"displayName\":\"Ngoc Anh\"}"))
             .andExpect(status().isAccepted())
             .andReturn();
     }
 
     private MvcResult verifyNgocAnh() throws Exception {
-        return mvc.perform(get("/auth/verify").param("token", verificationToken()))
+        return mvc.perform(get("/auth/verify").param("token", verificationToken()).param("deviceId", "test-device-1"))
             .andExpect(status().isOk())
             .andReturn();
     }
@@ -245,6 +248,28 @@ class AuthControllerTest {
             }
         }
 
+        @Override
+        public void updateBannedAt(String userId, Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
+        }
+
     }
 
     private static final class MemorySessions implements SessionRepository {
@@ -258,6 +283,47 @@ class AuthControllerTest {
         @Override
         public Session findById(String sessionId) {
             return rows.stream().filter(row -> row.getSessionId().equals(sessionId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public Session findByUserIdAndDeviceId(String userId, String deviceId) {
+            if (deviceId == null) {
+                return null;
+            }
+            return rows.stream()
+                .filter(row -> row.getUserId().equals(userId) && deviceId.equals(row.getDeviceId()))
+                .findFirst()
+                .orElse(null);
+        }
+
+        @Override
+        public List<Session> findByUserId(String userId) {
+            return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
+        }
+
+        @Override
+        public void delete(String sessionId) {
+            rows.removeIf(row -> row.getSessionId().equals(sessionId));
+        }
+
+        @Override
+        public void touch(String sessionId, Instant lastSeenAt, Instant expiresAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Session row = rows.get(i);
+                if (row.getSessionId().equals(sessionId)) {
+                    rows.set(i, new Session(
+                        row.getSessionId(),
+                        row.getUserId(),
+                        row.getCreatedAt(),
+                        expiresAt,
+                        row.getDeviceId(),
+                        row.getDeviceLabel(),
+                        row.getUserAgent(),
+                        lastSeenAt
+                    ));
+                    return;
+                }
+            }
         }
     }
 

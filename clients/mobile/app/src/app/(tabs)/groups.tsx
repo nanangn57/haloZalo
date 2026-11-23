@@ -17,11 +17,14 @@ import {
   addGroupMemberApi,
   getGroupMembersApi,
   removeGroupMemberApi,
-  assignGroupMemberRoleApi,
+  transferGroupOwnerApi,
+  dissolveGroupApi,
+  updateGroupApi,
 } from '@core/groupService';
 import { findUserApi } from '@core/userService';
+import { confirmAction } from '@/lib/confirm';
 import { createGroupConversationApi } from '@core/messageService';
-import type { AssignableGroupRole, Group, Member } from '@core/types/group';
+import type { Group, Member } from '@core/types/group';
 
 export default function GroupsPage() {
   const router = useRouter();
@@ -39,7 +42,10 @@ export default function GroupsPage() {
   const [memberCount, setMemberCount] = useState<Record<string, number>>({});
   const [members, setMembers] = useState<Member[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const [roleUpdatingId, setRoleUpdatingId] = useState<string | null>(null);
+  const [transferringId, setTransferringId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [dissolving, setDissolving] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -147,19 +153,66 @@ export default function GroupsPage() {
     }
   };
 
-  const handleAssignRole = async (userId: string, role: AssignableGroupRole) => {
-    if (!selectedGroupId || roleUpdatingId) return;
-    setRoleUpdatingId(userId);
+  const handleTransferOwner = (member: Member) => {
+    if (!selectedGroupId || transferringId) return;
+    confirmAction(
+      'Transfer ownership',
+      `Make ${member.username} the owner? You will become a member.`,
+      () => {
+        void (async () => {
+          setTransferringId(member.userId);
+          setError('');
+          try {
+            await transferGroupOwnerApi(selectedGroupId, member.userId);
+            await loadMembers(selectedGroupId);
+            await load();
+          } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Cannot transfer ownership');
+          } finally {
+            setTransferringId(null);
+          }
+        })();
+      },
+    );
+  };
+
+  const handleRename = async () => {
+    const name = renameValue.trim();
+    if (!selectedGroupId || !name || renaming || name === selectedGroup?.name) return;
+    setRenaming(true);
     setError('');
     try {
-      await assignGroupMemberRoleApi(selectedGroupId, userId, role);
-      await loadMembers(selectedGroupId);
+      await updateGroupApi(selectedGroupId, { name });
       await load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Cannot update role');
+      setError(err instanceof Error ? err.message : 'Cannot rename group');
     } finally {
-      setRoleUpdatingId(null);
+      setRenaming(false);
     }
+  };
+
+  const handleDissolve = () => {
+    if (!selectedGroupId || dissolving) return;
+    confirmAction(
+      'Dissolve group',
+      'This removes the group for everyone and cannot be undone.',
+      () => {
+        void (async () => {
+          setDissolving(true);
+          setError('');
+          try {
+            await dissolveGroupApi(selectedGroupId);
+            setSelectedGroupId(null);
+            setMembers([]);
+            await load();
+          } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Cannot dissolve group');
+          } finally {
+            setDissolving(false);
+          }
+        })();
+      },
+    );
   };
 
   const openChat = async (group: Group) => {
@@ -179,6 +232,7 @@ export default function GroupsPage() {
   };
 
   const selectedGroup = groups.find((group) => group.groupId === selectedGroupId);
+  const isOwner = selectedGroup?.role === 'OWNER';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -202,30 +256,43 @@ export default function GroupsPage() {
           <Text style={styles.panelTitle}>
             Members · {selectedGroup?.name ?? selectedGroupId.slice(0, 8)}
           </Text>
-          <View style={styles.row}>
-            <TextInput
-              style={styles.input}
-              placeholder="Add member (username/email)"
-              value={memberQuery}
-              onChangeText={setMemberQuery}
-            />
-            <Pressable style={styles.button} onPress={() => void handleAddMember()} disabled={adding}>
-              <Text style={styles.buttonText}>{adding ? '…' : 'Add'}</Text>
-            </Pressable>
-          </View>
+          {isOwner ? (
+            <View style={styles.row}>
+              <TextInput
+                style={styles.input}
+                placeholder="Group name"
+                value={renameValue}
+                onChangeText={setRenameValue}
+                maxLength={64}
+              />
+              <Pressable
+                style={styles.button}
+                onPress={() => void handleRename()}
+                disabled={renaming}
+              >
+                <Text style={styles.buttonText}>{renaming ? '…' : 'Rename'}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {isOwner ? (
+            <View style={styles.row}>
+              <TextInput
+                style={styles.input}
+                placeholder="Add member (username/email)"
+                value={memberQuery}
+                onChangeText={setMemberQuery}
+              />
+              <Pressable style={styles.button} onPress={() => void handleAddMember()} disabled={adding}>
+                <Text style={styles.buttonText}>{adding ? '…' : 'Add'}</Text>
+              </Pressable>
+            </View>
+          ) : null}
           {members.map((member) => {
-            const canManage =
-              selectedGroup?.role === 'OWNER' || selectedGroup?.role === 'ADMIN';
             const canRemove =
-              (canManage &&
-                member.userId !== currentUserId &&
-                member.role !== 'OWNER' &&
-                !(selectedGroup?.role === 'ADMIN' && member.role === 'ADMIN')) ||
-              member.userId === currentUserId;
-            const canAssignRole =
-              selectedGroup?.role === 'OWNER' &&
-              member.userId !== currentUserId &&
-              member.role !== 'OWNER';
+              (isOwner && member.userId !== currentUserId && member.role !== 'OWNER') ||
+              (!isOwner && member.userId === currentUserId);
+            const canTransfer =
+              isOwner && member.userId !== currentUserId && member.role !== 'OWNER';
 
             return (
               <View key={member.userId} style={styles.memberRow}>
@@ -233,22 +300,13 @@ export default function GroupsPage() {
                   {member.username} · {member.role}
                 </Text>
                 <View style={styles.memberActions}>
-                  {canAssignRole && member.role !== 'ADMIN' ? (
+                  {canTransfer ? (
                     <Pressable
                       style={styles.secondaryButton}
-                      disabled={roleUpdatingId === member.userId}
-                      onPress={() => void handleAssignRole(member.userId, 'ADMIN')}
+                      disabled={transferringId === member.userId}
+                      onPress={() => handleTransferOwner(member)}
                     >
-                      <Text style={styles.buttonText}>Admin</Text>
-                    </Pressable>
-                  ) : null}
-                  {canAssignRole && member.role === 'ADMIN' ? (
-                    <Pressable
-                      style={styles.secondaryButton}
-                      disabled={roleUpdatingId === member.userId}
-                      onPress={() => void handleAssignRole(member.userId, 'MEMBER')}
-                    >
-                      <Text style={styles.buttonText}>Member</Text>
+                      <Text style={styles.buttonText}>Owner</Text>
                     </Pressable>
                   ) : null}
                   {canRemove && member.role !== 'OWNER' ? (
@@ -266,7 +324,16 @@ export default function GroupsPage() {
               </View>
             );
           })}
-          {selectedGroup?.role === 'MEMBER' || selectedGroup?.role === 'ADMIN' ? (
+          {isOwner ? (
+            <Pressable
+              style={[styles.dangerButton, { alignSelf: 'flex-start', marginTop: 8 }]}
+              disabled={dissolving}
+              onPress={handleDissolve}
+            >
+              <Text style={styles.buttonText}>{dissolving ? '…' : 'Dissolve group'}</Text>
+            </Pressable>
+          ) : null}
+          {selectedGroup?.role === 'MEMBER' ? (
             <Pressable
               style={[styles.dangerButton, { alignSelf: 'flex-start', marginTop: 8 }]}
               onPress={() => void handleRemoveMember(currentUserId)}
@@ -286,7 +353,13 @@ export default function GroupsPage() {
           ListEmptyComponent={<Text style={styles.empty}>No groups yet.</Text>}
           renderItem={({ item }) => (
             <View style={styles.card}>
-              <Pressable onPress={() => setSelectedGroupId(item.groupId)} style={{ flex: 1 }}>
+              <Pressable
+                onPress={() => {
+                  setSelectedGroupId(item.groupId);
+                  setRenameValue(item.name);
+                }}
+                style={{ flex: 1 }}
+              >
                 <Text style={styles.groupName}>{item.name}</Text>
                 <Text style={styles.meta}>
                   {memberCount[item.groupId] ?? '?'} members · {item.role}

@@ -1,6 +1,6 @@
 # identity
 
-Tài khoản, xác minh email, và session. Schema `identity` trên database PostgreSQL `halozalo` dùng chung (local: Compose; cloud: Amazon RDS). Link xác minh hết hạn sau 15 phút. Session id opaque, hết hạn sau 3 ngày, tính từ lúc cấp. Đăng nhập mới không xóa session cũ. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
+Tài khoản, xác minh email, và session. Schema `identity` trên database PostgreSQL `halozalo` dùng chung (local: Compose; cloud: Amazon RDS). Link xác minh hết hạn sau 2 phút. Session id opaque, gắn `deviceId` (unique `(user_id, device_id)`); idle 30 ngày (gia hạn khi còn dùng), absolute max 90 ngày. Login/verify cùng device rotate token. Module khác không đọc bảng này. Filter của app gọi `AuthService` trong cùng process.
 
 Người giữ: P1 Ngọc Anh.
 

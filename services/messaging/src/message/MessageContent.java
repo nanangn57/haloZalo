@@ -45,4 +45,24 @@ public sealed interface MessageContent {
             return MessageType.DOCUMENT;
         }
     }
+
+    /**
+     * Notice written by the server, for example "Alice added Bob". It has no sender and clients cannot post it.
+     */
+    record System(String text) implements MessageContent {
+        @Override
+        public MessageType type() {
+            return MessageType.SYSTEM;
+        }
+    }
+
+    /**
+     * Voice note. duration is in seconds and may be missing.
+     */
+    record Audio(String url, String mimeType, long size, Integer duration, String fileName) implements MessageContent {
+        @Override
+        public MessageType type() {
+            return MessageType.AUDIO;
+        }
+    }
 }

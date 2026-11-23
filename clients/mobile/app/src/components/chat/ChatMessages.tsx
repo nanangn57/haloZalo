@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Linking, Pressable } from 'react-native';
 import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '@core/types/message';
+import type { MessageReaction, ReactionCode } from '@core/messageService';
 import { resolveMediaUrl } from '@core/mediaService';
 import { useTheme } from '@/hooks/use-theme';
+import AudioBubble from './AudioBubble';
 
 const EMOTION_LABEL: Record<string, string> = {
   like: '👍',
@@ -50,6 +53,14 @@ function MessageBody({
   const [imageFailed, setImageFailed] = useState(false);
   const mediaUrl = resolveMediaUrl(message.content);
 
+  if (message.deleted) {
+    return (
+      <Text style={{ color: isMine ? mineColor : otherColor, fontStyle: 'italic', opacity: 0.7 }}>
+        Message recalled
+      </Text>
+    );
+  }
+
   if (message.type === 'EMOTION') {
     return (
       <Text style={styles.emotion}>
@@ -93,6 +104,9 @@ function MessageBody({
       />
     );
   }
+  if (message.type === 'AUDIO') {
+    return <AudioBubble url={mediaUrl} color={isMine ? mineColor : otherColor} />;
+  }
   if (message.type === 'DOCUMENT') {
     return (
       <MediaFallback
@@ -111,22 +125,82 @@ function MessageBody({
   );
 }
 
+function formatMessageTime(sentAt: number): string {
+  return new Date(sentAt * 1000).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function replySnippet(message: Message | undefined): string {
+  if (!message) return 'Original message';
+  if (message.deleted) return 'Message recalled';
+  switch (message.type) {
+    case 'IMAGE':
+      return '🖼 Image';
+    case 'VIDEO':
+      return '🎬 Video';
+    case 'DOCUMENT':
+      return '📎 File';
+    case 'AUDIO':
+      return '🎤 Voice message';
+    case 'EMOTION':
+      return EMOTION_LABEL[message.content] ?? message.content;
+    default:
+      return message.content.length > 80 ? `${message.content.slice(0, 79)}…` : message.content;
+  }
+}
+
 export default function ChatMessages({
   messages,
   currentUserId,
+  reactions = {},
+  getSenderName,
+  onLongPress,
+  onToggleReaction,
 }: {
   messages: Message[];
   currentUserId: string;
+  reactions?: Record<string, MessageReaction[]>;
+  getSenderName?: (userId: string) => string;
+  // Giữ lâu một tin để mở menu: reply / react / forward / recall.
+  onLongPress?: (message: Message) => void;
+  onToggleReaction?: (message: Message, code: ReactionCode) => void;
 }) {
   const theme = useTheme();
+
+  const byMessageId = new Map<string, Message>();
+  messages.forEach((message) => {
+    if (message.messageId) byMessageId.set(message.messageId, message);
+  });
+
+  const senderName = (userId: string) =>
+    userId === currentUserId ? 'You' : (getSenderName?.(userId) ?? 'User');
 
   return (
     <FlatList
       data={messages}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
+      extraData={reactions}
       renderItem={({ item }) => {
         const isMine = item.senderId === currentUserId;
+        const persisted = Boolean(item.messageId) && item.status !== 'sending';
+        const canAct = persisted && !item.deleted;
+        const reply = item.replyTo ? byMessageId.get(item.replyTo) : undefined;
+        const textColor = isMine ? theme.chatOwnText : theme.chatOtherText;
+        const itemReactions = item.messageId ? (reactions[item.messageId] ?? []) : [];
+        const grouped = (['like', 'love', 'haha', 'wow', 'sad', 'angry'] as ReactionCode[])
+          .map((code) => {
+            const rows = itemReactions.filter((reaction) => reaction.code === code);
+            return {
+              code,
+              count: rows.length,
+              mine: rows.some((reaction) => reaction.userId === currentUserId),
+            };
+          })
+          .filter((group) => group.count > 0);
+
         return (
           <View
             style={[
@@ -134,25 +208,101 @@ export default function ChatMessages({
               isMine ? styles.mineWrapper : styles.otherWrapper,
             ]}
           >
-            <View
+            {item.forwardedFrom && !item.deleted ? (
+              <View style={styles.forwardedRow}>
+                <Ionicons name="arrow-redo-outline" size={11} color={theme.textMuted} />
+                <Text style={[styles.forwarded, { color: theme.textMuted }]}>Forwarded</Text>
+              </View>
+            ) : null}
+            <View style={styles.bubbleRow}>
+              {/* Web: tin mình → ⋯ bên trái bubble; tin người khác → ⋯ bên phải. */}
+              {isMine && canAct && onLongPress ? (
+                <Pressable
+                  style={[styles.menuTrigger, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => onLongPress(item)}
+                  hitSlop={8}
+                  accessibilityLabel="Message actions"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={16} color={theme.textMuted} />
+                </Pressable>
+              ) : null}
+              <Pressable
+                onLongPress={canAct ? () => onLongPress?.(item) : undefined}
+                delayLongPress={350}
+                style={[
+                  styles.bubble,
+                  {
+                    backgroundColor: isMine ? theme.chatOwn : theme.chatOther,
+                    borderBottomRightRadius: isMine ? 4 : 16,
+                    borderBottomLeftRadius: isMine ? 16 : 4,
+                    opacity: item.deleted ? 0.6 : 1,
+                  },
+                ]}
+              >
+                {item.replyTo && !item.deleted ? (
+                  <View style={[styles.replyQuote, { borderLeftColor: textColor }]}>
+                    <Text style={[styles.replyName, { color: textColor }]} numberOfLines={1}>
+                      {reply ? senderName(reply.senderId) : 'Reply'}
+                    </Text>
+                    <Text style={[styles.replyText, { color: textColor }]} numberOfLines={1}>
+                      {replySnippet(reply)}
+                    </Text>
+                  </View>
+                ) : null}
+                <MessageBody
+                  key={item.id}
+                  message={item}
+                  isMine={isMine}
+                  mineColor={theme.chatOwnText}
+                  otherColor={theme.chatOtherText}
+                  imageBg={theme.border}
+                />
+              </Pressable>
+              {!isMine && canAct && onLongPress ? (
+                <Pressable
+                  style={[styles.menuTrigger, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => onLongPress(item)}
+                  hitSlop={8}
+                  accessibilityLabel="Message actions"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="ellipsis-horizontal" size={16} color={theme.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+            {grouped.length > 0 ? (
+              <View style={[styles.reactions, isMine && styles.reactionsMine]}>
+                {grouped.map((group) => (
+                  <Pressable
+                    key={group.code}
+                    disabled={!canAct || !onToggleReaction}
+                    onPress={() => onToggleReaction?.(item, group.code)}
+                    style={[
+                      styles.reactionChip,
+                      {
+                        borderColor: group.mine ? theme.primary : theme.border,
+                        backgroundColor: group.mine ? theme.primarySoft : theme.background,
+                      },
+                    ]}
+                  >
+                    <Text style={{ fontSize: 12, color: theme.text }}>
+                      {EMOTION_LABEL[group.code]} {group.count}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+            <Text
               style={[
-                styles.bubble,
-                {
-                  backgroundColor: isMine ? theme.chatOwn : theme.chatOther,
-                  borderBottomRightRadius: isMine ? 4 : 16,
-                  borderBottomLeftRadius: isMine ? 16 : 4,
-                },
+                styles.messageTime,
+                isMine ? styles.messageTimeMine : styles.messageTimeOther,
+                { color: theme.textMuted },
               ]}
             >
-              <MessageBody
-                key={item.id}
-                message={item}
-                isMine={isMine}
-                mineColor={theme.chatOwnText}
-                otherColor={theme.chatOtherText}
-                imageBg={theme.border}
-              />
-            </View>
+              {formatMessageTime(item.sentAt)}
+              {item.status === 'failed' ? ' · failed' : ''}
+            </Text>
           </View>
         );
       }}
@@ -162,10 +312,51 @@ export default function ChatMessages({
 
 const styles = StyleSheet.create({
   list: { padding: 16, flexGrow: 1, justifyContent: 'flex-end' },
-  messageWrapper: { marginBottom: 12, maxWidth: '80%' },
+  messageWrapper: { marginBottom: 12, maxWidth: '88%' },
   mineWrapper: { alignSelf: 'flex-end' },
   otherWrapper: { alignSelf: 'flex-start' },
-  bubble: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 16 },
+  bubbleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  menuTrigger: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bubble: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 16, maxWidth: '100%', flexShrink: 1 },
   emotion: { fontSize: 28 },
+  forwardedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  forwarded: { fontSize: 11 },
+  replyQuote: {
+    borderLeftWidth: 3,
+    paddingLeft: 8,
+    marginBottom: 6,
+    opacity: 0.85,
+  },
+  replyName: { fontSize: 12, fontWeight: '700' },
+  replyText: { fontSize: 12 },
+  reactions: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  reactionsMine: { justifyContent: 'flex-end' },
+  reactionChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  messageTime: {
+    fontSize: 11,
+    marginTop: 4,
+  },
+  messageTimeMine: { alignSelf: 'flex-end' },
+  messageTimeOther: { alignSelf: 'flex-start' },
   image: { width: 180, height: 180, borderRadius: 8 },
 });

@@ -2,18 +2,26 @@ package service;
 
 import conversation.Conversation;
 import conversation.ConversationCursor;
+import conversation.ConversationFilter;
+import conversation.ConversationPrefs;
+import conversation.ConversationPrefsPatch;
 import conversation.ConversationSummary;
 import conversation.ConversationType;
 import conversation.ReadState;
 import event.EventPublisher;
+import member.BlockChecker;
 import member.ConversationMembers;
+import member.FriendshipChecker;
 import message.ContentValidator;
 import message.Message;
 import message.MessageContent;
 import message.MessageMetadata;
 import message.MessageStatus;
+import message.MessageType;
 import reaction.MessageReaction;
+import storage.ConversationPrefsRepository;
 import storage.ConversationRepository;
+import storage.MessageSearchRepository;
 import storage.MessageRepository;
 import storage.ReactionRepository;
 import storage.ReadMarkerRepository;
@@ -29,32 +37,46 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
-public final class MessageService {
+public final class MessageService implements SystemMessagePoster {
     private static final String NOT_MEMBER = "Not a member of this conversation";
+    private static final String BLOCKED = "Blocked";
     public static final int MESSAGES_DEFAULT_LIMIT = 100;
     public static final int MESSAGES_MAX_LIMIT = 200;
+    public static final int SEARCH_MAX_LENGTH = 256;
     public static final int CONVERSATIONS_DEFAULT_LIMIT = 50;
     public static final int CONVERSATIONS_MAX_LIMIT = 100;
 
     private final ConversationRepository conversations;
     private final MessageRepository messages;
+    private final MessageSearchRepository search;
     private final ReactionRepository reactions;
     private final ReadMarkerRepository readMarkers;
+    private final ConversationPrefsRepository prefs;
     private final ConversationMembers members;
+    private final FriendshipChecker friendships;
+    private final BlockChecker blocks;
     private final EventPublisher events;
 
     public MessageService(
         ConversationRepository conversations,
         MessageRepository messages,
+        MessageSearchRepository search,
         ReactionRepository reactions,
         ReadMarkerRepository readMarkers,
+        ConversationPrefsRepository prefs,
         ConversationMembers members,
+        FriendshipChecker friendships,
+        BlockChecker blocks,
         EventPublisher events) {
         this.conversations = conversations;
         this.messages = messages;
+        this.search = search;
         this.reactions = reactions;
         this.readMarkers = readMarkers;
+        this.prefs = prefs;
         this.members = members;
+        this.friendships = friendships;
+        this.blocks = blocks;
         this.events = events;
     }
 
@@ -143,41 +165,94 @@ public final class MessageService {
         if (user.equals(other)) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A direct conversation needs another user");
         }
+        if (blocks.isBlocked(user, other)) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, BLOCKED);
+        }
         String key = Conversation.directKey(Set.of(user, other));
         Conversation existing = conversations.findDirect(key);
         if (existing != null) {
-            return new Opened(summary(existing, user), false);
+            return new Opened(summary(settled(existing), user), false);
         }
-        Conversation created = new Conversation(UUID.randomUUID().toString(), ConversationType.DIRECT, Set.of(user, other), 0, now());
+        // A stranger's first chat is a request for the other side until they accept.
+        String pendingFor = friendships.areFriends(user, other) ? null : other;
+        Conversation created = new Conversation(
+            UUID.randomUUID().toString(), ConversationType.DIRECT, Set.of(user, other), 0, now(), null, pendingFor);
         if (conversations.insert(created)) {
-            return new Opened(new ConversationSummary(created, created.getMemberIds(), null, new ReadState(0, 0)), true);
+            return new Opened(new ConversationSummary(created, created.getMemberIds(), null, new ReadState(0, 0),
+                ConversationPrefs.DEFAULT, created.isPendingFor(user)), true);
         }
         // The other user opened it between our lookup and our insert.
         Conversation winner = conversations.findDirect(key);
         if (winner == null) {
             throw new IllegalStateException("Direct conversation was neither inserted nor found: " + key);
         }
-        return new Opened(summary(winner, user), false);
+        return new Opened(summary(settled(winner), user), false);
     }
 
     /**
-     * The caller's conversations, most recent activity first, each with its newest message.
+     * The caller's conversations in the normal inbox, pinned first, then most recent activity first.
      */
     public ConversationPage conversations(String userId, String cursor, Integer limit) {
+        return conversations(userId, cursor, limit, ConversationFilter.DEFAULT);
+    }
+
+    /**
+     * The filter chooses archived or not, and the stranger-request inbox. A request whose two users became friends
+     * since it was made is accepted here instead of listed.
+     */
+    public ConversationPage conversations(String userId, String cursor, Integer limit, ConversationFilter filter) {
         String user = user(userId);
         int size = limit(limit, CONVERSATIONS_DEFAULT_LIMIT, CONVERSATIONS_MAX_LIMIT);
-        List<Conversation> rows = conversations.findForMember(user, members.groupIdsOf(user), cursor(cursor), size + 1);
+        List<Conversation> rows = conversations.findForMember(
+            user, members.groupIdsOf(user), filter, cursor(cursor), size + 1);
         boolean hasMore = rows.size() > size;
-        List<Conversation> page = hasMore ? rows.subList(0, size) : rows;
+        List<Conversation> found = hasMore ? rows.subList(0, size) : rows;
+        List<String> foundIds = found.stream().map(Conversation::getConversationId).toList();
+        Map<String, ConversationPrefs> foundPrefs = prefs.find(user, foundIds);
+        String next = hasMore
+            ? ConversationCursor.after(found.get(found.size() - 1), foundPrefs
+                .getOrDefault(found.get(found.size() - 1).getConversationId(), ConversationPrefs.DEFAULT).pinned()).encode()
+            : null;
+        List<Conversation> page = filter.requests() ? found.stream().filter(row -> stillPending(row, user)).toList() : found;
         List<String> ids = page.stream().map(Conversation::getConversationId).toList();
         Map<String, Message> latest = messages.findLatest(ids);
         Map<String, ReadState> read = readMarkers.readStates(user, ids);
         List<ConversationSummary> summaries = page.stream()
             .map(conversation -> new ConversationSummary(conversation, members.memberIds(conversation),
-                latest.get(conversation.getConversationId()), read.get(conversation.getConversationId())))
+                latest.get(conversation.getConversationId()), read.get(conversation.getConversationId()),
+                foundPrefs.getOrDefault(conversation.getConversationId(), ConversationPrefs.DEFAULT),
+                conversation.isPendingFor(user)))
             .toList();
-        String next = hasMore ? ConversationCursor.after(page.get(page.size() - 1)).encode() : null;
         return new ConversationPage(summaries, next);
+    }
+
+    /**
+     * Pin, mute or archive for the caller only. Fields left null stay as they are.
+     */
+    public PrefsChange updatePrefs(String conversationId, String userId, ConversationPrefsPatch patch) {
+        if (patch == null || patch.isEmpty()) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "At least one of pinned, muted, archived is required");
+        }
+        String user = user(userId);
+        Conversation conversation = memberConversation(conversationId, user);
+        ConversationPrefs changed = prefs.update(user, conversation.getConversationId(), patch, now());
+        return new PrefsChange(conversation.getConversationId(), changed);
+    }
+
+    /**
+     * The recipient of a stranger's request takes it into the normal inbox. Accepting twice is fine.
+     */
+    public ConversationSummary acceptRequest(String conversationId, String userId) {
+        String user = user(userId);
+        Conversation conversation = memberConversation(conversationId, user);
+        if (conversation.getType() != ConversationType.DIRECT) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Only a direct conversation can be a request");
+        }
+        if (conversation.isPendingFor(user)) {
+            conversations.acceptRequest(conversation.getConversationId(), user);
+            conversation = conversation.accepted();
+        }
+        return summary(conversation, user);
     }
 
     public ConversationSummary conversation(String conversationId, String userId) {
@@ -219,7 +294,7 @@ public final class MessageService {
             throw new Rejected(Rejected.Reason.VALIDATION, problem);
         }
         String sender = user(senderId);
-        Conversation conversation = memberConversation(conversationId, sender);
+        Conversation conversation = allowedToWrite(memberConversation(conversationId, sender), sender);
         Message existing = messages.findBySenderAndClientMsgId(sender, clientId);
         if (existing != null) {
             return new Sent(existing, false);
@@ -236,12 +311,41 @@ public final class MessageService {
     }
 
     /**
+     * Writes a SYSTEM message with no sender. Only server code calls this: clients cannot post SYSTEM.
+     * Every member sees it through the normal fan-out; nobody is pushed. A system message is never deleted
+     * or reacted to. conversationId can only be a group here, because DIRECT conversations are never created
+     * with an id the caller picks: when the conversation is not stored yet, it is opened as the GROUP with that id.
+     */
+    @Override
+    public Message postSystem(String conversationId, String text) {
+        String id = uuid(conversationId, "conversationId");
+        String problem = ContentValidator.problem(new MessageContent.System(text));
+        if (problem != null) {
+            throw new Rejected(Rejected.Reason.VALIDATION, problem);
+        }
+        Conversation conversation = conversations.findById(id);
+        if (conversation == null) {
+            try {
+                conversation = openGroup(id, List.of());
+            } catch (Rejected rejected) {
+                // Someone opened it at the same moment: write into theirs.
+                conversation = conversations.findById(id);
+                if (rejected.getReason() != Rejected.Reason.CONFLICT || conversation == null) {
+                    throw rejected;
+                }
+            }
+        }
+        return store(conversation, null, UUID.randomUUID().toString(), new MessageContent.System(text), null, null, null)
+            .getMessage();
+    }
+
+    /**
      * Forwards a message the sender can see into another conversation. forwardedFrom always points at the first original.
      */
     public Sent forward(String conversationId, String senderId, String clientMsgId, String sourceMessageId) {
         String clientId = uuid(clientMsgId, "clientMsgId");
         String sender = user(senderId);
-        Conversation target = memberConversation(conversationId, sender);
+        Conversation target = allowedToWrite(memberConversation(conversationId, sender), sender);
         Message existing = messages.findBySenderAndClientMsgId(sender, clientId);
         if (existing != null) {
             return new Sent(existing, false);
@@ -249,6 +353,9 @@ public final class MessageService {
         Message source = visibleMessage(sourceMessageId, sender);
         if (source.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot be forwarded");
+        }
+        if (source.getType() == MessageType.SYSTEM) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "A system message cannot be forwarded");
         }
         String original = source.getForwardedFrom() == null ? source.getMessageId() : source.getForwardedFrom();
         return store(target, sender, clientId, source.getContent(), null, null, original);
@@ -261,6 +368,15 @@ public final class MessageService {
      * older ones exist.
      */
     public MessagePage messages(String conversationId, String userId, Long afterSeq, Long beforeSeq, Integer limit) {
+        return messages(conversationId, userId, afterSeq, beforeSeq, limit, null);
+    }
+
+    /**
+     * With text, only live TEXT messages containing it (ignoring case) are returned, paged the same way.
+     * Blank text means no search.
+     */
+    public MessagePage messages(
+        String conversationId, String userId, Long afterSeq, Long beforeSeq, Integer limit, String text) {
         if (afterSeq != null && beforeSeq != null) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Use afterSeq or beforeSeq, not both");
         }
@@ -270,15 +386,24 @@ public final class MessageService {
         if (beforeSeq != null && beforeSeq < 1) {
             throw new Rejected(Rejected.Reason.VALIDATION, "beforeSeq must be 1 or more");
         }
+        String needle = text == null || text.isBlank() ? null : text.trim();
+        if (needle != null && needle.length() > SEARCH_MAX_LENGTH) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "q must be at most " + SEARCH_MAX_LENGTH + " characters");
+        }
         int size = limit(limit, MESSAGES_DEFAULT_LIMIT, MESSAGES_MAX_LIMIT);
         String id = memberConversation(conversationId, user(userId)).getConversationId();
         // One extra row tells whether another page exists without a count query.
         if (afterSeq != null) {
-            List<Message> rows = messages.findAfterSeq(id, afterSeq, size + 1);
+            List<Message> rows = needle == null
+                ? messages.findAfterSeq(id, afterSeq, size + 1)
+                : search.searchAfterSeq(id, afterSeq, needle, size + 1);
             boolean hasMore = rows.size() > size;
             return new MessagePage(hasMore ? rows.subList(0, size) : rows, hasMore);
         }
-        List<Message> rows = messages.findBeforeSeq(id, beforeSeq == null ? Long.MAX_VALUE : beforeSeq, size + 1);
+        long before = beforeSeq == null ? Long.MAX_VALUE : beforeSeq;
+        List<Message> rows = needle == null
+            ? messages.findBeforeSeq(id, before, size + 1)
+            : search.searchBeforeSeq(id, before, needle, size + 1);
         boolean hasMore = rows.size() > size;
         // Rows are in seq order, so the extra one is the oldest.
         return new MessagePage(hasMore ? rows.subList(1, rows.size()) : rows, hasMore);
@@ -290,7 +415,7 @@ public final class MessageService {
     public Message delete(String conversationId, String messageId, String userId) {
         String user = user(userId);
         Message message = messageIn(conversationId, messageId, user);
-        if (!message.getSenderId().equals(user)) {
+        if (!user.equals(message.getSenderId())) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, "Only the sender can delete a message");
         }
         if (message.isDeleted()) {
@@ -313,6 +438,9 @@ public final class MessageService {
         Message message = messageIn(conversationId, messageId, user);
         if (message.isDeleted()) {
             throw new Rejected(Rejected.Reason.VALIDATION, "A deleted message cannot get reactions");
+        }
+        if (message.getType() == MessageType.SYSTEM) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "A system message cannot get reactions");
         }
         MessageReaction reaction = new MessageReaction(
             UUID.randomUUID().toString(), message.getMessageId(), user, code, now());
@@ -362,11 +490,17 @@ public final class MessageService {
             null
         );
         Message message = messages.append(draft);
+        if (message == null && senderId == null) {
+            throw new IllegalStateException("A system message was not stored: " + clientMsgId);
+        }
         if (message == null) {
             // A concurrent retry with the same clientMsgId won. No seq was used for this attempt.
             return new Sent(messages.findBySenderAndClientMsgId(senderId, clientMsgId), false);
         }
         events.publishMessageCreated(message);
+        if (senderId == null) {
+            return new Sent(message, true);
+        }
         // Writing in a conversation means having read it up to your own message.
         ReadMarkerRepository.Advance own = readMarkers.advance(message.getConversationId(), senderId, message.getSeq(), now);
         if (own.moved()) {
@@ -383,6 +517,44 @@ public final class MessageService {
         // Unknown and foreign conversations look the same, so ids cannot be probed.
         if (conversation == null || !members.isMember(conversation, userId)) {
             throw new Rejected(Rejected.Reason.FORBIDDEN, NOT_MEMBER);
+        }
+        return settled(conversation);
+    }
+
+    /**
+     * A request ends by itself once the two users are friends: no accept needed.
+     */
+    private Conversation settled(Conversation conversation) {
+        if (conversation.getPendingFor() == null) {
+            return conversation;
+        }
+        String other = conversation.otherMember(conversation.getPendingFor());
+        if (other != null && friendships.areFriends(other, conversation.getPendingFor())) {
+            conversations.acceptRequest(conversation.getConversationId(), conversation.getPendingFor());
+            return conversation.accepted();
+        }
+        return conversation;
+    }
+
+    private boolean stillPending(Conversation conversation, String userId) {
+        return settled(conversation).isPendingFor(userId);
+    }
+
+    /**
+     * Writing into a DIRECT conversation: refused when either user blocked the other. The recipient of a request
+     * who writes back has accepted it.
+     */
+    private Conversation allowedToWrite(Conversation conversation, String senderId) {
+        if (conversation.getType() != ConversationType.DIRECT) {
+            return conversation;
+        }
+        String other = conversation.otherMember(senderId);
+        if (other != null && blocks.isBlocked(senderId, other)) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, BLOCKED);
+        }
+        if (conversation.isPendingFor(senderId)) {
+            conversations.acceptRequest(conversation.getConversationId(), senderId);
+            return conversation.accepted();
         }
         return conversation;
     }
@@ -415,7 +587,9 @@ public final class MessageService {
         String id = conversation.getConversationId();
         Map<String, Message> latest = messages.findLatest(List.of(id));
         ReadState read = userId == null ? null : readMarkers.readStates(userId, List.of(id)).get(id);
-        return new ConversationSummary(conversation, members.memberIds(conversation), latest.get(id), read);
+        ConversationPrefs own = userId == null ? null : prefs.find(userId, List.of(id)).getOrDefault(id, ConversationPrefs.DEFAULT);
+        return new ConversationSummary(conversation, members.memberIds(conversation), latest.get(id), read, own,
+            userId != null && conversation.isPendingFor(userId));
     }
 
     private static int limit(Integer limit, int fallback, int max) {
@@ -430,11 +604,13 @@ public final class MessageService {
         if (value == null) {
             return null;
         }
-        int split = value.indexOf('_');
-        String id = split < 0 ? null : Ids.canonical(value.substring(split + 1));
+        boolean pinned = value.startsWith("p");
+        String rest = pinned ? value.substring(1) : value;
+        int split = rest.indexOf('_');
+        String id = split < 0 ? null : Ids.canonical(rest.substring(split + 1));
         try {
             if (id != null) {
-                return new ConversationCursor(Instant.ofEpochMilli(Long.parseLong(value.substring(0, split))), id);
+                return new ConversationCursor(pinned, Instant.ofEpochMilli(Long.parseLong(rest.substring(0, split))), id);
             }
         } catch (NumberFormatException ex) {
             // Falls through to the rejection below.
@@ -473,6 +649,9 @@ public final class MessageService {
      * nextCursor is null on the last page.
      */
     public record ConversationPage(List<ConversationSummary> conversations, String nextCursor) {
+    }
+
+    public record PrefsChange(String conversationId, ConversationPrefs prefs) {
     }
 
     public record Opened(ConversationSummary conversation, boolean created) {

@@ -4,12 +4,14 @@ import api.MessageResponse;
 import conversation.Conversation;
 import member.ConversationMembers;
 import message.Message;
+import message.MessageType;
 import reaction.MessageReaction;
 import push.PushNotifier;
 import realtime.RealtimeBus;
 import realtime.RealtimeFrame;
 import realtime.RealtimeSessions;
 import storage.ConversationRepository;
+import storage.MutedConversations;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,6 +56,7 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     private final ActivityRecorder activities;
     private final RealtimeSessions sessions;
     private final PushNotifier push;
+    private final MutedConversations muted;
 
     public EnvelopeEventPublisher(ConversationRepository conversations, ConversationMembers members, RealtimeBus realtime) {
         this(conversations, members, realtime, envelope -> { }, null, (ids, conversationId, preview) -> { });
@@ -76,6 +79,22 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         RealtimeSessions sessions,
         PushNotifier push
     ) {
+        this(conversations, members, realtime, activities, sessions, push, null);
+    }
+
+    /**
+     * muted says who muted a conversation: they get no offline push for it. Null means nobody muted anything.
+     */
+    public EnvelopeEventPublisher(
+        ConversationRepository conversations,
+        ConversationMembers members,
+        RealtimeBus realtime,
+        ActivityRecorder activities,
+        RealtimeSessions sessions,
+        PushNotifier push,
+        MutedConversations muted
+    ) {
+        this.muted = muted;
         this.conversations = conversations;
         this.members = members;
         this.realtime = realtime;
@@ -94,7 +113,8 @@ public final class EnvelopeEventPublisher implements EventPublisher {
         RealtimeBus realtime,
         ObjectProvider<ActivityRecorder> activities,
         ObjectProvider<RealtimeSessions> sessions,
-        ObjectProvider<PushNotifier> push
+        ObjectProvider<PushNotifier> push,
+        ObjectProvider<MutedConversations> muted
     ) {
         this(
             conversations,
@@ -102,14 +122,42 @@ public final class EnvelopeEventPublisher implements EventPublisher {
             realtime,
             activities.getIfAvailable(() -> envelope -> { }),
             sessions.getIfAvailable(),
-            push.getIfAvailable(() -> (ids, conversationId, preview) -> { })
+            push.getIfAvailable(() -> (ids, conversationId, preview) -> { }),
+            muted.getIfAvailable()
         );
     }
 
     @Override
     public void publishMessageCreated(Message message) {
-        emit(message.getConversationId(), MESSAGE_CREATED, new MessageResponse(message));
+        Map<String, Object> payload = enrichedMessagePayload(message);
+        if (message.getType() == MessageType.SYSTEM) {
+            // A notice, not something a user did: members see it live, but it is not counted and nobody is pushed.
+            emit(message.getConversationId(), MESSAGE_CREATED, payload, false);
+            return;
+        }
+        emit(message.getConversationId(), MESSAGE_CREATED, payload, true);
         notifyOffline(message);
+    }
+
+    /**
+     * Message contract fields plus analytics enrichment: conversationType and recipientIds (members except sender).
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> enrichedMessagePayload(Message message) {
+        Map<String, Object> payload = new LinkedHashMap<>(JSON.convertValue(new MessageResponse(message), Map.class));
+        Conversation conversation = conversations.findById(message.getConversationId());
+        if (conversation == null) {
+            return payload;
+        }
+        payload.put("conversationType", conversation.getType().name());
+        List<String> recipients = new ArrayList<>();
+        for (String memberId : members.memberIds(conversation)) {
+            if (message.getSenderId() == null || !message.getSenderId().equals(memberId)) {
+                recipients.add(memberId);
+            }
+        }
+        payload.put("recipientIds", recipients);
+        return payload;
     }
 
     @Override
@@ -152,9 +200,15 @@ public final class EnvelopeEventPublisher implements EventPublisher {
     }
 
     private void emit(String conversationId, String type, Object payload) {
+        emit(conversationId, type, payload, true);
+    }
+
+    private void emit(String conversationId, String type, Object payload, boolean tracked) {
         String envelope = envelope(type, payload);
         log.info(envelope);
-        record(envelope);
+        if (tracked) {
+            record(envelope);
+        }
         push(type, conversationId, () -> {
             Conversation conversation = conversations.findById(conversationId);
             return conversation == null ? List.of() : List.copyOf(members.memberIds(conversation));
@@ -218,6 +272,10 @@ public final class EnvelopeEventPublisher implements EventPublisher {
                     offline.add(memberId);
                 }
             }
+            if (muted != null && !offline.isEmpty()) {
+                // Mute only stops the push: the socket still gets the event, and the message is stored.
+                offline.removeAll(muted.mutedAmong(message.getConversationId(), offline));
+            }
             if (!offline.isEmpty()) {
                 push.notifyNewMessage(offline, message.getConversationId(), previewOf(message));
             }
@@ -241,7 +299,9 @@ public final class EnvelopeEventPublisher implements EventPublisher {
             case IMAGE -> "Sent an image";
             case VIDEO -> "Sent a video";
             case DOCUMENT -> "Sent a file";
+            case AUDIO -> "Sent a voice message";
             case EMOTION -> "Sent an emotion";
+            case SYSTEM -> "New message";
             case TEXT -> "New message";
         };
     }

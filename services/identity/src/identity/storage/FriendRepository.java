@@ -13,5 +13,13 @@ public interface FriendRepository {
 
     void saveFriendship(String userId, String friendId);
 
+    void deleteFriendship(String userId, String friendId);
+
     java.util.List<String> friendIds(String userId);
+
+    /** Requests addressed to this user. */
+    java.util.List<FriendRequest> incomingRequests(String userId);
+
+    /** Requests this user has sent. */
+    java.util.List<FriendRequest> outgoingRequests(String userId);
 }

@@ -38,6 +38,30 @@ class RealtimeSessionsTest {
     }
 
     @Test
+    void openingAndClosingSocketsTellsThePresenceTrackerOncePerSocket() throws Exception {
+        List<String> told = new java.util.ArrayList<>();
+        RealtimeSessions tracked = new RealtimeSessions(PROPERTIES, clock, new presence.PresenceTracker() {
+            @Override
+            public void connected(String userId) {
+                told.add("connected " + userId);
+            }
+
+            @Override
+            public void disconnected(String userId) {
+                told.add("disconnected " + userId);
+            }
+        });
+        tracked.open(socket("web"), "bob");
+        tracked.open(socket("mobile"), "bob");
+
+        tracked.forget("web");
+        tracked.forget("web");
+        tracked.close("mobile", CloseStatus.NORMAL);
+
+        assertEquals(List.of("connected bob", "connected bob", "disconnected bob", "disconnected bob"), told);
+    }
+
+    @Test
     void deliverReachesEverySocketOfEachRecipientAndNobodyElse() throws Exception {
         WebSocketSession bobWeb = socket("bob-web");
         WebSocketSession bobMobile = socket("bob-mobile");

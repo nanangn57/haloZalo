@@ -71,6 +71,10 @@ public final class SendMessageRequest {
             long documentSize = size == null ? 0L : size;
             return new MessageContent.Document(body, fileName, mimeType, documentSize);
         }
+        if ("AUDIO".equals(type)) {
+            long audioSize = size == null ? 0L : size;
+            return new MessageContent.Audio(body, mimeType, audioSize, duration, fileName);
+        }
         return null;
     }
 

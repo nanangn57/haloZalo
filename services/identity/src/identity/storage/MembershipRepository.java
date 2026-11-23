@@ -10,6 +10,8 @@ public interface MembershipRepository {
 
     void delete(String groupId, String userId);
 
+    void deleteByGroup(String groupId);
+
     Membership find(String groupId, String userId);
 
     List<Membership> listByUser(String userId);

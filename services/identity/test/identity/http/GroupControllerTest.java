@@ -31,7 +31,9 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -167,6 +169,133 @@ class GroupControllerTest {
             .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
     }
 
+    @Test
+    void transferOwnerMovesOwnershipAndOldOwnerBecomesMember() throws Exception {
+        String groupId = createGroupWithMember();
+
+        mvc.perform(post("/groups/" + groupId + "/transfer-owner")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + memberId + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.userId").value(memberId))
+            .andExpect(jsonPath("$.role").value("OWNER"));
+
+        mvc.perform(get("/groups").requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(jsonPath("$.groups[0].role").value("MEMBER"))
+            .andExpect(jsonPath("$.groups[0].ownerId").value(memberId));
+        mvc.perform(post("/groups/" + groupId + "/transfer-owner")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + ownerId + "\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void transferOwnerRejectsNonMemberTarget() throws Exception {
+        String groupId = createGroup();
+        String stranger = saveAccount("stranger");
+
+        mvc.perform(post("/groups/" + groupId + "/transfer-owner")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + stranger + "\"}"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void roleEndpointIsGone() throws Exception {
+        String groupId = createGroupWithMember();
+
+        mvc.perform(put("/groups/" + groupId + "/members/" + memberId + "/role")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"role\":\"ADMIN\"}"))
+            .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void ownerDissolvesGroupWith204AndMemberCannot() throws Exception {
+        String groupId = createGroupWithMember();
+
+        mvc.perform(delete("/groups/" + groupId).requestAttr(SessionFilter.USER_ID, memberId))
+            .andExpect(status().isForbidden());
+        mvc.perform(delete("/groups/" + groupId).requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isNoContent());
+
+        mvc.perform(get("/groups").requestAttr(SessionFilter.USER_ID, memberId))
+            .andExpect(jsonPath("$.groups", hasSize(0)));
+        mvc.perform(delete("/groups/" + groupId).requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void ownerLeavingWhileOthersRemainIsForbiddenButSoleOwnerDissolves() throws Exception {
+        String groupId = createGroupWithMember();
+
+        mvc.perform(delete("/groups/" + groupId + "/members/" + ownerId).requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isForbidden());
+        mvc.perform(delete("/groups/" + groupId + "/members/" + memberId).requestAttr(SessionFilter.USER_ID, memberId))
+            .andExpect(status().isNoContent());
+        mvc.perform(delete("/groups/" + groupId + "/members/" + ownerId).requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isNoContent());
+
+        mvc.perform(get("/groups").requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(jsonPath("$.groups", hasSize(0)));
+    }
+
+    @Test
+    void patchUpdatesGroupDetailsForOwnerOnly() throws Exception {
+        String groupId = createGroupWithMember();
+
+        mvc.perform(patch("/groups/" + groupId)
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"nhom moi\",\"description\":\"mo ta\",\"avatar\":\"a.png\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value("nhom moi"))
+            .andExpect(jsonPath("$.description").value("mo ta"))
+            .andExpect(jsonPath("$.avatar").value("a.png"));
+
+        mvc.perform(patch("/groups/" + groupId)
+                .requestAttr(SessionFilter.USER_ID, memberId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"hack\"}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(patch("/groups/" + groupId)
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        mvc.perform(patch("/groups/" + groupId)
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\" \"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    private String createGroup() throws Exception {
+        MvcResult created = mvc.perform(post("/groups")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"nhom\"}"))
+            .andReturn();
+        return JsonPath.read(created.getResponse().getContentAsString(), "$.groupId");
+    }
+
+    private String createGroupWithMember() throws Exception {
+        String groupId = createGroup();
+        mvc.perform(post("/groups/" + groupId + "/members")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"userId\":\"" + memberId + "\"}"))
+            .andExpect(status().isCreated());
+        return groupId;
+    }
+
     private String saveAccount(String name) {
         String userId = UUID.randomUUID().toString();
         accounts.save(new Account(userId, name, name + "@example.com", "hash", Instant.now()));
@@ -200,6 +329,17 @@ class GroupControllerTest {
         public Group findById(String groupId) {
             return rows.stream().filter(row -> row.getGroupId().equals(groupId)).findFirst().orElse(null);
         }
+
+        @Override
+        public void update(Group group) {
+            rows.removeIf(row -> row.getGroupId().equals(group.getGroupId()));
+            rows.add(group);
+        }
+
+        @Override
+        public void delete(String groupId) {
+            rows.removeIf(row -> row.getGroupId().equals(groupId));
+        }
     }
 
     private static final class MemoryMemberships implements MembershipRepository {
@@ -213,6 +353,11 @@ class GroupControllerTest {
         @Override
         public void delete(String groupId, String userId) {
             rows.removeIf(row -> row.getGroupId().equals(groupId) && row.getUserId().equals(userId));
+        }
+
+        @Override
+        public void deleteByGroup(String groupId) {
+            rows.removeIf(row -> row.getGroupId().equals(groupId));
         }
 
         @Override
@@ -235,6 +380,12 @@ class GroupControllerTest {
 
         @Override
         public void updateRole(String groupId, String userId, Role role) {
+            Membership current = find(groupId, userId);
+            if (current == null) {
+                return;
+            }
+            delete(groupId, userId);
+            save(new Membership(groupId, userId, current.getJoinedAt(), role));
         }
     }
 
@@ -259,6 +410,28 @@ class GroupControllerTest {
         @Override
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void updateBannedAt(String userId, java.time.Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
         }
 
         @Override

@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Component
-public final class PostgresMessageRepository implements MessageRepository {
+public final class PostgresMessageRepository implements MessageRepository, MessageSearchRepository {
     private static final String COLUMNS = "id, conversation_id, seq, sender_id, client_msg_id, type, content, metadata, "
         + "reply_to, forwarded_from, status, created_at, updated_at, deleted_at";
     /**
@@ -29,6 +29,12 @@ public final class PostgresMessageRepository implements MessageRepository {
     private static final String COLUMNS_OF_M = Arrays.stream(COLUMNS.split(", "))
         .map(column -> "m." + column)
         .collect(Collectors.joining(", "));
+
+    /**
+     * Only live TEXT messages are searched; the text is the body clients see.
+     */
+    private static final String MATCHES =
+        "type = 'TEXT' AND status = 'SENT' AND content ->> 'text' ILIKE ? ESCAPE '\\'";
 
     private static final RowMapper<Message> MESSAGE = (row, index) -> {
         MessageType type = MessageType.valueOf(row.getString("type"));
@@ -135,6 +141,29 @@ public final class PostgresMessageRepository implements MessageRepository {
             "SELECT * FROM (SELECT " + COLUMNS + " FROM messages WHERE conversation_id = ? AND seq < ? "
                 + "ORDER BY seq DESC LIMIT ?) page ORDER BY seq",
             MESSAGE, Sql.uuid(conversationId), beforeSeq, limit);
+    }
+
+    @Override
+    public List<Message> searchAfterSeq(String conversationId, long afterSeq, String text, int limit) {
+        return jdbc.query(
+            "SELECT " + COLUMNS + " FROM messages WHERE conversation_id = ? AND seq > ? AND " + MATCHES
+                + " ORDER BY seq LIMIT ?",
+            MESSAGE, Sql.uuid(conversationId), afterSeq, likePattern(text), limit);
+    }
+
+    @Override
+    public List<Message> searchBeforeSeq(String conversationId, long beforeSeq, String text, int limit) {
+        return jdbc.query(
+            "SELECT * FROM (SELECT " + COLUMNS + " FROM messages WHERE conversation_id = ? AND seq < ? AND " + MATCHES
+                + " ORDER BY seq DESC LIMIT ?) page ORDER BY seq",
+            MESSAGE, Sql.uuid(conversationId), beforeSeq, likePattern(text), limit);
+    }
+
+    /**
+     * "contains, ignoring case" with %, _ and the escape character taken literally.
+     */
+    static String likePattern(String text) {
+        return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
     }
 
     @Override

@@ -15,11 +15,13 @@ public final class FriendExceptionHandler {
         HttpStatus status = switch (rejected.getReason()) {
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
+            case FORBIDDEN -> HttpStatus.FORBIDDEN;
             case VALIDATION -> HttpStatus.BAD_REQUEST;
         };
         String code = switch (rejected.getReason()) {
             case NOT_FOUND -> "NOT_FOUND";
             case CONFLICT -> "CONFLICT";
+            case FORBIDDEN -> "FORBIDDEN";
             case VALIDATION -> "VALIDATION_ERROR";
         };
         return ResponseEntity.status(status).body(new ErrorResponse(code, rejected.getMessage()));

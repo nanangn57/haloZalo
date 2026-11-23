@@ -16,16 +16,16 @@ import GroupPage from './pages/GroupPage'
 import DashboardPage from './pages/DashboardPage'
 import AdminStatsPage from './pages/AdminStatsPage'
 import FriendRequestPage from './pages/FriendRequestPage'
+import SettingsPage from './pages/SettingsPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
 
 import MainLayout from './layouts/MainLayout'
 import ContactLayout from './layouts/ContactLayout'
 
-import { getAuth } from '@core/authSession'
+import { hasSession } from '@core/authSession'
 
 function ProtectedLayout() {
-  const auth = getAuth()
-
-  if (!auth?.user?.userId) {
+  if (!hasSession()) {
     return <Navigate to="/login" replace />
   }
 
@@ -36,6 +36,11 @@ function ProtectedLayout() {
   )
 }
 
+// Có token thì vào /chat, chưa có thì /login.
+function RootRedirect() {
+  return <Navigate to={hasSession() ? '/chat' : '/login'} replace />
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -44,6 +49,9 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/auth/verify" element={<VerifyPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        {/* Link trong email đặt lại mật khẩu: /reset-password?token= */}
+        <Route path="/reset-password" element={<ForgotPasswordPage />} />
 
         {/* Protected routes */}
         <Route element={<ProtectedLayout />}>
@@ -52,6 +60,9 @@ function App() {
 
           {/* Platform admin stats */}
           <Route path="/admin" element={<AdminStatsPage />} />
+
+          {/* Sessions, password, notifications */}
+          <Route path="/settings" element={<SettingsPage />} />
 
           {/* Normal chat */}
           <Route path="/chat" element={<ChatPage />} />
@@ -77,8 +88,8 @@ function App() {
         </Route>
 
         {/* Default routes */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="*" element={<RootRedirect />} />
       </Routes>
     </BrowserRouter>
   )

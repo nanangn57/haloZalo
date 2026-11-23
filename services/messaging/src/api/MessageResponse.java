@@ -6,7 +6,7 @@ import message.MessageContent;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * The contract's Message: MessageBase plus type and body. Only TEXT and EMOTION have a contract shape yet.
+ * The contract's Message: MessageBase plus type and body. senderId is absent on SYSTEM messages.
  * replyTo, forwardedFrom, status and deletedAt are left out when null, so a plain message keeps the exact
  * contract shape. A deleted message keeps its seq slot but never shows its content again.
  */
@@ -55,6 +55,12 @@ public final class MessageResponse {
         if (content instanceof MessageContent.Document document) {
             return document.url();
         }
+        if (content instanceof MessageContent.Audio audio) {
+            return audio.url();
+        }
+        if (content instanceof MessageContent.System system) {
+            return system.text();
+        }
         throw new IllegalStateException("No contract shape for message type " + content.type());
     }
 
@@ -70,6 +76,7 @@ public final class MessageResponse {
         return seq;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getSenderId() {
         return senderId;
     }

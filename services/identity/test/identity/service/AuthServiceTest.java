@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import identity.password.BcryptPasswordHasher;
 import identity.password.PasswordHasher;
 import identity.session.Session;
+import identity.account.Profile;
 import identity.storage.AccountRepository;
+import identity.storage.ProfileRepository;
 import identity.storage.SessionRepository;
 import identity.storage.VerificationRepository;
 import identity.verification.EmailVerification;
@@ -28,6 +30,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,6 +40,7 @@ class AuthServiceTest {
     private static final String BASE_URL = "http://localhost:8080";
 
     private MemoryAccounts accounts;
+    private MemoryProfiles profiles;
     private MemorySessions sessions;
     private MemoryEvents events;
     private MemoryVerifications verifications;
@@ -48,13 +52,14 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         accounts = new MemoryAccounts();
+        profiles = new MemoryProfiles();
         sessions = new MemorySessions();
         events = new MemoryEvents();
         verifications = new MemoryVerifications();
         mail = new MemoryMail();
         clock = new MutableClock(NOW);
         passwordHasher = new BcryptPasswordHasher();
-        auth = new AuthService(passwordHasher, accounts, sessions, events, verifications, mail, clock, BASE_URL);
+        auth = new AuthService(passwordHasher, accounts, profiles, sessions, events, verifications, mail, clock, BASE_URL);
     }
 
     @Test
@@ -82,6 +87,7 @@ class AuthServiceTest {
         AuthService immediate = new AuthService(
             passwordHasher,
             accounts,
+            profiles,
             sessions,
             events,
             verifications,
@@ -103,7 +109,7 @@ class AuthServiceTest {
         Account account = accounts.findByUsername("ngoc_anh");
         assertEquals("anh@example.com", account.getEmail());
         assertTrue(passwordHasher.matches("password1", account.getPasswordHash()));
-        TokenResponse login = immediate.login(new LoginRequest("ngoc_anh", "password1"));
+        TokenResponse login = immediate.login(new LoginRequest("anh@example.com", "password1", "test-device-1"));
         assertEquals(account.getUserId(), login.getUser().getUserId());
     }
 
@@ -112,6 +118,7 @@ class AuthServiceTest {
         AuthService immediate = new AuthService(
             passwordHasher,
             accounts,
+            profiles,
             sessions,
             events,
             verifications,
@@ -204,11 +211,13 @@ class AuthServiceTest {
         assertNull(verifications.findByToken(oldToken));
         EmailVerification pending = verifications.findByEmail("anh@example.com");
         assertNotEquals(oldToken, pending.getToken());
-        AuthService.Rejected oldLink = assertThrows(AuthService.Rejected.class, () -> auth.verify(oldToken));
-        Account account = auth.verify(pending.getToken());
+        AuthService.Rejected oldLink = assertThrows(AuthService.Rejected.class, () -> auth.verify(oldToken, "test-device-1", null));
+        TokenResponse verified = auth.verify(pending.getToken(), "test-device-1", null);
+        Account account = accounts.findByUsername("ngoc_anh");
         assertEquals(AuthService.Rejected.Reason.VALIDATION, oldLink.getReason());
         assertTrue(passwordHasher.matches("password2", account.getPasswordHash()));
-        assertEquals(account.getUserId(), accounts.findByUsername("ngoc_anh").getUserId());
+        assertEquals(account.getUserId(), verified.getUser().getUserId());
+        assertEquals(1, sessions.size());
     }
 
     @Test
@@ -230,17 +239,20 @@ class AuthServiceTest {
         auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
         String token = verifications.findByEmail("anh@example.com").getToken();
 
-        Account account = auth.verify(token);
+        TokenResponse verified = auth.verify(token, "test-device-1", null);
+        Account account = accounts.findByUsername("ngoc_anh");
 
-        assertEquals("ngoc_anh", account.getUsername());
-        assertEquals("anh@example.com", account.getEmail());
-        assertEquals(identity.account.PlatformRole.USER, account.getPlatformRole());
+        assertEquals("ngoc_anh", verified.getUser().getUsername());
+        assertEquals("anh@example.com", verified.getUser().getEmail());
+        assertEquals(identity.account.PlatformRole.USER, verified.getUser().getPlatformRole());
         assertEquals(NOW, account.getCreatedAt());
+        assertNotNull(verified.getAccessToken());
+        assertEquals(1, sessions.size());
+        assertEquals("test-device-1", sessions.findById(verified.getAccessToken()).getDeviceId());
         assertNull(verifications.findByToken(token));
-        assertEquals(0, sessions.size());
-        AuthService.Rejected reused = assertThrows(AuthService.Rejected.class, () -> auth.verify(token));
+        AuthService.Rejected reused = assertThrows(AuthService.Rejected.class, () -> auth.verify(token, "test-device-1", null));
         assertEquals(AuthService.Rejected.Reason.VALIDATION, reused.getReason());
-        assertTrue(passwordHasher.matches("password1", accounts.findByUsername("ngoc_anh").getPasswordHash()));
+        assertTrue(passwordHasher.matches("password1", account.getPasswordHash()));
     }
 
     @Test
@@ -248,6 +260,7 @@ class AuthServiceTest {
         AuthService adminAuth = new AuthService(
             passwordHasher,
             accounts,
+            profiles,
             sessions,
             events,
             verifications,
@@ -259,10 +272,10 @@ class AuthServiceTest {
         adminAuth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
         String token = verifications.findByEmail("anh@example.com").getToken();
 
-        Account account = adminAuth.verify(token);
+        TokenResponse verified = adminAuth.verify(token, "test-device-1", null);
 
-        assertEquals(identity.account.PlatformRole.ADMIN, account.getPlatformRole());
-        TokenResponse login = adminAuth.login(new LoginRequest("ngoc_anh", "password1"));
+        assertEquals(identity.account.PlatformRole.ADMIN, verified.getUser().getPlatformRole());
+        TokenResponse login = adminAuth.login(new LoginRequest("anh@example.com", "password1", "test-device-1"));
         assertEquals(identity.account.PlatformRole.ADMIN, login.getUser().getPlatformRole());
     }
 
@@ -273,12 +286,13 @@ class AuthServiceTest {
             "token-2",
             "ngoc_anh",
             "other@example.com",
+            "ngoc_anh",
             "hash",
             NOW,
             NOW.plusSeconds(AuthService.VERIFICATION_TTL_SECONDS)
         ));
 
-        AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class, () -> auth.verify("token-2"));
+        AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class, () -> auth.verify("token-2", "test-device-1", null));
 
         assertEquals(AuthService.Rejected.Reason.CONFLICT, rejected.getReason());
         assertEquals("token-2", verifications.findByToken("token-2").getToken());
@@ -291,9 +305,9 @@ class AuthServiceTest {
         String token = verifications.findByEmail("anh@example.com").getToken();
         clock.setInstant(NOW.plusSeconds(AuthService.VERIFICATION_TTL_SECONDS));
 
-        AuthService.Rejected expired = assertThrows(AuthService.Rejected.class, () -> auth.verify(token));
-        AuthService.Rejected unknown = assertThrows(AuthService.Rejected.class, () -> auth.verify("missing"));
-        AuthService.Rejected blank = assertThrows(AuthService.Rejected.class, () -> auth.verify("  "));
+        AuthService.Rejected expired = assertThrows(AuthService.Rejected.class, () -> auth.verify(token, "test-device-1", null));
+        AuthService.Rejected unknown = assertThrows(AuthService.Rejected.class, () -> auth.verify("missing", "test-device-1", null));
+        AuthService.Rejected blank = assertThrows(AuthService.Rejected.class, () -> auth.verify("  ", "test-device-1", null));
 
         assertEquals(AuthService.Rejected.Reason.VALIDATION, expired.getReason());
         assertEquals(AuthService.Rejected.Reason.VALIDATION, unknown.getReason());
@@ -308,7 +322,7 @@ class AuthServiceTest {
         int before = sessions.size();
 
         AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
-            () -> auth.login(new LoginRequest("anh@example.com", "password1")));
+            () -> auth.login(new LoginRequest("anh@example.com", "password1", "test-device-1")));
 
         assertEquals(AuthService.Rejected.Reason.UNAUTHENTICATED, rejected.getReason());
         assertEquals(before, sessions.size());
@@ -316,34 +330,52 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginOpensAnotherSessionAndPublishesEvent() {
+    void loginSameDeviceRotatesSessionAndPublishesEvent() {
         Account account = verifyNgocAnh();
         Instant accountCreatedAt = account.getCreatedAt();
+        events.userIds.clear();
 
-        TokenResponse first = auth.login(new LoginRequest("anh@example.com", "password1"));
-        TokenResponse second = auth.login(new LoginRequest("anh@example.com", "password1"));
+        TokenResponse first = auth.login(new LoginRequest("anh@example.com", "password1", "test-device-1"));
+        TokenResponse second = auth.login(new LoginRequest("anh@example.com", "password1", "test-device-1"));
 
         Session loggedInSession = sessions.findById(second.getAccessToken());
         assertNotEquals(first.getAccessToken(), second.getAccessToken());
+        assertEquals(1, sessions.size());
+        assertNull(sessions.findById(first.getAccessToken()));
         assertEquals(accountCreatedAt, accounts.findByUsername("ngoc_anh").getCreatedAt());
         assertFalse(loggedInSession.getCreatedAt().isBefore(accountCreatedAt));
-        assertEquals(loggedInSession.getCreatedAt().plusSeconds(AuthService.SESSION_TTL_SECONDS), loggedInSession.getExpiresAt());
-        assertEquals(account.getUserId(), auth.currentUserId(first.getAccessToken()));
+        assertEquals(loggedInSession.getCreatedAt().plusSeconds(AuthService.SESSION_IDLE_SECONDS), loggedInSession.getExpiresAt());
+        assertEquals("test-device-1", loggedInSession.getDeviceId());
         assertEquals(account.getUserId(), auth.currentUserId(second.getAccessToken()));
         assertEquals(List.of(account.getUserId(), account.getUserId()), events.userIds);
+    }
+
+    @Test
+    void loginDifferentDevicesKeepSeparateSessions() {
+        Account account = verifyNgocAnh();
+        for (Session existing : sessions.findByUserId(account.getUserId())) {
+            sessions.delete(existing.getSessionId());
+        }
+        TokenResponse web = auth.login(new LoginRequest("anh@example.com", "password1", "device-web-01"));
+        TokenResponse mobile = auth.login(new LoginRequest("anh@example.com", "password1", "device-mobile-01"));
+        assertEquals(2, sessions.size());
+        assertNotNull(auth.currentUserId(web.getAccessToken()));
+        assertNotNull(auth.currentUserId(mobile.getAccessToken()));
+        assertEquals(web.getUser().getUserId(), mobile.getUser().getUserId());
     }
 
     @Test
     void loginRejectsWrongPasswordWithoutNewSession() {
         verifyNgocAnh();
         int before = sessions.size();
+        int eventsBefore = events.userIds.size();
 
         AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
-            () -> auth.login(new LoginRequest("ngoc_anh", "wrong-password")));
+            () -> auth.login(new LoginRequest("anh@example.com", "wrong-password", "test-device-1")));
 
         assertEquals(AuthService.Rejected.Reason.UNAUTHENTICATED, rejected.getReason());
         assertEquals(before, sessions.size());
-        assertEquals(0, events.userIds.size());
+        assertEquals(eventsBefore, events.userIds.size());
     }
 
     @Test
@@ -351,7 +383,7 @@ class AuthServiceTest {
         int before = sessions.size();
 
         AuthService.Rejected rejected = assertThrows(AuthService.Rejected.class,
-            () -> auth.login(new LoginRequest("missing_user", "password1")));
+            () -> auth.login(new LoginRequest("missing@example.com", "password1", "test-device-1")));
 
         assertEquals(AuthService.Rejected.Reason.UNAUTHENTICATED, rejected.getReason());
         assertEquals(before, sessions.size());
@@ -359,10 +391,10 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginByUsernameOpensASession() {
+    void loginByEmailOpensASession() {
         Account account = verifyNgocAnh();
 
-        TokenResponse loggedIn = auth.login(new LoginRequest("ngoc_anh", "password1"));
+        TokenResponse loggedIn = auth.login(new LoginRequest("anh@example.com", "password1", "test-device-1"));
 
         assertEquals(account.getUserId(), auth.currentUserId(loggedIn.getAccessToken()));
     }
@@ -379,7 +411,8 @@ class AuthServiceTest {
 
     private Account verifyNgocAnh() {
         auth.register(new RegisterRequest("ngoc_anh", "anh@example.com", "password1"));
-        return auth.verify(verifications.findByEmail("anh@example.com").getToken());
+        auth.verify(verifications.findByEmail("anh@example.com").getToken(), "test-device-1", null);
+        return accounts.findByUsername("ngoc_anh");
     }
 
     private static final class MemoryAccounts implements AccountRepository {
@@ -416,6 +449,43 @@ class AuthServiceTest {
             }
         }
 
+        @Override
+        public void updateBannedAt(String userId, Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
+        }
+
+    }
+
+    private static final class MemoryProfiles implements ProfileRepository {
+        private final List<Profile> rows = new ArrayList<>();
+
+        @Override
+        public Profile find(String userId) {
+            return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void save(Profile profile) {
+            rows.removeIf(row -> row.getUserId().equals(profile.getUserId()));
+            rows.add(profile);
+        }
     }
 
     private static final class MemorySessions implements SessionRepository {
@@ -429,6 +499,47 @@ class AuthServiceTest {
         @Override
         public Session findById(String sessionId) {
             return rows.stream().filter(row -> row.getSessionId().equals(sessionId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public Session findByUserIdAndDeviceId(String userId, String deviceId) {
+            if (deviceId == null) {
+                return null;
+            }
+            return rows.stream()
+                .filter(row -> row.getUserId().equals(userId) && deviceId.equals(row.getDeviceId()))
+                .findFirst()
+                .orElse(null);
+        }
+
+        @Override
+        public List<Session> findByUserId(String userId) {
+            return rows.stream().filter(row -> row.getUserId().equals(userId)).toList();
+        }
+
+        @Override
+        public void delete(String sessionId) {
+            rows.removeIf(row -> row.getSessionId().equals(sessionId));
+        }
+
+        @Override
+        public void touch(String sessionId, Instant lastSeenAt, Instant expiresAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Session row = rows.get(i);
+                if (row.getSessionId().equals(sessionId)) {
+                    rows.set(i, new Session(
+                        row.getSessionId(),
+                        row.getUserId(),
+                        row.getCreatedAt(),
+                        expiresAt,
+                        row.getDeviceId(),
+                        row.getDeviceLabel(),
+                        row.getUserAgent(),
+                        lastSeenAt
+                    ));
+                    return;
+                }
+            }
         }
 
         int size() {

@@ -3,10 +3,11 @@ package identity.http;
 import identity.group.AddMemberRequest;
 import identity.group.CreateGroupRequest;
 import identity.group.GroupListResponse;
+import identity.group.GroupPatch;
 import identity.group.GroupResponse;
 import identity.group.MemberListResponse;
 import identity.group.MembershipResponse;
-import identity.group.SetRoleRequest;
+import identity.group.TransferOwnerRequest;
 import identity.service.AuthService;
 import identity.service.GroupService;
 
@@ -18,7 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import com.fasterxml.jackson.databind.JsonNode;
 
 @RestController
 public final class GroupController {
@@ -68,14 +70,31 @@ public final class GroupController {
         return ResponseEntity.noContent().build();
     }
 
-    @PutMapping("/groups/{groupId}/members/{userId}/role")
-    public MembershipResponse assignRole(
+    @PatchMapping("/groups/{groupId}")
+    public GroupResponse update(
         @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
         @PathVariable String groupId,
-        @PathVariable("userId") String targetUserId,
-        @RequestBody SetRoleRequest request
+        @RequestBody JsonNode body
     ) {
-        return groups.assignRole(callerId(userId), groupId, targetUserId, request == null ? null : request.getRole());
+        return groups.update(callerId(userId), groupId, GroupPatch.from(body));
+    }
+
+    @DeleteMapping("/groups/{groupId}")
+    public ResponseEntity<Void> dissolve(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable String groupId
+    ) {
+        groups.dissolve(callerId(userId), groupId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/groups/{groupId}/transfer-owner")
+    public MembershipResponse transferOwner(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable String groupId,
+        @RequestBody TransferOwnerRequest request
+    ) {
+        return groups.transferOwner(callerId(userId), groupId, request == null ? null : request.getUserId());
     }
 
     private static String callerId(String userId) {

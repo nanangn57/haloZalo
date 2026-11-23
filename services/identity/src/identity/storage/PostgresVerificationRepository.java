@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public final class PostgresVerificationRepository implements VerificationRepository {
+    private static final String COLS = "token, username, email, display_name, password_hash, created_at, expires_at";
+
     private final DataSource dataSource;
 
     public PostgresVerificationRepository(DataSource dataSource) {
@@ -22,15 +24,16 @@ public final class PostgresVerificationRepository implements VerificationReposit
 
     @Override
     public void save(EmailVerification verification) {
-        String sql = "INSERT INTO identity.verifications (token, username, email, password_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO identity.verifications (token, username, email, display_name, password_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, verification.getToken());
             statement.setString(2, verification.getUsername());
             statement.setString(3, verification.getEmail());
-            statement.setString(4, verification.getPasswordHash());
-            statement.setObject(5, OffsetDateTime.ofInstant(verification.getCreatedAt(), ZoneOffset.UTC));
-            statement.setObject(6, OffsetDateTime.ofInstant(verification.getExpiresAt(), ZoneOffset.UTC));
+            statement.setString(4, verification.getDisplayName());
+            statement.setString(5, verification.getPasswordHash());
+            statement.setObject(6, OffsetDateTime.ofInstant(verification.getCreatedAt(), ZoneOffset.UTC));
+            statement.setObject(7, OffsetDateTime.ofInstant(verification.getExpiresAt(), ZoneOffset.UTC));
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save verification", ex);
@@ -39,17 +42,17 @@ public final class PostgresVerificationRepository implements VerificationReposit
 
     @Override
     public EmailVerification findByToken(String token) {
-        return findOne("SELECT token, username, email, password_hash, created_at, expires_at FROM identity.verifications WHERE token = ?", token);
+        return findOne("SELECT " + COLS + " FROM identity.verifications WHERE token = ?", token);
     }
 
     @Override
     public EmailVerification findByUsername(String username) {
-        return findOne("SELECT token, username, email, password_hash, created_at, expires_at FROM identity.verifications WHERE username = ?", username);
+        return findOne("SELECT " + COLS + " FROM identity.verifications WHERE username = ?", username);
     }
 
     @Override
     public EmailVerification findByEmail(String email) {
-        return findOne("SELECT token, username, email, password_hash, created_at, expires_at FROM identity.verifications WHERE email = ?", email);
+        return findOne("SELECT " + COLS + " FROM identity.verifications WHERE email = ?", email);
     }
 
     @Override
@@ -76,6 +79,7 @@ public final class PostgresVerificationRepository implements VerificationReposit
                     rows.getString("token"),
                     rows.getString("username"),
                     rows.getString("email"),
+                    rows.getString("display_name"),
                     rows.getString("password_hash"),
                     rows.getObject("created_at", OffsetDateTime.class).toInstant(),
                     rows.getObject("expires_at", OffsetDateTime.class).toInstant()

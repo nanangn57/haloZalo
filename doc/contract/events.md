@@ -28,20 +28,26 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
     "type": "TEXT",
     "body": "hello",
     "clientMsgId": "99999999-8888-4777-8666-555555555555",
-    "createdAt": "2026-09-28T09:00:00Z"
+    "createdAt": "2026-09-28T09:00:00Z",
+    "conversationType": "DIRECT",
+    "recipientIds": ["bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"]
   }
 }
 ```
 
-`payload` của `messaging.message.created` là schema `Message` trong [openapi.yaml](openapi.yaml).
+`payload` của `messaging.message.created` là schema `Message` trong [openapi.yaml](openapi.yaml) cộng hai field analytics: `conversationType` (`DIRECT` | `GROUP`) và `recipientIds` (mọi member trừ `senderId`).
 
 ## Event có trong bản v1
 
 | type | Khi nào phát | Producer | Payload |
 |---|---|---|---|
+| `identity.user.registered` | Tài khoản được tạo (verify email hoặc immediate) | identity | `{ "userId": "<uuid>" }` |
+| `identity.user.verified` | Email xác minh thành công (chỉ mode email-link) | identity | `{ "userId": "<uuid>" }` |
 | `identity.user.logged_in` | Đăng nhập thành công | identity | `{ "userId": "<uuid>" }` |
-| `identity.group.created` | Nhóm đã ghi vào schema `identity` | identity | `{ "groupId": "<uuid>", "ownerId": "<uuid>" }` |
-| `messaging.message.created` | Tin đã ghi vào schema `messaging` | messaging | `Message` |
+| `identity.group.created` | Nhóm đã ghi vào schema `identity` | identity | `{ "groupId": "<uuid>", "ownerId": "<uuid>", "memberCount": 1 }` |
+| `identity.friend.request_sent` | Gửi lời mời kết bạn | identity | `{ "fromUserId": "<uuid>", "toUserId": "<uuid>" }` |
+| `identity.friend.request_accepted` | Chấp nhận lời mời | identity | `{ "fromUserId": "<uuid>", "toUserId": "<uuid>" }` |
+| `messaging.message.created` | Tin đã ghi vào schema `messaging` | messaging | `Message` + `conversationType` + `recipientIds` |
 | `messaging.message.deleted` | Tin bị xoá lần đầu | messaging | `{ "messageId": "<uuid>", "conversationId": "<uuid>", "deletedAt": "<date-time>" }` |
 | `messaging.reaction.added` | Thêm reaction mới | messaging | `{ "messageId": "<uuid>", "conversationId": "<uuid>", "userId": "<uuid>", "code": "<icon>" }` |
 | `messaging.reaction.removed` | Gỡ reaction | messaging | cùng payload với `messaging.reaction.added` |
@@ -50,9 +56,9 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `messaging.typing` | Client báo đang gõ (ephemeral, không persist) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "typing": true }` |
 | `messaging.presence` | Client báo online/offline trong hội thoại (ephemeral) | messaging | `{ "conversationId": "<uuid>", "userId": "<uuid>", "status": "online" }` |
 
-`type` của upload là `IMAGE`, `DOCUMENT`, hoặc `VIDEO`. Analytics đếm envelope upload, không dùng payload của upload.
+`type` của upload là `IMAGE`, `DOCUMENT`, `VIDEO`, hoặc `AUDIO`. Analytics đếm theo `type` trong payload upload để gom `media_by_day`.
 
-Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, và `conversationId` trong payload của login, tạo nhóm, và tin mới để ghi bảng tổng hợp của chính schema `analytics`. Không đọc bảng schema `messaging`.
+Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, `conversationId`, `conversationType`, `recipientIds`, `fromUserId`, `toUserId`, `memberCount`, và `type` (media/message) trong payload để ghi bảng tổng hợp của schema `analytics`. Không đọc bảng schema `messaging`. Không backfill lịch sử — chỉ ghi từ event mới sau khi deploy.
 
 `code` của reaction nằm trong bộ `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 

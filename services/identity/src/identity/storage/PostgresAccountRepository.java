@@ -8,6 +8,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -20,7 +22,7 @@ import org.springframework.stereotype.Component;
 @Component
 public final class PostgresAccountRepository implements AccountRepository {
     private static final String SELECT_COLS =
-        "user_id, username, email, password_hash, created_at, platform_role";
+        "user_id, username, email, password_hash, created_at, platform_role, banned_at";
 
     private final DataSource dataSource;
 
@@ -31,8 +33,8 @@ public final class PostgresAccountRepository implements AccountRepository {
     @Override
     public void save(Account account) {
         String sql =
-            "INSERT INTO identity.accounts (user_id, username, email, password_hash, created_at, platform_role) "
-                + "VALUES (?, ?, ?, ?, ?, ?)";
+            "INSERT INTO identity.accounts (user_id, username, email, password_hash, created_at, platform_role, banned_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, account.getUserId());
@@ -41,6 +43,7 @@ public final class PostgresAccountRepository implements AccountRepository {
             statement.setString(4, account.getPasswordHash());
             statement.setObject(5, OffsetDateTime.ofInstant(account.getCreatedAt(), ZoneOffset.UTC));
             statement.setString(6, account.getPlatformRole().name());
+            setTimestamp(statement, 7, account.getBannedAt());
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not save account", ex);
@@ -96,6 +99,32 @@ public final class PostgresAccountRepository implements AccountRepository {
     }
 
     @Override
+    public void updateBannedAt(String userId, Instant bannedAt) {
+        String sql = "UPDATE identity.accounts SET banned_at = ? WHERE user_id = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            setTimestamp(statement, 1, bannedAt);
+            statement.setString(2, userId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not update ban", ex);
+        }
+    }
+
+    @Override
+    public void updatePasswordHash(String userId, String passwordHash) {
+        String sql = "UPDATE identity.accounts SET password_hash = ? WHERE user_id = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, passwordHash);
+            statement.setString(2, userId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not update password", ex);
+        }
+    }
+
+    @Override
     public List<Account> findByIds(List<String> userIds) {
         if (userIds.isEmpty()) {
             return List.of();
@@ -131,8 +160,21 @@ public final class PostgresAccountRepository implements AccountRepository {
             rows.getString("email"),
             rows.getString("password_hash"),
             rows.getObject("created_at", OffsetDateTime.class).toInstant(),
-            PlatformRole.fromStorage(rows.getString("platform_role"))
+            PlatformRole.fromStorage(rows.getString("platform_role")),
+            instant(rows.getObject("banned_at", OffsetDateTime.class))
         );
+    }
+
+    private static void setTimestamp(PreparedStatement statement, int index, Instant value) throws SQLException {
+        if (value == null) {
+            statement.setNull(index, Types.TIMESTAMP_WITH_TIMEZONE);
+            return;
+        }
+        statement.setObject(index, OffsetDateTime.ofInstant(value, ZoneOffset.UTC));
+    }
+
+    private static Instant instant(OffsetDateTime value) {
+        return value == null ? null : value.toInstant();
     }
 
     private Account findOne(String sql, String value) {

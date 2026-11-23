@@ -7,25 +7,51 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, Redirect } from 'expo-router';
 import RegisterForm from '../components/auth/RegisterForm';
-import { registerApi } from '@core/authService';
+import { registerApi, resendVerificationApi } from '@core/authService';
+import { hasSession } from '@core/authSession';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export default function RegisterPage() {
   const theme = useTheme();
-  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState('');
+  const [resending, setResending] = useState(false);
+
+  if (hasSession()) {
+    return <Redirect href="/(tabs)/chat" />;
+  }
+
+  const handleResend = async () => {
+    if (!pendingEmail) return;
+    setError('');
+    try {
+      setResending(true);
+      await resendVerificationApi(pendingEmail);
+      setMessage(`Verification email sent again to ${pendingEmail}. The link expires in 2 minutes.`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not resend email.');
+    } finally {
+      setResending(false);
+    }
+  };
 
   const handleRegister = async () => {
     setError('');
     setMessage('');
+
+    if (!displayName.trim()) {
+      setError('Display name is required');
+      return;
+    }
 
     if (password.length < 8 || password.length > 72) {
       setError('Password must be between 8 and 72 characters');
@@ -40,14 +66,15 @@ export default function RegisterPage() {
     try {
       setIsLoading(true);
       const result = await registerApi({
-        username: username.trim(),
         email: email.trim(),
         password,
+        displayName: displayName.trim(),
       });
+      setPendingEmail(result.status === 'PENDING_VERIFICATION' ? result.email : '');
       setMessage(
         result.status === 'ACTIVE'
           ? `Account created for ${result.email}. You can login now.`
-          : `Register request sent to ${result.email}. Check email (or identity logs) to verify before login.`,
+          : `Verification link sent to ${result.email}. Open it within 2 minutes to finish signing up.`,
       );
     } catch (err: unknown) {
       setError(
@@ -84,19 +111,32 @@ export default function RegisterPage() {
             Join haloZalo to message friends and groups.
           </Text>
           <RegisterForm
-            username={username}
+            displayName={displayName}
             email={email}
             password={password}
             confirmPassword={confirmPassword}
             error={error}
             message={message}
             isLoading={isLoading}
-            onUsernameChange={setUsername}
+            onDisplayNameChange={setDisplayName}
             onEmailChange={setEmail}
             onPasswordChange={setPassword}
             onConfirmPasswordChange={setConfirmPassword}
             onSubmit={handleRegister}
           />
+          {pendingEmail ? (
+            <View style={styles.footer}>
+              <Text style={[styles.footerText, { color: theme.textSecondary }]}>
+                Link expired or missing?{' '}
+              </Text>
+              <Text
+                onPress={resending ? undefined : () => void handleResend()}
+                style={[styles.link, { color: theme.primary }]}
+              >
+                {resending ? 'Sending…' : 'Resend email'}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: theme.textSecondary }]}>
               Already have an account?{' '}

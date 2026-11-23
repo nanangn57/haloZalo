@@ -5,6 +5,7 @@ import identity.auth.ErrorResponse;
 import identity.service.AuthService;
 
 import java.io.IOException;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -21,9 +22,19 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public final class SessionFilter extends OncePerRequestFilter {
     public static final String USER_ID = "userId";
+    public static final String SESSION_ID = "sessionId";
     private static final String BEARER = "Bearer ";
 
     private static final String ACCESS_TOKEN = "access_token";
+
+    private static final Set<String> PUBLIC_AUTH_PATHS = Set.of(
+        "/auth/register",
+        "/auth/login",
+        "/auth/verify",
+        "/auth/verify/resend",
+        "/auth/password/forgot",
+        "/auth/password/reset"
+    );
 
     private final AuthService auth;
     private final ObjectMapper json;
@@ -41,7 +52,7 @@ public final class SessionFilter extends OncePerRequestFilter {
         if (path == null) {
             return false;
         }
-        if ("/auth/register".equals(path) || "/auth/login".equals(path) || "/auth/verify".equals(path)) {
+        if (PUBLIC_AUTH_PATHS.contains(path)) {
             return true;
         }
         if (path.startsWith("/actuator")) {
@@ -62,8 +73,10 @@ public final class SessionFilter extends OncePerRequestFilter {
     )
         throws ServletException, IOException {
         try {
-            String userId = auth.currentUserId(sessionId(request));
+            String sessionId = sessionId(request);
+            String userId = auth.currentUserId(sessionId);
             request.setAttribute(USER_ID, userId);
+            request.setAttribute(SESSION_ID, sessionId);
             access.authorize(userId, request.getRequestURI());
             chain.doFilter(request, response);
         } catch (AuthService.Rejected rejected) {

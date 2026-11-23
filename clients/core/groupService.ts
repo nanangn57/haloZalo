@@ -8,7 +8,7 @@ import type {
   AddMemberRequest,
   Membership,
   MemberListResponse,
-  AssignableGroupRole,
+  UpdateGroupRequest,
 } from './types/group'
 import { connectionConfig } from './connectionConfig'
 
@@ -146,23 +146,22 @@ export async function getGroupMembersApi(
   return response.json()
 }
 
-// 6. Owner gán ADMIN / MEMBER (không đổi OWNER)
-export async function assignGroupMemberRoleApi(
+// 6. Owner chuyển quyền owner cho member khác (POST /groups/{id}/transfer-owner)
+export async function transferGroupOwnerApi(
   groupId: string,
   userId: string,
-  role: AssignableGroupRole,
 ): Promise<Membership> {
   const token = requireAccessToken()
 
   const response = await fetch(
-    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}/role`,
+    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}/transfer-owner`,
     {
-      method: 'PUT',
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ userId }),
     },
   )
 
@@ -171,4 +170,47 @@ export async function assignGroupMemberRoleApi(
   }
 
   return (await response.json()) as Membership
+}
+
+// 7. Owner giải tán nhóm (DELETE /groups/{id})
+export async function dissolveGroupApi(groupId: string): Promise<void> {
+  const token = requireAccessToken()
+
+  const response = await fetch(
+    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+// 8. Owner sửa tên / mô tả / avatar nhóm (PATCH /groups/{id})
+export async function updateGroupApi(
+  groupId: string,
+  patch: UpdateGroupRequest,
+): Promise<Group> {
+  const token = requireAccessToken()
+
+  const response = await fetch(
+    `${API_BASE_URL}/groups/${encodeURIComponent(groupId)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(patch),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  return (await response.json()) as Group
 }

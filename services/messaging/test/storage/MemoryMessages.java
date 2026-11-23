@@ -8,9 +8,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Stream;
 
-public final class MemoryMessages implements MessageRepository {
+public final class MemoryMessages implements MessageRepository, MessageSearchRepository {
     private final Map<String, Message> rows = new LinkedHashMap<>();
     private final Map<String, Long> lastSeq = new HashMap<>();
     private final MemoryConversations conversations;
@@ -52,7 +53,7 @@ public final class MemoryMessages implements MessageRepository {
     @Override
     public synchronized Message findBySenderAndClientMsgId(String senderId, String clientMsgId) {
         return rows.values().stream()
-            .filter(row -> row.getSenderId().equals(senderId) && row.getClientMsgId().equals(clientMsgId))
+            .filter(row -> Objects.equals(row.getSenderId(), senderId) && row.getClientMsgId().equals(clientMsgId))
             .findFirst()
             .orElse(null);
     }
@@ -81,6 +82,30 @@ public final class MemoryMessages implements MessageRepository {
             }
         }
         return latest;
+    }
+
+    @Override
+    public synchronized List<Message> searchAfterSeq(String conversationId, long afterSeq, String text, int limit) {
+        return inConversation(conversationId)
+            .filter(row -> row.getSeq() > afterSeq)
+            .filter(row -> matches(row, text))
+            .limit(limit)
+            .toList();
+    }
+
+    @Override
+    public synchronized List<Message> searchBeforeSeq(String conversationId, long beforeSeq, String text, int limit) {
+        List<Message> older = inConversation(conversationId)
+            .filter(row -> row.getSeq() < beforeSeq)
+            .filter(row -> matches(row, text))
+            .toList();
+        return older.subList(Math.max(0, older.size() - limit), older.size());
+    }
+
+    private static boolean matches(Message row, String text) {
+        return !row.isDeleted()
+            && row.getContent() instanceof message.MessageContent.Text body
+            && body.text().toLowerCase().contains(text.toLowerCase());
     }
 
     public synchronized int size() {

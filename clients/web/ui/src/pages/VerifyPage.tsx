@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { verifyEmailApi } from '../../../../core/authService'
+import { resendVerificationApi } from '@core/authService'
+import { verifyAndSaveSession } from '@core/authSession'
 
 type Status = 'pending' | 'success' | 'error'
 
@@ -15,6 +16,9 @@ function VerifyPage() {
   const navigate = useNavigate()
   const token = searchParams.get('token')?.trim() ?? ''
   const [result, setResult] = useState<VerifyResult | null>(null)
+  const [resendEmail, setResendEmail] = useState('')
+  const [resendMessage, setResendMessage] = useState('')
+  const [resending, setResending] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -23,18 +27,17 @@ function VerifyPage() {
 
     let cancelled = false
 
-    verifyEmailApi(token)
-      .then((user) => {
+    // Server cấp TokenResponse khi verify: lưu session rồi vào app luôn.
+    verifyAndSaveSession(token)
+      .then((auth) => {
         if (cancelled) {
           return
         }
         setResult({
           status: 'success',
-          message: `Email ${user.email} verified. You can sign in as ${user.username}.`,
+          message: `Email ${auth.user.email} verified. Signing you in…`,
         })
-        window.setTimeout(() => {
-          navigate('/login?verified=1', { replace: true })
-        }, 1200)
+        navigate('/chat', { replace: true })
       })
       .catch((err: unknown) => {
         if (cancelled) {
@@ -54,6 +57,21 @@ function VerifyPage() {
     }
   }, [navigate, token])
 
+  async function handleResend(event: React.FormEvent) {
+    event.preventDefault()
+    if (!resendEmail.trim()) return
+    setResending(true)
+    setResendMessage('')
+    try {
+      await resendVerificationApi(resendEmail)
+      setResendMessage('A new verification link was sent. It expires in 2 minutes.')
+    } catch (err: unknown) {
+      setResendMessage(err instanceof Error ? err.message : 'Could not resend email.')
+    } finally {
+      setResending(false)
+    }
+  }
+
   const status: Status = !token ? 'error' : (result?.status ?? 'pending')
   const message = !token
     ? 'Verification link is invalid or expired'
@@ -69,6 +87,38 @@ function VerifyPage() {
         </div>
         <h1 className="auth-title">Email verification</h1>
         <p className="auth-description">{message}</p>
+
+        {status === 'error' ? (
+          <form className="auth-form" onSubmit={(event) => void handleResend(event)}>
+            <div>
+              <label htmlFor="resend-email" className="app-form-label">
+                Send a new link to
+              </label>
+              <input
+                id="resend-email"
+                type="email"
+                className="app-input"
+                placeholder="you@example.com"
+                value={resendEmail}
+                onChange={(event) => setResendEmail(event.target.value)}
+                autoComplete="email"
+              />
+            </div>
+            {resendMessage ? (
+              <div className="auth-alert auth-alert-success" role="status">
+                {resendMessage}
+              </div>
+            ) : null}
+            <button
+              type="submit"
+              className="app-button app-button-primary w-100"
+              disabled={resending || !resendEmail.trim()}
+            >
+              {resending ? 'Sending…' : 'Resend verification email'}
+            </button>
+          </form>
+        ) : null}
+
         {status !== 'pending' && (
           <div className="auth-footer">
             <Link to="/login">Back to login</Link>

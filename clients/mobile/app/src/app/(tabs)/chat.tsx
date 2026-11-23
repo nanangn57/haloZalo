@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,22 +17,35 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessages from '../../components/chat/ChatMessages';
 import ConversationItem from '../../components/chat/ConversationItem';
+import MediaGalleryModal from '../../components/chat/MediaGalleryModal';
+import MesToolBar from '../../components/chat/MesToolBar';
 import { getAuth } from '@core/authSession';
 import { getConversationsApi } from '@core/conversationService';
 import {
   getMessagesApi,
   sendMessageApi,
   markConversationReadApi,
+  deleteMessageApi,
+  addReactionApi,
+  removeReactionApi,
+  listReactionsApi,
+  forwardMessageApi,
+  updateConversationPrefsApi,
   type EmotionCode,
+  type MessageReaction,
+  type ReactionCode,
 } from '@core/messageService';
+import { confirmAction } from '@/lib/confirm';
 import { uploadMediaApi, type MediaUploadType } from '@core/mediaService';
 import { lookupUsersApi } from '@core/userService';
 import { getGroupsApi } from '@core/groupService';
 import { socketClient } from '@core/socketClient';
-import type { Conversation } from '@core/types/conversation';
+import { applyConversationPrefs } from '@core/conversationPrefs';
+import type { Conversation, ConversationPrefsPatch } from '@core/types/conversation';
 import type { Message } from '@core/types/message';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { VoiceRecorder, VoiceRecorderError } from '@/lib/voiceRecorder';
 import { useTheme } from '@/hooks/use-theme';
 import { Radius, Spacing } from '@/constants/theme';
 
@@ -63,6 +77,11 @@ export default function ChatPage() {
   selectedRef.current = selectedConversation;
 
   const [titles, setTitles] = useState<Record<string, string>>({});
+  const [usersById, setUsersById] = useState<Record<string, string>>({});
+  const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, MessageReaction[]>>({});
+  const [actionTarget, setActionTarget] = useState<Message | null>(null);
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -71,6 +90,13 @@ export default function ChatPage() {
   const [socketStatus, setSocketStatus] = useState('disconnected');
   const [typingUserId, setTypingUserId] = useState<string | null>(null);
   const [peerOnline, setPeerOnline] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [prefsTarget, setPrefsTarget] = useState<Conversation | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showEmotionBar, setShowEmotionBar] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const voiceRef = useRef<VoiceRecorder | null>(null);
+  const recordingLiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentRef = useRef(false);
 
@@ -104,6 +130,7 @@ export default function ChatPage() {
         users.forEach((user) => {
           byId[user.userId] = user.displayName || user.username;
         });
+        setUsersById((previous) => ({ ...previous, ...byId }));
       } catch {
         // keep fallback titles
       }
@@ -188,6 +215,27 @@ export default function ChatPage() {
     try {
       const page = await getMessagesApi(conversation.conversationId);
       setMessages(page.messages);
+      setReplyTarget(null);
+      setReactionsByMessage({});
+      // Reaction không nằm trong trang tin; endpoint chưa có thì listReactionsApi trả [].
+      const recent = page.messages
+        .filter((message) => message.messageId && !message.deleted && message.type !== 'EMOTION')
+        .slice(-30);
+      void Promise.all(
+        recent.map((message) =>
+          listReactionsApi(conversation.conversationId, message.messageId as string)
+            .then((rows) => [message.messageId as string, rows] as const)
+            .catch(() => null),
+        ),
+      ).then((entries) => {
+        setReactionsByMessage((previous) => {
+          const next = { ...previous };
+          entries.forEach((entry) => {
+            if (entry && entry[1].length > 0) next[entry[0]] = entry[1];
+          });
+          return next;
+        });
+      });
       const maxSeq = page.messages.reduce(
         (max, message) =>
           typeof message.seq === 'number' ? Math.max(max, message.seq) : max,
@@ -295,6 +343,40 @@ export default function ChatPage() {
         setPeerOnline(payload.status === 'online');
         return;
       }
+      if (event.type === 'messaging.message.deleted') {
+        const payload = event.payload as { messageId?: string };
+        if (!payload.messageId) return;
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.messageId === payload.messageId
+              ? { ...message, content: '', deleted: true }
+              : message,
+          ),
+        );
+        return;
+      }
+      if (event.type === 'messaging.reaction.added' || event.type === 'messaging.reaction.removed') {
+        const payload = event.payload as {
+          messageId?: string;
+          userId?: string;
+          code?: ReactionCode;
+        };
+        if (!payload.messageId || !payload.userId || !payload.code) return;
+        const { messageId, userId, code } = payload;
+        setReactionsByMessage((previous) => {
+          const without = (previous[messageId] ?? []).filter(
+            (row) => !(row.userId === userId && row.code === code),
+          );
+          return {
+            ...previous,
+            [messageId]:
+              event.type === 'messaging.reaction.removed'
+                ? without
+                : [...without, { userId, code, createdAt: event.occurredAt }],
+          };
+        });
+        return;
+      }
       if (event.type !== 'messaging.message.created') return;
       const payload = event.payload as {
         messageId?: string;
@@ -305,6 +387,8 @@ export default function ChatPage() {
         body?: string;
         clientMsgId?: string;
         createdAt?: string;
+        replyTo?: string;
+        forwardedFrom?: string;
       };
       if (!payload.messageId || !payload.conversationId || !payload.clientMsgId) return;
       const createdAt = Date.parse(payload.createdAt ?? '');
@@ -321,6 +405,8 @@ export default function ChatPage() {
           ? Math.floor(createdAt / 1000)
           : Math.floor(Date.now() / 1000),
         status: 'sent',
+        replyTo: payload.replyTo,
+        forwardedFrom: payload.forwardedFrom,
       });
       if (
         selectedRef.current?.conversationId === payload.conversationId &&
@@ -371,6 +457,13 @@ export default function ChatPage() {
     };
   }, [selectedConversation?.conversationId]);
 
+  useEffect(() => {
+    return () => {
+      void voiceRef.current?.cancel();
+      voiceRef.current = null;
+    };
+  }, []);
+
   const handleSend = async () => {
     if (!selectedConversation || !newMessage.trim() || sending) return;
     const body = newMessage.trim();
@@ -379,17 +472,91 @@ export default function ChatPage() {
     setSending(true);
     setError('');
     try {
+      const replyToId = replyTarget?.messageId;
       const sent = await sendMessageApi(selectedConversation.conversationId, {
         type: 'TEXT',
         body,
         clientMsgId: uuid(),
+        ...(replyToId ? { replyTo: replyToId } : {}),
       });
       upsertMessage(sent);
       setNewMessage('');
+      setReplyTarget(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
       setSending(false);
+    }
+  };
+
+  const senderNameOf = (userId: string) => usersById[userId] ?? 'User';
+
+  const handleRecall = (message: Message) => {
+    if (!message.messageId || message.senderId !== currentUserId) return;
+    confirmAction('Recall message', 'Recall this message for everyone?', () => {
+      void (async () => {
+        setError('');
+        try {
+          await deleteMessageApi(message.conversationId, message.messageId as string);
+          setMessages((previous) =>
+            previous.map((item) =>
+              item.messageId === message.messageId ? { ...item, content: '', deleted: true } : item,
+            ),
+          );
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : 'Cannot recall message');
+        }
+      })();
+    }, 'Recall');
+  };
+
+  const handleToggleReaction = async (message: Message, code: ReactionCode) => {
+    const messageId = message.messageId;
+    if (!messageId) return;
+    const mine = (reactionsByMessage[messageId] ?? []).some(
+      (row) => row.userId === currentUserId && row.code === code,
+    );
+    const apply = (adding: boolean) =>
+      setReactionsByMessage((previous) => {
+        const without = (previous[messageId] ?? []).filter(
+          (row) => !(row.userId === currentUserId && row.code === code),
+        );
+        return {
+          ...previous,
+          [messageId]: adding
+            ? [...without, { userId: currentUserId, code, createdAt: new Date().toISOString() }]
+            : without,
+        };
+      });
+    setError('');
+    apply(!mine);
+    try {
+      if (mine) {
+        await removeReactionApi(message.conversationId, messageId, code);
+      } else {
+        await addReactionApi(message.conversationId, messageId, code);
+      }
+    } catch (err: unknown) {
+      apply(mine);
+      setError(err instanceof Error ? err.message : 'Cannot update reaction');
+    }
+  };
+
+  const handleForwardTo = async (target: Conversation) => {
+    const source = forwardTarget;
+    if (!source?.messageId) return;
+    setForwardTarget(null);
+    setError('');
+    try {
+      const saved = await forwardMessageApi(target.conversationId, {
+        messageId: source.messageId,
+        clientMsgId: uuid(),
+      });
+      if (target.conversationId === selectedRef.current?.conversationId) {
+        upsertMessage(saved);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Cannot forward message');
     }
   };
 
@@ -410,7 +577,13 @@ export default function ChatPage() {
     }
   };
 
-  const sendUploaded = async (type: MediaUploadType, uri: string, fileName: string, mimeType: string) => {
+  const sendUploaded = async (
+    type: MediaUploadType,
+    uri: string,
+    fileName: string,
+    mimeType: string,
+    durationSec?: number,
+  ) => {
     if (!selectedConversation) return;
     setSending(true);
     setError('');
@@ -421,21 +594,30 @@ export default function ChatPage() {
         conversationId: selectedConversation.conversationId,
       });
       const clientMsgId = uuid();
-      const sent =
-        type === 'DOCUMENT'
-          ? await sendMessageApi(selectedConversation.conversationId, {
-              type: 'DOCUMENT',
-              body: uploaded.url,
-              clientMsgId,
-              fileName: uploaded.fileName,
-              mimeType: uploaded.contentType || mimeType,
-              size: uploaded.size,
-            })
-          : await sendMessageApi(selectedConversation.conversationId, {
-              type,
-              body: uploaded.url,
-              clientMsgId,
-            });
+      const conversationId = selectedConversation.conversationId;
+      let sent: Message;
+      if (type === 'DOCUMENT') {
+        sent = await sendMessageApi(conversationId, {
+          type: 'DOCUMENT',
+          body: uploaded.url,
+          clientMsgId,
+          fileName: uploaded.fileName,
+          mimeType: uploaded.contentType || mimeType,
+          size: uploaded.size,
+        });
+      } else if (type === 'AUDIO') {
+        sent = await sendMessageApi(conversationId, {
+          type: 'AUDIO',
+          body: uploaded.url,
+          clientMsgId,
+          fileName: uploaded.fileName,
+          mimeType: uploaded.contentType || mimeType,
+          size: uploaded.size,
+          ...(durationSec ? { duration: durationSec } : {}),
+        });
+      } else {
+        sent = await sendMessageApi(conversationId, { type, body: uploaded.url, clientMsgId });
+      }
       upsertMessage(sent);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload media');
@@ -478,11 +660,117 @@ export default function ChatPage() {
     );
   };
 
+  const startVoice = async () => {
+    if (!selectedConversation || sending || recordingLiveRef.current || voiceRef.current) return;
+    setError('');
+    const recorder = new VoiceRecorder();
+    voiceRef.current = recorder;
+    try {
+      await recorder.start();
+      // Nhả tay trước khi start xong → stopVoice đã clear ref; hủy clip.
+      if (voiceRef.current !== recorder) {
+        void recorder.cancel();
+        return;
+      }
+      recordingLiveRef.current = true;
+      setRecording(true);
+    } catch (err: unknown) {
+      if (voiceRef.current === recorder) {
+        voiceRef.current = null;
+      }
+      recordingLiveRef.current = false;
+      setRecording(false);
+      setError(
+        err instanceof VoiceRecorderError && err.code === 'permission-denied'
+          ? 'Microphone permission denied. Enable it in Settings to send voice messages.'
+          : 'Cannot start recording',
+      );
+    }
+  };
+
+  const stopVoice = async () => {
+    const recorder = voiceRef.current;
+    const wasLive = recordingLiveRef.current;
+    voiceRef.current = null;
+    recordingLiveRef.current = false;
+    setRecording(false);
+    if (!recorder || !wasLive) return;
+    try {
+      const clip = await recorder.stop();
+      await sendUploaded('AUDIO', clip.uri, clip.fileName, clip.mimeType, clip.durationSec);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Cannot send voice message');
+    }
+  };
+
+  const applyPrefs = async (conversation: Conversation, patch: ConversationPrefsPatch) => {
+    setPrefsTarget(null);
+    setError('');
+    try {
+      const ok = await updateConversationPrefsApi(conversation.conversationId, patch);
+      if (!ok) {
+        setError('Server does not support conversation preferences yet');
+        return;
+      }
+      setConversations((previous) =>
+        applyConversationPrefs(previous, conversation.conversationId, patch),
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Cannot update conversation');
+    }
+  };
+
   const titleOf = useMemo(
     () => (conversation: Conversation) =>
       titles[conversation.conversationId] ||
       (conversation.type === 'GROUP' ? 'Group chat' : 'Direct chat'),
     [titles],
+  );
+
+  const prefsSheet = (
+    <Modal
+      visible={prefsTarget !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setPrefsTarget(null)}
+    >
+      <Pressable style={styles.modalBackdrop} onPress={() => setPrefsTarget(null)}>
+        <Pressable
+          style={[styles.sheet, { backgroundColor: theme.background, borderColor: theme.border }]}
+          onPress={() => undefined}
+        >
+          <Text style={[styles.sheetTitle, { color: theme.text }]} numberOfLines={1}>
+            {prefsTarget ? titleOf(prefsTarget) : ''}
+          </Text>
+          {prefsTarget ? (
+            <>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => void applyPrefs(prefsTarget, { pinned: !prefsTarget.pinned })}
+              >
+                <Text style={[styles.sheetText, { color: theme.text }]}>
+                  {prefsTarget.pinned ? 'Unpin' : 'Pin'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => void applyPrefs(prefsTarget, { muted: !prefsTarget.muted })}
+              >
+                <Text style={[styles.sheetText, { color: theme.text }]}>
+                  {prefsTarget.muted ? 'Unmute' : 'Mute'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetItem}
+                onPress={() => void applyPrefs(prefsTarget, { archived: true })}
+              >
+                <Text style={[styles.sheetText, { color: theme.text }]}>Archive</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 
   if (!selectedConversation) {
@@ -511,12 +799,15 @@ export default function ChatPage() {
               <ConversationItem
                 conversation={item}
                 title={titleOf(item)}
+                currentUserId={currentUserId}
                 active={false}
                 onClick={() => void openConversation(item)}
+                onLongPress={() => setPrefsTarget(item)}
               />
             )}
           />
         )}
+        {prefsSheet}
       </SafeAreaView>
     );
   }
@@ -534,9 +825,12 @@ export default function ChatPage() {
                 : 'Offline'
               : undefined
         }
+        onMediaPress={() => setGalleryOpen(true)}
         onBack={() => {
           setSelectedConversation(null);
           setMessages([]);
+          setShowEmojiPicker(false);
+          setShowEmotionBar(false);
           void loadConversations();
         }}
       />
@@ -546,84 +840,270 @@ export default function ChatPage() {
         {loadingMessages ? (
           <ActivityIndicator style={{ marginTop: 24 }} color={theme.primary} />
         ) : (
-          <ChatMessages messages={messages} currentUserId={currentUserId} />
-        )}
-        <View style={styles.emotionRow}>
-          {(['like', 'love', 'haha', 'wow', 'sad', 'angry'] as EmotionCode[]).map((code) => (
-            <Pressable
-              key={code}
-              style={[styles.emotionChip, { borderColor: theme.border }]}
-              onPress={() => void handleEmotion(code)}
-            >
-              <Text style={[styles.emotionText, { color: theme.textSecondary }]}>{code}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.mediaRow}>
-          <Pressable
-            style={[styles.mediaChip, { borderColor: theme.primary }]}
-            onPress={() => void pickImage(false)}
-            disabled={sending}
-          >
-            <Text style={[styles.emotionText, { color: theme.primary }]}>Image</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.mediaChip, { borderColor: theme.primary }]}
-            onPress={() => void pickDocument()}
-            disabled={sending}
-          >
-            <Text style={[styles.emotionText, { color: theme.primary }]}>File</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.mediaChip, { borderColor: theme.primary }]}
-            onPress={() => void pickImage(true)}
-            disabled={sending}
-          >
-            <Text style={[styles.emotionText, { color: theme.primary }]}>Video</Text>
-          </Pressable>
-        </View>
-        <View style={[styles.inputContainer, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                borderColor: theme.inputBorder,
-                backgroundColor: theme.inputBg,
-                color: theme.text,
-              },
-            ]}
-            placeholder="Type a message..."
-            placeholderTextColor={theme.textMuted}
-            value={newMessage}
-            onChangeText={(value) => {
-              setNewMessage(value);
-              const conversationId = selectedConversation.conversationId;
-              if (value.trim() && !lastTypingSentRef.current) {
-                lastTypingSentRef.current = true;
-                socketClient.sendTyping(conversationId, true);
-              }
-              if (typingTimerRef.current) {
-                clearTimeout(typingTimerRef.current);
-              }
-              typingTimerRef.current = setTimeout(() => {
-                lastTypingSentRef.current = false;
-                socketClient.sendTyping(conversationId, false);
-              }, 1500);
-            }}
+          <ChatMessages
+            messages={messages}
+            currentUserId={currentUserId}
+            reactions={reactionsByMessage}
+            getSenderName={senderNameOf}
+            onLongPress={setActionTarget}
+            onToggleReaction={(message, code) => void handleToggleReaction(message, code)}
           />
-          <Pressable
-            style={[
-              styles.sendButton,
-              { backgroundColor: theme.primary },
-              (!newMessage.trim() || sending) && styles.sendDisabled,
-            ]}
-            onPress={() => void handleSend()}
-            disabled={!newMessage.trim() || sending}
-          >
-            <Ionicons name="send" size={20} color="#fff" />
-          </Pressable>
+        )}
+        {replyTarget ? (
+          <View style={[styles.replyBanner, { borderLeftColor: theme.primary, backgroundColor: theme.backgroundElement }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.replyBannerTitle, { color: theme.text }]} numberOfLines={1}>
+                Replying to {replyTarget.senderId === currentUserId ? 'yourself' : senderNameOf(replyTarget.senderId)}
+              </Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }} numberOfLines={1}>
+                {replyTarget.type === 'TEXT' ? replyTarget.content : `[${replyTarget.type.toLowerCase()}]`}
+              </Text>
+            </View>
+            <Pressable onPress={() => setReplyTarget(null)} hitSlop={8} accessibilityLabel="Cancel reply">
+              <Ionicons name="close" size={20} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+        ) : null}
+        <View style={[styles.composer, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
+          <MesToolBar
+            disabled={sending}
+            emojiOpen={showEmojiPicker}
+            emotionOpen={showEmotionBar}
+            recording={recording}
+            onEmojiPress={() => {
+              setShowEmojiPicker((previous) => !previous);
+              setShowEmotionBar(false);
+            }}
+            onEmotionPress={() => {
+              setShowEmotionBar((previous) => !previous);
+              setShowEmojiPicker(false);
+            }}
+            onImagePress={() => void pickImage(false)}
+            onFilePress={() => void pickDocument()}
+            onVideoPress={() => void pickImage(true)}
+            onVoiceStart={() => void startVoice()}
+            onVoiceStop={() => void stopVoice()}
+          />
+
+          {recording ? (
+            <Text style={[styles.recordingHint, { color: theme.danger }]} accessibilityLiveRegion="polite">
+              Recording… release to send
+            </Text>
+          ) : null}
+
+          {showEmojiPicker ? (
+            <View
+              style={[styles.emojiPanel, { borderColor: theme.border, backgroundColor: theme.backgroundElement }]}
+              accessibilityLabel="Emoji picker"
+            >
+              {(
+                [
+                  '😀', '😂', '🥹', '😍', '😎', '🤔', '👍', '👎',
+                  '❤️', '🔥', '🎉', '👏', '🙏', '💯', '✨', '😢',
+                  '😮', '😡', '🤝', '👋', '💪', '⭐', '✅', '❌',
+                ] as const
+              ).map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  style={styles.emojiCell}
+                  onPress={() => {
+                    setNewMessage((previous) => previous + emoji);
+                    setShowEmojiPicker(false);
+                  }}
+                  accessibilityLabel={`Insert ${emoji}`}
+                >
+                  <Text style={styles.emojiGlyph}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          {showEmotionBar ? (
+            <View style={styles.emotionRow}>
+              {(
+                [
+                  ['like', '👍'],
+                  ['love', '❤️'],
+                  ['haha', '😄'],
+                  ['wow', '😮'],
+                  ['sad', '😢'],
+                  ['angry', '😠'],
+                ] as const
+              ).map(([code, emoji]) => (
+                <Pressable
+                  key={code}
+                  style={[styles.emotionChip, { borderColor: theme.border, backgroundColor: theme.backgroundElement }]}
+                  onPress={() => {
+                    setShowEmotionBar(false);
+                    void handleEmotion(code);
+                  }}
+                  disabled={sending}
+                  accessibilityLabel={`Send ${code}`}
+                >
+                  <Text style={styles.emotionEmoji}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  borderColor: theme.inputBorder,
+                  backgroundColor: theme.inputBg,
+                  color: theme.text,
+                },
+              ]}
+              placeholder="Type a message..."
+              placeholderTextColor={theme.textMuted}
+              value={newMessage}
+              onChangeText={(value) => {
+                setNewMessage(value);
+                const conversationId = selectedConversation.conversationId;
+                if (value.trim() && !lastTypingSentRef.current) {
+                  lastTypingSentRef.current = true;
+                  socketClient.sendTyping(conversationId, true);
+                }
+                if (typingTimerRef.current) {
+                  clearTimeout(typingTimerRef.current);
+                }
+                typingTimerRef.current = setTimeout(() => {
+                  lastTypingSentRef.current = false;
+                  socketClient.sendTyping(conversationId, false);
+                }, 1500);
+              }}
+            />
+            <Pressable
+              style={[
+                styles.sendButton,
+                { backgroundColor: theme.primary },
+                (!newMessage.trim() || sending) && styles.sendDisabled,
+              ]}
+              onPress={() => void handleSend()}
+              disabled={!newMessage.trim() || sending}
+            >
+              <Ionicons name="send" size={20} color="#fff" />
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={actionTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionTarget(null)}
+      >
+        <Pressable style={styles.menuBackdrop} onPress={() => setActionTarget(null)}>
+          <Pressable
+            style={[
+              styles.messageMenu,
+              {
+                backgroundColor: theme.background,
+                borderColor: theme.border,
+                shadowColor: '#000',
+              },
+            ]}
+            onPress={() => undefined}
+            accessibilityRole="menu"
+          >
+            <View style={[styles.menuReactions, { borderBottomColor: theme.border }]}>
+              {(['like', 'love', 'haha', 'wow', 'sad', 'angry'] as ReactionCode[]).map((code) => (
+                <Pressable
+                  key={code}
+                  style={[styles.menuReactionChip, { backgroundColor: theme.backgroundElement }]}
+                  onPress={() => {
+                    const target = actionTarget;
+                    setActionTarget(null);
+                    if (target) void handleToggleReaction(target, code);
+                  }}
+                  accessibilityLabel={`React ${code}`}
+                  accessibilityRole="menuitem"
+                >
+                  <Text style={{ fontSize: 18 }}>
+                    {{ like: '👍', love: '❤️', haha: '😄', wow: '😮', sad: '😢', angry: '😠' }[code]}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setReplyTarget(actionTarget);
+                setActionTarget(null);
+              }}
+              accessibilityRole="menuitem"
+            >
+              <Ionicons name="arrow-undo-outline" size={18} color={theme.text} />
+              <Text style={[styles.menuItemText, { color: theme.text }]}>Reply</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setForwardTarget(actionTarget);
+                setActionTarget(null);
+              }}
+              accessibilityRole="menuitem"
+            >
+              <Ionicons name="arrow-redo-outline" size={18} color={theme.text} />
+              <Text style={[styles.menuItemText, { color: theme.text }]}>Forward</Text>
+            </Pressable>
+            {actionTarget?.senderId === currentUserId ? (
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  const target = actionTarget;
+                  setActionTarget(null);
+                  if (target) handleRecall(target);
+                }}
+                accessibilityRole="menuitem"
+              >
+                <Ionicons name="refresh-outline" size={18} color={theme.danger} />
+                <Text style={[styles.menuItemText, { color: theme.danger }]}>Recall</Text>
+              </Pressable>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <MediaGalleryModal
+        visible={galleryOpen}
+        messages={messages}
+        onClose={() => setGalleryOpen(false)}
+      />
+
+      <Modal
+        visible={forwardTarget !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setForwardTarget(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => setForwardTarget(null)}>
+          <Pressable
+            style={[styles.sheet, { backgroundColor: theme.background, borderColor: theme.border, maxHeight: '70%' }]}
+            onPress={() => undefined}
+          >
+            <Text style={[styles.sheetTitle, { color: theme.text }]}>Forward to…</Text>
+            <FlatList
+              data={conversations}
+              keyExtractor={(item) => item.conversationId}
+              ListEmptyComponent={
+                <Text style={{ color: theme.textSecondary, padding: 12 }}>No conversations.</Text>
+              }
+              renderItem={({ item }) => (
+                <ConversationItem
+                  conversation={item}
+                  title={titleOf(item)}
+                  currentUserId={currentUserId}
+                  onClick={() => void handleForwardTo(item)}
+                />
+              )}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -642,37 +1122,115 @@ const styles = StyleSheet.create({
   socket: { fontSize: 12 },
   socketBar: { fontSize: 12, paddingHorizontal: Spacing.three, paddingTop: 4 },
   chatArea: { flex: 1 },
+  composer: {
+    borderTopWidth: 1,
+  },
+  recordingHint: {
+    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+  },
+  emojiPanel: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: 12,
+    marginTop: 6,
+    padding: 8,
+    borderWidth: 1,
+    borderRadius: Radius.lg,
+    gap: 2,
+  },
+  emojiCell: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emojiGlyph: { fontSize: 22 },
   emotionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
     paddingHorizontal: 12,
-    paddingTop: 8,
-  },
-  mediaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingTop: 4,
+    paddingTop: 6,
   },
   emotionChip: {
     borderWidth: 1,
     borderRadius: Radius.full,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 6,
   },
-  mediaChip: {
+  emotionEmoji: { fontSize: 20 },
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 12,
+    marginTop: 8,
+    padding: 8,
+    borderLeftWidth: 3,
+    borderRadius: 6,
+  },
+  replyBannerTitle: { fontSize: 13, fontWeight: '600' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.28)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  messageMenu: {
+    width: '100%',
+    maxWidth: 280,
     borderWidth: 1,
-    borderRadius: Radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderRadius: 12,
+    padding: 6,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 8,
   },
-  emotionText: { fontSize: 12, fontWeight: '500' },
+  menuReactions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    paddingBottom: 6,
+    marginBottom: 4,
+    borderBottomWidth: 1,
+  },
+  menuReactionChip: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  menuItemText: { fontSize: 14, fontWeight: '500' },
+  sheet: {
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    borderWidth: 1,
+    padding: Spacing.three,
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  sheetItem: { paddingVertical: 14 },
+  sheetText: { fontSize: 16 },
   inputContainer: {
     flexDirection: 'row',
     padding: 12,
-    borderTopWidth: 1,
     alignItems: 'center',
   },
   input: {

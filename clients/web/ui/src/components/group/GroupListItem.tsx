@@ -1,4 +1,5 @@
 import type { Group } from '@core/types/group'
+import { getInitials } from '@core/avatar'
 
 interface GroupListItemProps {
   group: Group
@@ -14,7 +15,7 @@ function GroupListItem({
   onOpenChat,
 }: GroupListItemProps) {
   const isOwner = group.role === 'OWNER'
-  const initial = (group.name?.trim()?.charAt(0) || 'G').toUpperCase()
+  const initial = group.name?.trim() ? getInitials(group.name) : 'G'
 
   return (
     <li className="group-row-item">

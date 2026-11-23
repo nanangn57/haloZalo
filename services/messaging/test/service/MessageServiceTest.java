@@ -5,6 +5,8 @@ import conversation.ConversationSummary;
 import conversation.ReadState;
 import event.RecordingEvents;
 import member.ConversationMembers;
+import member.StandaloneBlockChecker;
+import member.StandaloneFriendshipChecker;
 import member.StandaloneGroupMembers;
 import message.Message;
 import message.MessageContent;
@@ -41,6 +43,8 @@ class MessageServiceTest {
     private MemoryMessages messages;
     private RecordingEvents events;
     private MessageService service;
+    private StandaloneFriendshipChecker friendships;
+    private StandaloneBlockChecker blocks;
 
     @BeforeEach
     void setUp() {
@@ -48,8 +52,11 @@ class MessageServiceTest {
         conversations = new MemoryConversations();
         messages = new MemoryMessages(conversations);
         groups = new StandaloneGroupMembers();
-        service = new MessageService(conversations, messages, new MemoryReactions(), new MemoryReadMarkers(messages),
-            new ConversationMembers(groups), events);
+        friendships = new StandaloneFriendshipChecker();
+        blocks = new StandaloneBlockChecker();
+        service = new MessageService(conversations, messages, messages, new MemoryReactions(),
+            new MemoryReadMarkers(messages), conversations.prefs(), new ConversationMembers(groups), friendships, blocks,
+            events);
         service.openConversation(DIRECT, ConversationType.DIRECT, List.of(ALICE, BOB));
         // Identity owns the group; messaging only opens the conversation with the group's id.
         groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));

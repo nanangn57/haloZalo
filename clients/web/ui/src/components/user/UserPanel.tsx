@@ -1,4 +1,5 @@
 import type { User } from '../../types/user'
+import Avatar from '../common/Avatar'
 
 interface UserInfoPanelProps {
   user: User
@@ -32,11 +33,7 @@ function UserInfoPanel({ user, onClose }: UserInfoPanelProps) {
       {/* Avatar và tên */}
       <div className="px-3 pb-3">
         <div className="d-flex align-items-center gap-3 user-profile">
-          <img
-            src={user.avatar}
-            alt={user.name}
-            className="rounded-circle me-2"
-          />
+          <Avatar name={user.name} src={user.avatar} size={72} className="me-2" />
 
           <div className="d-flex align-items-center gap-2 min-w-0">
             <h5 className="mb-0 fw-bold text-truncate">
