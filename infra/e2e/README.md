@@ -10,6 +10,8 @@ Bộ kiểm thử end-to-end (HTTP + WebSocket) chạy thật trên monolith loc
 | `media` | `agents/media.py` | Upload IMAGE/DOCUMENT, fan-out, GET `/media`, history |
 | `groups` | `agents/groups.py` | Tạo nhóm, chat nhóm, leave |
 | `dashboard_devices` | `agents/dashboard_devices.py` | Stats/dashboard/activity + device token |
+| `features_coverage` | `features_coverage.py` | UC phụ (block, prefs, stranger request, sessions…) |
+| `uc_matrix` | `uc_matrix.py` | **Toàn bộ UC** trong `doc/features.md` — API + hiện diện UI web/mobile |
 
 ## Chạy
 

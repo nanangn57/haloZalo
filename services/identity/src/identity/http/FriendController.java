@@ -1,6 +1,8 @@
 package identity.http;
 
+import identity.friend.BlockBody;
 import identity.friend.FriendRequest;
+import identity.friend.FriendRequestList;
 import identity.friend.FriendRequestBody;
 import identity.friend.FriendView;
 import identity.service.AuthService;
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +44,66 @@ public final class FriendController {
         @PathVariable("userId") String fromUserId
     ) {
         return friends.accept(callerId(userId), fromUserId);
+    }
+
+    @GetMapping("/friends/requests")
+    public FriendRequestList requests(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId
+    ) {
+        return friends.requests(callerId(userId));
+    }
+
+    @PostMapping("/friends/requests/{userId}/reject")
+    public ResponseEntity<Void> reject(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable("userId") String fromUserId
+    ) {
+        friends.reject(callerId(userId), fromUserId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/friends/requests/{userId}")
+    public ResponseEntity<Void> cancel(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable("userId") String toUserId
+    ) {
+        friends.cancel(callerId(userId), toUserId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/friends/{userId}")
+    public ResponseEntity<Void> unfriend(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable("userId") String friendUserId
+    ) {
+        friends.unfriend(callerId(userId), friendUserId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/blocks")
+    public ResponseEntity<FriendView> block(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @RequestBody BlockBody body
+    ) {
+        return ResponseEntity.status(201).body(friends.block(callerId(userId), body == null ? null : body.getUserId()));
+    }
+
+    @DeleteMapping("/blocks/{userId}")
+    public ResponseEntity<Void> unblock(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId,
+        @PathVariable("userId") String blockedUserId
+    ) {
+        friends.unblock(callerId(userId), blockedUserId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/blocks")
+    public Map<String, List<FriendView>> blocked(
+        @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId
+    ) {
+        Map<String, List<FriendView>> body = new LinkedHashMap<>();
+        body.put("blocks", friends.listBlocked(callerId(userId)));
+        return body;
     }
 
     @GetMapping("/friends")

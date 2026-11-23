@@ -7,10 +7,13 @@ import api.MessagePageResponse;
 import api.MessageResponse;
 import api.MarkReadRequest;
 import api.OpenDirectRequest;
+import api.PrefsResponse;
+import api.UpdatePrefsRequest;
 import api.ReadStateResponse;
 import api.OpenConversationRequest;
 import api.ReactionsResponse;
 import api.SendMessageRequest;
+import conversation.ConversationFilter;
 import conversation.ConversationType;
 import message.MessageContent;
 import service.MessageService;
@@ -20,6 +23,7 @@ import java.util.Arrays;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -44,7 +48,7 @@ public final class MessageController {
         if (content == null) {
             throw new MessageService.Rejected(
                 MessageService.Rejected.Reason.VALIDATION,
-                "Message type must be TEXT, EMOTION, IMAGE, VIDEO, or DOCUMENT"
+                "Message type must be TEXT, EMOTION, IMAGE, VIDEO, DOCUMENT, or AUDIO"
             );
         }
         MessageService.Sent sent = messages.send(
@@ -67,8 +71,31 @@ public final class MessageController {
     public ConversationListResponse conversations(
         @UserId String userId,
         @RequestParam(required = false) String cursor,
-        @RequestParam(required = false) Integer limit) {
-        return new ConversationListResponse(messages.conversations(userId, cursor, limit));
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(required = false, defaultValue = "false") boolean archived,
+        @RequestParam(required = false) String inbox) {
+        return new ConversationListResponse(messages.conversations(userId, cursor, limit, filter(archived, inbox)));
+    }
+
+    /**
+     * Pin, mute or archive for the caller only.
+     */
+    @PatchMapping("/conversations/{conversationId}/prefs")
+    public PrefsResponse updatePrefs(
+        @UserId String userId,
+        @PathVariable String conversationId,
+        @RequestBody UpdatePrefsRequest request) {
+        return new PrefsResponse(messages.updatePrefs(conversationId, userId, request.toPatch()));
+    }
+
+    /**
+     * The recipient of a stranger's message request moves it to the normal inbox.
+     */
+    @PostMapping("/conversations/{conversationId}/accept-request")
+    public ConversationResponse acceptRequest(
+        @UserId String userId,
+        @PathVariable String conversationId) {
+        return new ConversationResponse(messages.acceptRequest(conversationId, userId));
     }
 
     @GetMapping("/conversations/{conversationId}")
@@ -99,8 +126,9 @@ public final class MessageController {
         @PathVariable String conversationId,
         @RequestParam(required = false) Long afterSeq,
         @RequestParam(required = false) Long beforeSeq,
-        @RequestParam(required = false) Integer limit) {
-        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit));
+        @RequestParam(required = false) Integer limit,
+        @RequestParam(required = false) String q) {
+        return new MessagePageResponse(messages.messages(conversationId, userId, afterSeq, beforeSeq, limit, q));
     }
 
     @PostMapping("/conversations/{conversationId}/forwards")
@@ -176,6 +204,14 @@ public final class MessageController {
         public OpenGroupRequest(@com.fasterxml.jackson.annotation.JsonProperty("groupId") String groupId) {
             this.groupId = groupId;
         }
+    }
+
+    private static ConversationFilter filter(boolean archived, String inbox) {
+        if (inbox != null && !inbox.equals("primary") && !inbox.equals("requests")) {
+            throw new MessageService.Rejected(
+                MessageService.Rejected.Reason.VALIDATION, "inbox must be primary or requests");
+        }
+        return new ConversationFilter("requests".equals(inbox), archived);
     }
 
     private static ResponseEntity<MessageResponse> sentResponse(MessageService.Sent sent) {

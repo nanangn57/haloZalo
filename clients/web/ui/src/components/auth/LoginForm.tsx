@@ -1,10 +1,11 @@
+import { Link } from 'react-router-dom'
 import type { LoginFormProps } from '../../types/auth'
 
 function LoginForm({
   email,
   password,
   error,
-  onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onSubmit,
   isLoading,
@@ -13,16 +14,16 @@ function LoginForm({
     <form className="auth-form" onSubmit={onSubmit}>
       <div>
         <label htmlFor="email" className="app-form-label">
-          Email or username
+          Email
         </label>
         <input
           id="email"
-          type="text"
+          type="email"
           className="app-input"
           placeholder="you@example.com"
           value={email}
-          autoComplete="username"
-          onChange={(event) => onUsernameChange(event.target.value)}
+          autoComplete="email"
+          onChange={(event) => onEmailChange(event.target.value)}
         />
       </div>
 
@@ -39,6 +40,12 @@ function LoginForm({
           autoComplete="current-password"
           onChange={(event) => onPasswordChange(event.target.value)}
         />
+      </div>
+
+      <div className="text-end">
+        <Link to="/forgot-password" className="small">
+          Forgot password?
+        </Link>
       </div>
 
       {error ? (

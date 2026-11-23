@@ -20,13 +20,17 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Media upload/download. Returns a URL the client puts into an IMAGE/DOCUMENT/VIDEO message body.
+ * Media upload/download. Returns a URL the client puts into an IMAGE/DOCUMENT/VIDEO/AUDIO message body.
  */
 @RestController
 public final class MediaController {
     private static final long IMAGE_MAX = 5L * 1024 * 1024;
     private static final long DOCUMENT_MAX = 10L * 1024 * 1024;
     private static final long VIDEO_MAX = 20L * 1024 * 1024;
+    private static final long AUDIO_MAX = 5L * 1024 * 1024;
+    private static final Set<String> AUDIO_TYPES = Set.of(
+        "audio/mpeg", "audio/mp3", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/ogg",
+        "audio/webm", "audio/wav", "audio/x-wav", "audio/3gpp", "audio/amr");
     private static final Set<String> IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
     private static final Set<String> VIDEO_TYPES = Set.of("video/mp4", "video/webm");
 
@@ -53,7 +57,9 @@ public final class MediaController {
             case "IMAGE" -> IMAGE_MAX;
             case "DOCUMENT" -> DOCUMENT_MAX;
             case "VIDEO" -> VIDEO_MAX;
-            default -> throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "type must be IMAGE, DOCUMENT, or VIDEO");
+            case "AUDIO" -> AUDIO_MAX;
+            default -> throw new MessageService.Rejected(
+                MessageService.Rejected.Reason.VALIDATION, "type must be IMAGE, DOCUMENT, VIDEO, or AUDIO");
         };
         if (file.getSize() > max) {
             throw new MessageService.Rejected(
@@ -67,6 +73,9 @@ public final class MediaController {
         }
         if ("VIDEO".equals(mediaType) && !VIDEO_TYPES.contains(contentType)) {
             throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Unsupported video content type");
+        }
+        if ("AUDIO".equals(mediaType) && !AUDIO_TYPES.contains(baseType(contentType))) {
+            throw new MessageService.Rejected(MessageService.Rejected.Reason.VALIDATION, "Unsupported audio content type");
         }
         MediaStore.Stored stored = store.store(file.getBytes(), contentType, file.getOriginalFilename());
         events.publishMediaUploaded(userId, conversationId, mediaType);
@@ -97,6 +106,14 @@ public final class MediaController {
             builder.contentLength(opened.size());
         }
         return builder.body(new InputStreamResource(opened.stream()));
+    }
+
+    /**
+     * "audio/webm;codecs=opus" is audio/webm: browsers add codec parameters to recorded voice notes.
+     */
+    static String baseType(String contentType) {
+        int parameters = contentType.indexOf(';');
+        return (parameters < 0 ? contentType : contentType.substring(0, parameters)).trim().toLowerCase();
     }
 
     private static String normalizeType(String type) {

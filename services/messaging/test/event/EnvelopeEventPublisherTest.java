@@ -124,6 +124,8 @@ class EnvelopeEventPublisherTest {
         assertEquals("messaging.message.created", JsonPath.read(recorded.get(0), "$.type"));
         assertEquals("messaging", JsonPath.read(recorded.get(0), "$.producer"));
         assertEquals(MESSAGE.getMessageId(), JsonPath.read(recorded.get(0), "$.payload.messageId"));
+        assertEquals("GROUP", JsonPath.read(recorded.get(0), "$.payload.conversationType"));
+        assertEquals(List.of("bob", "carol"), JsonPath.read(recorded.get(0), "$.payload.recipientIds"));
     }
 
     @Test

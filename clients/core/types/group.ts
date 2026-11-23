@@ -1,12 +1,13 @@
-export type GroupRole = 'OWNER' | 'ADMIN' | 'MEMBER'
-
-export type AssignableGroupRole = 'ADMIN' | 'MEMBER'
+// Chỉ hai role (decisions.md): không còn ADMIN nhóm.
+export type GroupRole = 'OWNER' | 'MEMBER'
 
 export interface Group {
   groupId: string
   name: string
   ownerId: string
   role: GroupRole
+  description?: string
+  avatar?: string
 }
 
 export interface GroupListResponse {
@@ -33,8 +34,14 @@ export interface Member {
   role: GroupRole
 }
 
-export interface SetRoleRequest {
-  role: AssignableGroupRole
+export interface UpdateGroupRequest {
+  name?: string
+  description?: string
+  avatar?: string
+}
+
+export interface TransferOwnerRequest {
+  userId: string
 }
 
 export interface MemberListResponse {

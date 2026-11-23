@@ -1,7 +1,10 @@
 package realtime;
 
+import presence.PresenceTracker;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
@@ -35,16 +38,26 @@ public final class RealtimeSessions implements SmartLifecycle {
     private final Clock clock;
     private final Map<String, Connection> connections = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> sessionIdsByUser = new ConcurrentHashMap<>();
+    private final PresenceTracker presence;
     private ScheduledExecutorService heartbeat;
 
     @Autowired
+    public RealtimeSessions(RealtimeProperties properties, ObjectProvider<PresenceTracker> presence) {
+        this(properties, Clock.systemUTC(), presence.getIfAvailable(() -> new NoPresence()));
+    }
+
     public RealtimeSessions(RealtimeProperties properties) {
         this(properties, Clock.systemUTC());
     }
 
     RealtimeSessions(RealtimeProperties properties, Clock clock) {
+        this(properties, clock, new NoPresence());
+    }
+
+    public RealtimeSessions(RealtimeProperties properties, Clock clock, PresenceTracker presence) {
         this.properties = properties;
         this.clock = clock;
+        this.presence = presence;
     }
 
     public void open(WebSocketSession session, String userId) {
@@ -57,6 +70,7 @@ public final class RealtimeSessions implements SmartLifecycle {
             ConcurrentWebSocketSessionDecorator.OverflowStrategy.TERMINATE);
         connections.put(session.getId(), new Connection(userId, guarded, clock.instant()));
         sessionIdsByUser.computeIfAbsent(userId, key -> ConcurrentHashMap.newKeySet()).add(session.getId());
+        presence.connected(userId);
     }
 
     public void seen(String sessionId) {
@@ -106,6 +120,7 @@ public final class RealtimeSessions implements SmartLifecycle {
                 ids.remove(sessionId);
                 return ids.isEmpty() ? null : ids;
             });
+            presence.disconnected(connection.userId());
         }
         return connection;
     }
@@ -165,6 +180,16 @@ public final class RealtimeSessions implements SmartLifecycle {
             beat();
         } catch (RuntimeException ex) {
             log.warn("Heartbeat failed", ex);
+        }
+    }
+
+    private static final class NoPresence implements PresenceTracker {
+        @Override
+        public void connected(String userId) {
+        }
+
+        @Override
+        public void disconnected(String userId) {
         }
     }
 

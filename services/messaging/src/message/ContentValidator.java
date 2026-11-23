@@ -7,6 +7,7 @@ public final class ContentValidator {
     public static final long IMAGE_MAX_BYTES = 5L * 1024 * 1024;
     public static final long DOCUMENT_MAX_BYTES = 10L * 1024 * 1024;
     public static final long VIDEO_MAX_BYTES = 20L * 1024 * 1024;
+    public static final long AUDIO_MAX_BYTES = 5L * 1024 * 1024;
 
     private ContentValidator() {
     }
@@ -27,6 +28,13 @@ public final class ContentValidator {
             }
             return null;
         }
+        if (content instanceof MessageContent.System system) {
+            if (system.text() == null || system.text().isBlank()) {
+                return "System text is required";
+            }
+            return system.text().getBytes(StandardCharsets.UTF_8).length > TEXT_MAX_BYTES
+                ? "System text exceeds " + TEXT_MAX_BYTES + " bytes" : null;
+        }
         if (content instanceof MessageContent.Emotion emotion) {
             return MessageContent.EMOTION_CODES.contains(emotion.code()) ? null : "Unknown emotion code";
         }
@@ -44,6 +52,18 @@ public final class ContentValidator {
                 return "Video size and duration must be positive";
             }
             return null;
+        }
+        if (content instanceof MessageContent.Audio audio) {
+            if (blank(audio.url()) || blank(audio.mimeType())) {
+                return "Audio url and mimeType are required";
+            }
+            if (!audio.mimeType().trim().toLowerCase().startsWith("audio/")) {
+                return "Audio mimeType must be audio/*";
+            }
+            if (audio.size() <= 0 || audio.size() > AUDIO_MAX_BYTES) {
+                return "Audio size must be between 1 and " + AUDIO_MAX_BYTES + " bytes";
+            }
+            return negative(audio.duration()) ? "Audio duration must be positive" : null;
         }
         MessageContent.Document document = (MessageContent.Document) content;
         if (blank(document.url()) || blank(document.fileName()) || blank(document.mimeType())) {

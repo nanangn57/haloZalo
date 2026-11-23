@@ -10,6 +10,7 @@ public final class ProfileView {
     private final PlatformRole platformRole;
     private final String displayName;
     private final String avatar;
+    private final String bio;
 
     public ProfileView(
         String userId,
@@ -19,12 +20,25 @@ public final class ProfileView {
         String displayName,
         String avatar
     ) {
+        this(userId, username, email, platformRole, displayName, avatar, null);
+    }
+
+    public ProfileView(
+        String userId,
+        String username,
+        String email,
+        PlatformRole platformRole,
+        String displayName,
+        String avatar,
+        String bio
+    ) {
         this.userId = userId;
         this.username = username;
         this.email = email;
         this.platformRole = platformRole == null ? PlatformRole.USER : platformRole;
         this.displayName = displayName;
         this.avatar = avatar;
+        this.bio = bio;
     }
 
     public String getUserId() {
@@ -49,5 +63,9 @@ public final class ProfileView {
 
     public String getAvatar() {
         return avatar;
+    }
+
+    public String getBio() {
+        return bio;
     }
 }

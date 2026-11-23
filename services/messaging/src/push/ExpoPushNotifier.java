@@ -25,17 +25,22 @@ public final class ExpoPushNotifier implements PushNotifier {
     private static final Logger log = LoggerFactory.getLogger(ExpoPushNotifier.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private static final String GENERIC_BODY = "You have a new message";
+
     private final DeviceTokenRepository tokens;
+    private final NotificationPrefsRepository prefs;
     private final HttpClient http;
     private final String endpoint;
     private final boolean enabled;
 
     public ExpoPushNotifier(
         DeviceTokenRepository tokens,
+        NotificationPrefsRepository prefs,
         @Value("${messaging.push.expo-url:https://exp.host/--/api/v2/push/send}") String endpoint,
         @Value("${messaging.push.enabled:true}") boolean enabled
     ) {
         this.tokens = tokens;
+        this.prefs = prefs;
         this.endpoint = endpoint;
         this.enabled = enabled;
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -47,13 +52,19 @@ public final class ExpoPushNotifier implements PushNotifier {
             return;
         }
         List<Map<String, Object>> messages = new ArrayList<>();
+        Map<String, NotificationPrefs> prefsOf = prefs.findAll(offlineUserIds);
         for (String userId : offlineUserIds) {
+            NotificationPrefs own = prefsOf.getOrDefault(userId, NotificationPrefs.DEFAULT);
+            if (!own.pushEnabled()) {
+                continue;
+            }
+            String text = own.previewEnabled() && preview != null && !preview.isBlank() ? preview : GENERIC_BODY;
             for (String token : tokens.tokensOf(userId)) {
                 if (token.startsWith("ExponentPushToken") || token.startsWith("ExpoPushToken")) {
                     Map<String, Object> body = new LinkedHashMap<>();
                     body.put("to", token);
                     body.put("title", "New message");
-                    body.put("body", preview == null || preview.isBlank() ? "You have a new message" : preview);
+                    body.put("body", text);
                     body.put("data", Map.of("conversationId", conversationId == null ? "" : conversationId));
                     messages.add(body);
                 } else {

@@ -1,115 +1,155 @@
-import type { LoginRequest, LoginResponse } from './types/auth'
 import { connectionConfig } from './connectionConfig'
+import { defaultDeviceLabel, getOrCreateDeviceId } from './deviceId'
+import { createApiError, requestJson, toApiError } from './httpError'
+import type {
+  LoginRequest,
+  LoginResponse,
+  RegisterAccepted,
+  RegisterRequest,
+  TokenResponse,
+} from './types/auth'
+
+export type { RegisterAccepted, RegisterRequest, TokenResponse }
 
 const API_BASE_URL = connectionConfig.identityBaseUrl
 
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
+function deviceFields(override?: Partial<Pick<LoginRequest, 'deviceId' | 'deviceLabel' | 'userAgent'>>) {
+  const deviceId = override?.deviceId?.trim() || getOrCreateDeviceId()
+  const deviceLabel = override?.deviceLabel?.trim() || defaultDeviceLabel()
+  const userAgent =
+    override?.userAgent?.trim() ||
+    (typeof navigator !== 'undefined' ? navigator.userAgent : undefined)
+  return { deviceId, deviceLabel, userAgent }
+}
+
+// Đăng nhập: email + mật khẩu + deviceId (decisions.md).
 export async function loginApi(
-  credentials: LoginRequest,
+  credentials: Omit<LoginRequest, 'deviceId'> & Partial<Pick<LoginRequest, 'deviceId' | 'deviceLabel' | 'userAgent'>>,
 ): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  const device = deviceFields(credentials)
+  return requestJson<LoginResponse>(
+    `${API_BASE_URL}/auth/login`,
+    {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        login: credentials.login.trim(),
+        password: credentials.password,
+        deviceId: device.deviceId,
+        deviceLabel: device.deviceLabel,
+        userAgent: device.userAgent,
+      }),
     },
-    body: JSON.stringify(credentials),
-  })
-
-  const data = await readJsonBody(response)
-
-  if (!response.ok) {
-    const error = new Error(
-      data?.error?.message ?? 'Đăng nhập thất bại',
-    ) as Error & { code?: string; status?: number }
-
-    error.code = data?.error?.code
-    error.status = response.status
-
-    throw error
-  }
-
-  return data as unknown as LoginResponse
-}
-
-export interface RegisterRequest {
-  username: string
-  email: string
-  password: string
-}
-
-export interface RegisterAccepted {
-  email: string
-  status: 'PENDING_VERIFICATION' | 'ACTIVE'
-}
-
-export async function registerApi(
-  credentials: RegisterRequest,
-): Promise<RegisterAccepted> {
-  const response = await fetch(`${API_BASE_URL}/auth/register`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(credentials),
-  })
-
-  const data = await readJsonBody(response)
-
-  if (!response.ok) {
-    const error = new Error(
-      data?.error?.message ?? 'Đăng ký thất bại',
-    ) as Error & { code?: string; status?: number }
-
-    error.code = data?.error?.code
-    error.status = response.status
-    throw error
-  }
-
-  return data as unknown as RegisterAccepted
-}
-
-export interface VerifyResponse {
-  userId: string
-  username: string
-  email: string
-  platformRole?: string
-}
-
-export async function verifyEmailApi(token: string): Promise<VerifyResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/auth/verify?token=${encodeURIComponent(token)}`,
+    'Đăng nhập thất bại',
   )
-
-  const data = await readJsonBody(response)
-
-  if (!response.ok) {
-    const error = new Error(
-      data?.error?.message ?? 'Xác minh email thất bại',
-    ) as Error & { code?: string; status?: number }
-
-    error.code = data?.error?.code
-    error.status = response.status
-    throw error
-  }
-
-  return data as unknown as VerifyResponse
 }
 
-async function readJsonBody(
-  response: Response,
-): Promise<{ error?: { code?: string; message?: string } } & Record<string, unknown>> {
-  const text = await response.text()
-  if (!text) {
-    return {}
+// Đăng ký: email + password + displayName. `username` do server derive từ email.
+export async function registerApi(
+  request: RegisterRequest,
+): Promise<RegisterAccepted> {
+  const body: RegisterRequest = {
+    email: request.email.trim(),
+    password: request.password,
+    displayName: request.displayName.trim(),
   }
-  try {
-    return JSON.parse(text) as {
-      error?: { code?: string; message?: string }
-    } & Record<string, unknown>
-  } catch {
-    throw new Error(
-      response.ok
-        ? 'Phản hồi máy chủ không phải JSON.'
-        : `Máy chủ lỗi (${response.status}). Thử lại sau.`,
+  if (request.username?.trim()) {
+    body.username = request.username.trim()
+  }
+
+  return requestJson<RegisterAccepted>(
+    `${API_BASE_URL}/auth/register`,
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) },
+    'Đăng ký thất bại',
+  )
+}
+
+// Verify trả TokenResponse (đã đăng nhập). Lưu session bằng `verifyAndSaveSession` trong authSession.
+export async function verifyEmailApi(token: string): Promise<TokenResponse> {
+  const device = deviceFields()
+  const params = new URLSearchParams({
+    token,
+    deviceId: device.deviceId,
+    deviceLabel: device.deviceLabel,
+  })
+  return requestJson<TokenResponse>(
+    `${API_BASE_URL}/auth/verify?${params.toString()}`,
+    { method: 'GET' },
+    'Xác minh email thất bại',
+  )
+}
+
+export async function resendVerificationApi(
+  email: string,
+): Promise<RegisterAccepted> {
+  const response = await fetch(`${API_BASE_URL}/auth/verify/resend`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ email: email.trim() }),
+  })
+
+  if (response.status === 429) {
+    throw createApiError(
+      'Gửi lại quá nhanh. Vui lòng đợi một lúc rồi thử lại.',
+      429,
+      'RATE_LIMITED',
     )
   }
+  if (!response.ok) {
+    throw await toApiError(response, 'Không gửi lại được email xác minh')
+  }
+
+  const data = (await response.json().catch(() => null)) as RegisterAccepted | null
+  return data ?? { email: email.trim(), status: 'PENDING_VERIFICATION' }
+}
+
+// Nhận token tường minh để authSession.logout không phải import apiClient (tránh vòng import).
+export async function logoutApi(accessToken: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+
+  if (!response.ok && response.status !== 401) {
+    throw await toApiError(response, 'Đăng xuất thất bại')
+  }
+}
+
+// Luôn 202, không lộ email có tồn tại hay không.
+export async function forgotPasswordApi(email: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/password/forgot`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ email: email.trim() }),
+  })
+
+  if (!response.ok) {
+    throw await toApiError(response, 'Không gửi được email đặt lại mật khẩu')
+  }
+}
+
+export async function resetPasswordApi(
+  token: string,
+  password: string,
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/auth/password/reset`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ token, password }),
+  })
+
+  if (!response.ok) {
+    throw await toApiError(response, 'Không đặt lại được mật khẩu')
+  }
+}
+
+export {
+  loginApi as login,
+  registerApi as register,
+  verifyEmailApi as verify,
+  resendVerificationApi as resendVerification,
+  forgotPasswordApi as forgotPassword,
+  resetPasswordApi as resetPassword,
 }

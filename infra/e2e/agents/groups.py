@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Agent: groups — create, add member, open conversation, message, leave/remove."""
+"""Agent: groups — create, add, transfer owner, dissolve, message (OWNER|MEMBER only)."""
 
 from __future__ import annotations
 
@@ -20,26 +20,48 @@ def run() -> Report:
     uid_a, uid_b = user_a["userId"], user_b["userId"]
 
     name = f"Agent Group {new_id()[:8]}"
-    status, group = req("POST", "/groups", tok_a, {"name": name})
+    status, group = req("POST", "/groups", tok_a, {"name": name, "description": "e2e group"})
     report.ok("create group", status == 201 and group.get("groupId"), group.get("groupId", ""))
     gid = group["groupId"]
+    report.ok("creator is OWNER", group.get("role") == "OWNER", str(group.get("role")))
+
+    status, patched = req(
+        "PATCH",
+        f"/groups/{gid}",
+        tok_a,
+        {"name": name + " renamed", "description": "updated"},
+    )
+    report.ok(
+        "owner patches group name/description",
+        status == 200 and "renamed" in (patched.get("name") or ""),
+        str(patched),
+    )
 
     status, _ = req("POST", f"/groups/{gid}/members", tok_a, {"userId": uid_b})
-    report.ok("add B as member", status == 201)
+    report.ok("add B as member (add thẳng)", status == 201)
 
     status, members = req("GET", f"/groups/{gid}/members", tok_a)
-    ids = {m.get("userId") for m in members.get("members", [])}
-    report.ok("members include A and B", uid_a in ids and uid_b in ids, str(ids))
+    by_id = {m.get("userId"): m for m in members.get("members", [])}
+    report.ok("members include A and B", uid_a in by_id and uid_b in by_id, str(by_id.keys()))
+    report.ok("roles are OWNER|MEMBER only", by_id[uid_a].get("role") == "OWNER" and by_id[uid_b].get("role") == "MEMBER")
 
+    # Contract removed group ADMIN — endpoint must stay gone
     status, role = req("PUT", f"/groups/{gid}/members/{uid_b}/role", tok_a, {"role": "ADMIN"})
-    report.ok("A promotes B to ADMIN", status == 200 and role.get("role") == "ADMIN", str(role))
+    report.ok("PUT …/role ADMIN is gone (404)", status == 404, str(role))
 
+    status, transfer = req("POST", f"/groups/{gid}/transfer-owner", tok_a, {"userId": uid_b})
+    report.ok(
+        "transfer owner A→B",
+        status == 200 and transfer.get("role") == "OWNER",
+        str(transfer),
+    )
     status, members = req("GET", f"/groups/{gid}/members", tok_a)
-    b_role = next((m.get("role") for m in members.get("members", []) if m.get("userId") == uid_b), None)
-    report.ok("B role is ADMIN", b_role == "ADMIN", str(b_role))
-
-    status, role = req("PUT", f"/groups/{gid}/members/{uid_b}/role", tok_a, {"role": "MEMBER"})
-    report.ok("A demotes B to MEMBER", status == 200 and role.get("role") == "MEMBER", str(role))
+    by_id = {m.get("userId"): m for m in members.get("members", [])}
+    report.ok(
+        "B is OWNER after transfer",
+        by_id.get(uid_b, {}).get("role") == "OWNER" and by_id.get(uid_a, {}).get("role") == "MEMBER",
+        str(by_id),
+    )
 
     status, gconv = req("POST", "/conversations/group", tok_a, {"groupId": gid})
     report.ok("open GROUP conversation", status in (200, 201), gconv.get("conversationId", ""))
@@ -55,17 +77,31 @@ def run() -> Report:
 
     status, page = req("GET", f"/conversations/{gid}/messages", tok_b)
     bodies = [m.get("body") for m in page.get("messages", [])]
-    report.ok("B sees group message without manual membership sync", "group-agent-hi" in bodies, str(bodies))
+    types = [m.get("type") for m in page.get("messages", [])]
+    report.ok("B sees group message", "group-agent-hi" in bodies, str(bodies))
+    report.ok(
+        "system messages present after membership changes",
+        "SYSTEM" in types or any("owner" in (b or "").lower() or "added" in (b or "").lower() for b in bodies),
+        str(list(zip(types, bodies))),
+    )
 
-    status, _ = req("DELETE", f"/groups/{gid}/members/{uid_b}", tok_b)
-    report.ok("B leaves group", status == 204)
+    # A (now member) can leave
+    status, _ = req("DELETE", f"/groups/{gid}/members/{uid_a}", tok_a)
+    report.ok("former owner (now member) leaves", status == 204)
 
-    status, members = req("GET", f"/groups/{gid}/members", tok_a)
+    status, members = req("GET", f"/groups/{gid}/members", tok_b)
     ids = {m.get("userId") for m in members.get("members", [])}
-    report.ok("B removed from members", uid_b not in ids and uid_a in ids, str(ids))
+    report.ok("A removed; B remains", uid_a not in ids and uid_b in ids, str(ids))
 
-    status, groups = req("GET", "/groups", tok_a)
-    report.ok("A still lists group", any(g.get("groupId") == gid for g in groups.get("groups", [])))
+    # Dissolve as current owner B
+    status, _ = req("DELETE", f"/groups/{gid}", tok_b)
+    report.ok("owner dissolves group", status == 204)
+
+    status, groups = req("GET", "/groups", tok_b)
+    report.ok(
+        "dissolved group gone from list",
+        not any(g.get("groupId") == gid for g in groups.get("groups", [])),
+    )
 
     return report
 

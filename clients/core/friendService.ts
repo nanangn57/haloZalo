@@ -1,5 +1,6 @@
 import { getIdentityApiHeaders } from './apiClient'
 import { connectionConfig } from './connectionConfig'
+import { requestJson, toApiError } from './httpError'
 
 const API_BASE_URL = connectionConfig.identityBaseUrl
 
@@ -14,59 +15,128 @@ export interface FriendRequest {
   toUserId: string
 }
 
+export interface FriendRequestList {
+  incoming: FriendRequest[]
+  outgoing: FriendRequest[]
+}
+
 export async function listFriendsApi(): Promise<Friend[]> {
-  const response = await fetch(`${API_BASE_URL}/friends`, {
-    method: 'GET',
-    headers: getIdentityApiHeaders(),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Cannot load friends: ${response.status}`)
-  }
-
-  const data = (await response.json()) as { friends: Friend[] }
+  const data = await requestJson<{ friends?: Friend[] }>(
+    `${API_BASE_URL}/friends`,
+    { method: 'GET', headers: getIdentityApiHeaders() },
+    'Cannot load friends',
+  )
   return data.friends ?? []
 }
 
 export async function sendFriendRequestApi(userId: string): Promise<FriendRequest> {
-  const response = await fetch(`${API_BASE_URL}/friends/requests`, {
-    method: 'POST',
-    headers: {
-      ...getIdentityApiHeaders(),
-      'Content-Type': 'application/json',
+  return requestJson<FriendRequest>(
+    `${API_BASE_URL}/friends/requests`,
+    {
+      method: 'POST',
+      headers: getIdentityApiHeaders(true),
+      body: JSON.stringify({ userId }),
     },
-    body: JSON.stringify({ userId }),
-  })
-
-  const data = await response.json().catch(() => null)
-  if (!response.ok) {
-    const message =
-      data && typeof data === 'object' && 'error' in data
-        ? (data as { error?: { message?: string } }).error?.message
-        : undefined
-    throw new Error(message ?? `Cannot send friend request: ${response.status}`)
-  }
-
-  return data as FriendRequest
+    'Cannot send friend request',
+  )
 }
 
 export async function acceptFriendRequestApi(fromUserId: string): Promise<Friend> {
-  const response = await fetch(
+  return requestJson<Friend>(
     `${API_BASE_URL}/friends/requests/${encodeURIComponent(fromUserId)}/accept`,
+    { method: 'POST', headers: getIdentityApiHeaders() },
+    'Cannot accept friend request',
+  )
+}
+
+// Lời mời đến và đi.
+export async function listFriendRequestsApi(): Promise<FriendRequestList> {
+  const data = await requestJson<Partial<FriendRequestList>>(
+    `${API_BASE_URL}/friends/requests`,
+    { method: 'GET', headers: getIdentityApiHeaders() },
+    'Cannot load friend requests',
+  )
+  return { incoming: data.incoming ?? [], outgoing: data.outgoing ?? [] }
+}
+
+async function expectNoContent(
+  url: string,
+  init: RequestInit,
+  fallback: string,
+): Promise<void> {
+  const response = await fetch(url, init)
+  if (!response.ok) {
+    throw await toApiError(response, fallback)
+  }
+}
+
+export function rejectFriendRequestApi(fromUserId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/friends/requests/${encodeURIComponent(fromUserId)}/reject`,
+    { method: 'POST', headers: getIdentityApiHeaders() },
+    'Cannot reject friend request',
+  )
+}
+
+// Huỷ lời mời đã gửi tới toUserId.
+export function cancelFriendRequestApi(toUserId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/friends/requests/${encodeURIComponent(toUserId)}`,
+    { method: 'DELETE', headers: getIdentityApiHeaders() },
+    'Cannot cancel friend request',
+  )
+}
+
+export function unfriendApi(userId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/friends/${encodeURIComponent(userId)}`,
+    { method: 'DELETE', headers: getIdentityApiHeaders() },
+    'Cannot unfriend',
+  )
+}
+
+export function blockUserApi(userId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/blocks`,
     {
       method: 'POST',
-      headers: getIdentityApiHeaders(),
+      headers: getIdentityApiHeaders(true),
+      body: JSON.stringify({ userId }),
     },
+    'Cannot block user',
   )
+}
 
-  const data = await response.json().catch(() => null)
-  if (!response.ok) {
-    const message =
-      data && typeof data === 'object' && 'error' in data
-        ? (data as { error?: { message?: string } }).error?.message
-        : undefined
-    throw new Error(message ?? `Cannot accept friend request: ${response.status}`)
-  }
+export function unblockUserApi(userId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/blocks/${encodeURIComponent(userId)}`,
+    { method: 'DELETE', headers: getIdentityApiHeaders() },
+    'Cannot unblock user',
+  )
+}
 
-  return data as Friend
+export async function listBlocksApi(): Promise<Friend[]> {
+  const data = await requestJson<{ friends?: Friend[] }>(
+    `${API_BASE_URL}/blocks`,
+    { method: 'GET', headers: getIdentityApiHeaders() },
+    'Cannot load blocked users',
+  )
+  return data.friends ?? []
+}
+
+// System admin (platformRole ADMIN).
+export function banUserApi(userId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/admin/users/${encodeURIComponent(userId)}/ban`,
+    { method: 'POST', headers: getIdentityApiHeaders() },
+    'Cannot ban user',
+  )
+}
+
+export function unbanUserApi(userId: string): Promise<void> {
+  return expectNoContent(
+    `${API_BASE_URL}/admin/users/${encodeURIComponent(userId)}/unban`,
+    { method: 'POST', headers: getIdentityApiHeaders() },
+    'Cannot unban user',
+  )
 }

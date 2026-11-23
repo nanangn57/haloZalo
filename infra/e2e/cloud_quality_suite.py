@@ -131,7 +131,18 @@ def http(
 
 
 def login(user: str) -> tuple[str, dict[str, Any]]:
-    status, body = http("POST", f"{IDENTITY}/auth/login", body={"login": user, "password": PASSWORD})
+    emails = {"ngoc_anh": "anh@example.com", "huy": "huy@example.com"}
+    email = emails.get(user, user if "@" in user else f"{user}@example.com")
+    status, body = http(
+        "POST",
+        f"{IDENTITY}/auth/login",
+        body={
+            "login": email,
+            "password": PASSWORD,
+            "deviceId": f"e2e-cloud-{email.split('@')[0]}-" + uuid.uuid4().hex[:12],
+            "deviceLabel": "cloud-suite",
+        },
+    )
     if status != 200:
         raise RuntimeError(f"login {user}: {status} {body}")
     return body["accessToken"], body["user"]

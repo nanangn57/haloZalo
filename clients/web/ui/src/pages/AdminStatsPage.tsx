@@ -2,9 +2,20 @@ import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
   getActivityStatsApi,
+  getAdminUserSummaryApi,
   getDashboardStatsApi,
+  rangePreset,
+  type AdminUserSummary,
   type DashboardStats,
+  type DateRange,
+  type MyActivity,
 } from '@core/statsService'
+import DateRangeFilter from '../components/common/DateRangeFilter'
+import Avatar from '../components/common/Avatar'
+import { MediaStack, SimpleLine } from '../components/stats/StatsCharts'
+import { findUserApi } from '@core/userService'
+import { banUserApi, unbanUserApi } from '@core/friendService'
+import type { AuthUser } from '@core/types/auth'
 import { getGroupsApi } from '@core/groupService'
 import { isPlatformAdmin } from '@core/authSession'
 import type { ActivityStats } from '@core/types/stat'
@@ -60,6 +71,14 @@ export default function AdminStatsPage() {
   >({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [range, setRange] = useState<DateRange>(() => rangePreset('7d'))
+
+  const [banQuery, setBanQuery] = useState('')
+  const [banTarget, setBanTarget] = useState<AuthUser | null>(null)
+  const [userSummary, setUserSummary] = useState<AdminUserSummary | null>(null)
+  const [banBusy, setBanBusy] = useState(false)
+  const [banMessage, setBanMessage] = useState<string | null>(null)
+  const [banError, setBanError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!allowed) {
@@ -71,8 +90,8 @@ export default function AdminStatsPage() {
         setLoading(true)
         setError(null)
         const [totals, board, groups] = await Promise.all([
-          getActivityStatsApi(),
-          getDashboardStatsApi(),
+          getActivityStatsApi(range),
+          getDashboardStatsApi(range),
           getGroupsApi().catch(() => []),
         ])
         setStats(totals)
@@ -97,10 +116,59 @@ export default function AdminStatsPage() {
     }
 
     void loadStats()
-  }, [allowed])
+  }, [allowed, range])
 
   if (!allowed) {
     return <Navigate to="/dashboard" replace />
+  }
+
+  async function handleFindBanTarget(event: React.FormEvent) {
+    event.preventDefault()
+    if (!banQuery.trim()) return
+    setBanBusy(true)
+    setBanError(null)
+    setBanMessage(null)
+    setUserSummary(null)
+    try {
+      const user = await findUserApi(banQuery)
+      setBanTarget(user)
+      try {
+        setUserSummary(await getAdminUserSummaryApi(user.userId))
+      } catch {
+        setUserSummary(null)
+      }
+    } catch (err) {
+      setBanTarget(null)
+      setBanError(err instanceof Error ? err.message : 'Cannot find user')
+    } finally {
+      setBanBusy(false)
+    }
+  }
+
+  async function handleBan(ban: boolean) {
+    if (!banTarget) return
+    const name = banTarget.displayName || banTarget.username
+    if (
+      ban &&
+      !window.confirm(`Ban ${name}? They will be signed out and cannot log in.`)
+    ) {
+      return
+    }
+    setBanBusy(true)
+    setBanError(null)
+    setBanMessage(null)
+    try {
+      if (ban) {
+        await banUserApi(banTarget.userId)
+      } else {
+        await unbanUserApi(banTarget.userId)
+      }
+      setBanMessage(ban ? `${name} was banned.` : `${name} was unbanned.`)
+    } catch (err) {
+      setBanError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setBanBusy(false)
+    }
   }
 
   const metrics = stats
@@ -110,11 +178,6 @@ export default function AdminStatsPage() {
       }))
     : []
 
-  const maxDayTotal = Math.max(
-    1,
-    ...(dashboard?.messagesByDay.map((day) => day.total) ?? [1]),
-  )
-
   return (
     <main className="activity-page">
       <div className="activity-header">
@@ -123,6 +186,78 @@ export default function AdminStatsPage() {
           <p>Admin-only aggregates across the whole platform.</p>
         </div>
       </div>
+
+      <DateRangeFilter value={range} onApply={setRange} disabled={loading} />
+
+      <section className="mb-4">
+        <div className="activity-panel">
+          <h2 className="activity-panel-title">User moderation</h2>
+          <form
+            className="d-flex gap-2"
+            onSubmit={(event) => void handleFindBanTarget(event)}
+          >
+            <input
+              className="app-input"
+              placeholder="Username or email"
+              value={banQuery}
+              onChange={(event) => setBanQuery(event.target.value)}
+              aria-label="Find user to moderate"
+            />
+            <button
+              type="submit"
+              className="app-button"
+              disabled={banBusy || !banQuery.trim()}
+            >
+              Find
+            </button>
+          </form>
+
+          {banTarget ? (
+            <div className="d-flex align-items-center gap-3 mt-3">
+              <Avatar
+                name={banTarget.displayName || banTarget.username}
+                src={banTarget.avatar}
+                size={40}
+              />
+              <div className="flex-grow-1 min-w-0">
+                <div className="fw-semibold text-truncate">
+                  {banTarget.displayName || banTarget.username}
+                </div>
+                <div className="app-text-muted small">{banTarget.email}</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                disabled={banBusy}
+                onClick={() => void handleBan(true)}
+              >
+                Ban
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                disabled={banBusy}
+                onClick={() => void handleBan(false)}
+              >
+                Unban
+              </button>
+            </div>
+          ) : null}
+
+          {userSummary ? <UserActivitySummary activity={userSummary.activity} /> : null}
+
+          {banError ? (
+            <div className="auth-alert auth-alert-error mt-3" role="alert">
+              {banError}
+            </div>
+          ) : null}
+          {banMessage ? (
+            <div className="auth-alert auth-alert-success mt-3" role="status">
+              {banMessage}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       {loading ? (
         <div className="app-loading">
@@ -140,127 +275,195 @@ export default function AdminStatsPage() {
         </div>
       ) : null}
 
-      {!loading && !error ? (
+      {!loading && !error && dashboard ? (
         <>
           <section className="mb-4">
-            <div className="activity-grid">
-              {metrics.map((metric) => (
-                <article className="activity-card" key={metric.key}>
-                  <div className="activity-card-top">
-                    <div className={`activity-icon ${metric.color}`}>
-                      <i className={metric.icon} />
-                    </div>
+            <div className="activity-kpi-primary">
+              {metrics.slice(0, 3).map((metric) => (
+                <article className="activity-metric activity-metric-primary" key={metric.key}>
+                  <div className={`activity-icon ${metric.color}`}>
+                    <i className={metric.icon} aria-hidden="true" />
                   </div>
-                  <div className="activity-card-content">
+                  <div className="activity-metric-body">
                     <p className="activity-label">{metric.label}</p>
-                    <h3>{metric.value.toLocaleString()}</h3>
-                    <span className="activity-description">
-                      {metric.description}
-                    </span>
+                    <p className="activity-metric-value">
+                      {metric.value.toLocaleString()}
+                    </p>
+                    <span className="activity-description">{metric.description}</span>
                   </div>
                 </article>
               ))}
             </div>
-          </section>
-
-          <section className="row g-3 mb-4">
-            <div className="col-md-6">
-              <div className="app-card h-100">
-                <div className="app-card-body">
-                  <h2 style={{ fontSize: 16, marginBottom: 12 }}>
-                    Active users
-                  </h2>
-                  <div
-                    style={{
-                      fontSize: 36,
-                      fontWeight: 700,
-                      letterSpacing: '-0.04em',
-                    }}
-                  >
-                    {dashboard?.activeUsers?.toLocaleString() ?? 0}
+            <div className="activity-kpi-secondary">
+              {metrics.slice(3).map((metric) => (
+                <article className="activity-metric activity-metric-secondary" key={metric.key}>
+                  <div className={`activity-icon ${metric.color}`}>
+                    <i className={metric.icon} aria-hidden="true" />
                   </div>
-                  <p className="app-text-muted mb-0" style={{ fontSize: 13 }}>
-                    Users with recent recorded activity
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="col-md-6">
-              <div className="app-card h-100">
-                <div className="app-card-body">
-                  <h2 style={{ fontSize: 16, marginBottom: 12 }}>Top groups</h2>
-                  {(dashboard?.topGroups?.length ?? 0) === 0 ? (
-                    <p className="app-text-muted mb-0" style={{ fontSize: 13 }}>
-                      No group traffic yet.
+                  <div className="activity-metric-body">
+                    <p className="activity-label">{metric.label}</p>
+                    <p className="activity-metric-value">
+                      {metric.value.toLocaleString()}
                     </p>
-                  ) : (
-                    <ul className="list-unstyled mb-0">
-                      {dashboard?.topGroups.map((group) => {
-                        const label = groupLabel(
-                          group.groupId,
-                          groupNamesById,
-                        )
-                        return (
-                          <li
-                            key={group.groupId}
-                            className="d-flex justify-content-between py-1 gap-2"
-                          >
-                            <span className="text-truncate" title={label}>
-                              {label}
-                            </span>
-                            <strong>{group.total}</strong>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
+                    <span className="activity-description">{metric.description}</span>
+                  </div>
+                </article>
+              ))}
+              <article className="activity-metric activity-metric-secondary">
+                <div className="activity-icon green">
+                  <i className="bi bi-people" aria-hidden="true" />
                 </div>
-              </div>
+                <div className="activity-metric-body">
+                  <p className="activity-label">DAU / WAU / MAU</p>
+                  <p className="activity-metric-value">
+                    {dashboard.dau} / {dashboard.wau} / {dashboard.mau}
+                  </p>
+                  <span className="activity-description">
+                    Active users anchored to range end
+                  </span>
+                </div>
+              </article>
+              <article className="activity-metric activity-metric-secondary">
+                <div className="activity-icon amber">
+                  <i className="bi bi-graph-up" aria-hidden="true" />
+                </div>
+                <div className="activity-metric-body">
+                  <p className="activity-label">Engagement</p>
+                  <p className="activity-metric-value">
+                    {dashboard.messagesPerActiveUser.toFixed(1)}
+                  </p>
+                  <span className="activity-description">
+                    Msgs / active ·{' '}
+                    {Math.round(dashboard.activeMessengersRate * 100)}% messengers
+                  </span>
+                </div>
+              </article>
             </div>
           </section>
 
-          <section className="mb-4">
-            <div className="app-card">
-              <div className="app-card-body">
-                <h2 style={{ fontSize: 16, marginBottom: 16 }}>
-                  Messages by day
-                </h2>
-                {(dashboard?.messagesByDay?.length ?? 0) === 0 ? (
-                  <p className="app-text-muted mb-0" style={{ fontSize: 13 }}>
-                    No message history yet.
-                  </p>
-                ) : (
-                  <div
-                    className="d-flex align-items-end gap-2"
-                    style={{ minHeight: 140 }}
-                  >
-                    {dashboard?.messagesByDay.map((day) => (
-                      <div
-                        key={day.day}
-                        className="d-flex flex-column align-items-center flex-grow-1"
-                        title={`${day.day}: ${day.total}`}
-                      >
-                        <div
-                          className="w-100 rounded-top"
-                          style={{
-                            height: `${Math.max(8, (day.total / maxDayTotal) * 100)}px`,
-                            background: 'var(--app-primary)',
-                            opacity: 0.88,
-                          }}
-                        />
-                        <small className="app-text-muted mt-1">
-                          {day.day.slice(5)}
-                        </small>
-                      </div>
-                    ))}
-                  </div>
-                )}
+          <section className="activity-split-grid mb-4">
+            <div className="activity-panel">
+              <div className="activity-section-heading">
+                <div>
+                  <h2>New users</h2>
+                  <p>Registrations by day.</p>
+                </div>
+              </div>
+              <SimpleLine days={dashboard.newUsersByDay} label="new users" />
+            </div>
+            <div className="activity-panel">
+              <div className="activity-section-heading">
+                <div>
+                  <h2>Verify funnel</h2>
+                  <p>Registered → verified → first message.</p>
+                </div>
+              </div>
+              <ul className="activity-list">
+                <li>
+                  <span>Registered</span>
+                  <strong>{dashboard.verifyFunnel.registered}</strong>
+                </li>
+                <li>
+                  <span>Verified</span>
+                  <strong>{dashboard.verifyFunnel.verified}</strong>
+                </li>
+                <li>
+                  <span>First message</span>
+                  <strong>{dashboard.verifyFunnel.firstMessage}</strong>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <section className="activity-split-grid mb-4">
+            <div className="activity-panel">
+              <div className="activity-section-heading">
+                <div>
+                  <h2>Social</h2>
+                  <p>Friend requests in range.</p>
+                </div>
+              </div>
+              <ul className="activity-list">
+                <li>
+                  <span>Requests</span>
+                  <strong>{dashboard.friendRequests}</strong>
+                </li>
+                <li>
+                  <span>Accept rate</span>
+                  <strong>
+                    {Math.round(dashboard.friendAcceptRate * 100)}%
+                  </strong>
+                </li>
+                <li>
+                  <span>Groups created</span>
+                  <strong>{dashboard.groupsCreated}</strong>
+                </li>
+                <li>
+                  <span>Avg members / group</span>
+                  <strong>{dashboard.avgMembersPerGroup.toFixed(1)}</strong>
+                </li>
+              </ul>
+            </div>
+            <div className="activity-panel">
+              <div className="activity-section-heading">
+                <div>
+                  <h2>Top groups</h2>
+                  <p>Lifetime by message volume.</p>
+                </div>
+              </div>
+              {(dashboard.topGroups.length ?? 0) === 0 ? (
+                <p className="activity-empty">No group traffic yet.</p>
+              ) : (
+                <ul className="activity-list">
+                  {dashboard.topGroups.map((group) => (
+                    <li key={group.groupId}>
+                      <span title={groupLabel(group.groupId, groupNamesById)}>
+                        {groupLabel(group.groupId, groupNamesById)}
+                      </span>
+                      <strong>{group.total}</strong>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
+          <section className="activity-panel mb-4">
+            <div className="activity-section-heading">
+              <div>
+                <h2>Messages by day</h2>
+                <p>Platform-wide outbound messages.</p>
               </div>
             </div>
+            <SimpleLine days={dashboard.messagesByDay} label="messages" />
+          </section>
+
+          <section className="activity-panel mb-4">
+            <div className="activity-section-heading">
+              <div>
+                <h2>Media uploads</h2>
+                <p>By day and type.</p>
+              </div>
+            </div>
+            <MediaStack days={dashboard.mediaByDay} />
           </section>
         </>
       ) : null}
     </main>
+  )
+}
+
+function UserActivitySummary({ activity }: { activity: MyActivity }) {
+  return (
+    <div className="activity-user-summary mt-3">
+      <h3>Activity summary</h3>
+      <div className="activity-user-summary-grid">
+        <span>Sent {activity.messagesSent}</span>
+        <span>Received {activity.messagesReceived}</span>
+        <span>Logins {activity.logins}</span>
+        <span>Groups {activity.groupsCreated}</span>
+        <span>Friends {activity.friends.count}</span>
+      </div>
+    </div>
   )
 }

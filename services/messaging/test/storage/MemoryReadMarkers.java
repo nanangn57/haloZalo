@@ -1,6 +1,7 @@
 package storage;
 
 import conversation.ReadState;
+import message.MessageType;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -36,7 +37,8 @@ public final class MemoryReadMarkers implements ReadMarkerRepository {
         for (String id : conversationIds) {
             long lastRead = markers.getOrDefault(id + "|" + userId, 0L);
             long unread = messages.findAfterSeq(id, lastRead, Integer.MAX_VALUE).stream()
-                .filter(message -> !message.getSenderId().equals(userId) && !message.isDeleted())
+                .filter(message -> !userId.equals(message.getSenderId())
+                    && message.getType() != MessageType.SYSTEM && !message.isDeleted())
                 .count();
             states.put(id, new ReadState(lastRead, unread));
         }

@@ -113,4 +113,43 @@ public final class PostgresFriendRepository implements FriendRepository {
             throw new IllegalStateException("Could not list friends", ex);
         }
     }
+
+    @Override
+    public void deleteFriendship(String userId, String friendId) {
+        String sql = "DELETE FROM identity.friendships WHERE user_id = ? AND friend_id = ?";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, userId);
+            statement.setString(2, friendId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not delete friendship", ex);
+        }
+    }
+
+    @Override
+    public List<FriendRequest> incomingRequests(String userId) {
+        return requests("SELECT from_user_id, to_user_id FROM identity.friend_requests WHERE to_user_id = ? ORDER BY from_user_id", userId);
+    }
+
+    @Override
+    public List<FriendRequest> outgoingRequests(String userId) {
+        return requests("SELECT from_user_id, to_user_id FROM identity.friend_requests WHERE from_user_id = ? ORDER BY to_user_id", userId);
+    }
+
+    private List<FriendRequest> requests(String sql, String userId) {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, userId);
+            List<FriendRequest> found = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    found.add(new FriendRequest(rows.getString("from_user_id"), rows.getString("to_user_id")));
+                }
+            }
+            return found;
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not list friend requests", ex);
+        }
+    }
 }

@@ -2,6 +2,8 @@ package http;
 
 import event.RecordingEvents;
 import member.ConversationMembers;
+import member.StandaloneBlockChecker;
+import member.StandaloneFriendshipChecker;
 import member.StandaloneGroupMembers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,8 +45,9 @@ class MessageControllerTest {
         MemoryConversations conversations = new MemoryConversations();
         StandaloneGroupMembers groups = new StandaloneGroupMembers();
         MemoryMessages messages = new MemoryMessages(conversations);
-        MessageService service = new MessageService(conversations, messages, new MemoryReactions(),
-            new MemoryReadMarkers(messages), new ConversationMembers(groups), new RecordingEvents());
+        MessageService service = new MessageService(conversations, messages, messages, new MemoryReactions(),
+            new MemoryReadMarkers(messages), conversations.prefs(), new ConversationMembers(groups),
+            new StandaloneFriendshipChecker(), new StandaloneBlockChecker(), new RecordingEvents());
         groups.replace(GROUP, Set.of(ALICE, BOB, CAROL));
         mvc = MockMvcBuilders.standaloneSetup(new MessageController(service))
             .setControllerAdvice(new MessageExceptionHandler())

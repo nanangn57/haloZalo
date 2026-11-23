@@ -43,6 +43,8 @@ final class MessageContentJson {
             case IMAGE -> MessageContent.Image.class;
             case VIDEO -> MessageContent.Video.class;
             case DOCUMENT -> MessageContent.Document.class;
+            case AUDIO -> MessageContent.Audio.class;
+            case SYSTEM -> MessageContent.System.class;
         };
         try {
             return JSON.readValue(json, shape);

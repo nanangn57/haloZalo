@@ -2,7 +2,7 @@ import { getAccessToken, requireUserId } from './authSession'
 import { connectionConfig } from './connectionConfig'
 import { getApiHeaders } from './apiClient'
 
-export type MediaUploadType = 'IMAGE' | 'DOCUMENT' | 'VIDEO'
+export type MediaUploadType = 'IMAGE' | 'DOCUMENT' | 'VIDEO' | 'AUDIO'
 
 export interface MediaUploadResult {
   mediaId: string

@@ -8,10 +8,13 @@ export default function ChatHeader({
   title,
   subtitle,
   onBack,
+  onMediaPress,
 }: {
   title: string;
   subtitle?: string;
   onBack: () => void;
+  // Mở danh sách media của hội thoại.
+  onMediaPress?: () => void;
 }) {
   const theme = useTheme();
 
@@ -44,6 +47,17 @@ export default function ChatHeader({
           </Text>
         ) : null}
       </View>
+      {onMediaPress ? (
+        <Pressable
+          onPress={onMediaPress}
+          style={styles.mediaButton}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Shared media"
+        >
+          <Ionicons name="images-outline" size={22} color={theme.text} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -58,6 +72,7 @@ const styles = StyleSheet.create({
   },
   backButton: { marginRight: Spacing.three },
   titles: { flex: 1, minWidth: 0 },
+  mediaButton: { marginLeft: Spacing.three },
   title: { fontSize: 18, fontWeight: '600' },
   subtitle: { fontSize: 12, marginTop: 2 },
 });

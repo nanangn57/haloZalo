@@ -8,6 +8,7 @@ import identity.group.Group;
 import identity.group.GroupAction;
 import identity.group.GroupListResponse;
 import identity.group.GroupMemberResponse;
+import identity.group.GroupPatch;
 import identity.group.GroupResponse;
 import identity.group.MemberListResponse;
 import identity.group.Membership;
@@ -33,6 +34,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public final class GroupService {
     private static final int NAME_MAX = 64;
+    private static final int DESCRIPTION_MAX = 280;
+    private static final int AVATAR_MAX = 2048;
 
     private final GroupRespository groups;
     private final MembershipRepository memberships;
@@ -126,6 +129,7 @@ public final class GroupService {
         } catch (DuplicateKeyException ex) {
             throw new Rejected(Rejected.Reason.CONFLICT, "User is already a member");
         }
+        events.publishMemberAdded(group, caller, memberId);
         return new MembershipResponse(group, memberId, Role.MEMBER);
     }
 
@@ -137,6 +141,11 @@ public final class GroupService {
             throw new Rejected(Rejected.Reason.VALIDATION, "Invalid member request");
         }
         requireGroup(group);
+        Membership self = memberships.find(group, caller);
+        if (target.equals(caller) && self != null && self.getRole() == Role.OWNER) {
+            leaveAsOwner(group, caller);
+            return;
+        }
         GroupAction action = target.equals(caller) ? GroupAction.LEAVE : GroupAction.REMOVE_MEMBER;
         requireAllowed(caller, group, action);
         Membership targetMembership = memberships.find(group, target);
@@ -147,43 +156,112 @@ public final class GroupService {
             throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
         }
         memberships.delete(group, target);
+        if (target.equals(caller)) {
+            events.publishMemberLeft(group, target);
+        } else {
+            events.publishMemberRemoved(group, caller, target);
+        }
     }
 
-    public MembershipResponse assignRole(String callerId, String groupId, String targetUserId, String roleName) {
+    /** An owner who is alone closes the group by leaving. With other members the owner must hand over first. */
+    private void leaveAsOwner(String groupId, String ownerId) {
+        if (memberships.listByGroup(groupId).size() > 1) {
+            throw new Rejected(Rejected.Reason.FORBIDDEN, "Transfer ownership before leaving");
+        }
+        dissolveGroup(groupId);
+        events.publishGroupDissolved(groupId, ownerId);
+    }
+
+    public MembershipResponse transferOwner(String callerId, String groupId, String newOwnerId) {
         String group = canonical(groupId);
-        String target = canonical(targetUserId);
         String caller = canonical(callerId);
-        Role role = role(roleName);
-        if (!validUuid(group) || !validUuid(target) || role == null) {
-            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid role request");
+        String target = canonical(newOwnerId);
+        if (!validUuid(group) || !validUuid(target)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid transfer request");
         }
-        requireGroup(group);
-        Membership callerMembership = memberships.find(group, caller);
-        if (callerMembership == null || callerMembership.getRole() != Role.OWNER) {
-            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
+        Group current = requireGroup(group);
+        requireAllowed(caller, group, GroupAction.TRANSFER_OWNER);
+        if (target.equals(caller)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Already the owner");
         }
-        Membership targetMembership = memberships.find(group, target);
-        if (targetMembership == null) {
+        if (memberships.find(group, target) == null) {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "User not found");
         }
-        if (targetMembership.getRole() == Role.OWNER) {
-            throw new Rejected(Rejected.Reason.FORBIDDEN, "Not allowed to change this group");
-        }
-        memberships.updateRole(group, target, role);
-        return new MembershipResponse(group, target, role);
+        transactions.executeWithoutResult(status -> {
+            memberships.updateRole(group, target, Role.OWNER);
+            memberships.updateRole(group, caller, Role.MEMBER);
+            groups.update(current.withOwnerId(target));
+        });
+        events.publishOwnerTransferred(group, caller, target);
+        return new MembershipResponse(group, target, Role.OWNER);
     }
 
-    private static Role role(String roleName) {
-        if ("ADMIN".equals(roleName) || "MEMBER".equals(roleName)) {
-            return Role.valueOf(roleName);
+    public void dissolve(String callerId, String groupId) {
+        String group = canonical(groupId);
+        String caller = canonical(callerId);
+        if (!validUuid(group)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group id");
         }
-        return null;
+        requireGroup(group);
+        requireAllowed(caller, group, GroupAction.DISSOLVE);
+        dissolveGroup(group);
+        events.publishGroupDissolved(group, caller);
     }
 
-    private void requireGroup(String groupId) {
-        if (groups.findById(groupId) == null) {
+    public GroupResponse update(String callerId, String groupId, GroupPatch patch) {
+        String group = canonical(groupId);
+        String caller = canonical(callerId);
+        if (!validUuid(group)) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group id");
+        }
+        Group current = requireGroup(group);
+        requireAllowed(caller, group, GroupAction.UPDATE_GROUP);
+        if (patch == null || (!patch.hasName() && !patch.hasDescription() && !patch.hasAvatar())) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Nothing to update");
+        }
+        String name = current.getGroupName();
+        String description = current.getGroupDescription();
+        String avatar = current.getGroupAvatar();
+        if (patch.hasName()) {
+            name = patch.getName();
+            if (name == null || name.isBlank() || name.length() > NAME_MAX) {
+                throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group name");
+            }
+        }
+        if (patch.hasDescription()) {
+            description = optionalText(patch.getDescription(), DESCRIPTION_MAX, "Invalid group description");
+        }
+        if (patch.hasAvatar()) {
+            avatar = optionalText(patch.getAvatar(), AVATAR_MAX, "Invalid group avatar");
+        }
+        Group updated = current.withDetails(name, description, avatar);
+        groups.update(updated);
+        return response(updated, Role.OWNER);
+    }
+
+    private void dissolveGroup(String groupId) {
+        transactions.executeWithoutResult(status -> {
+            memberships.deleteByGroup(groupId);
+            groups.delete(groupId);
+        });
+    }
+
+    private static String optionalText(String value, int max, String message) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (value.length() > max) {
+            throw new Rejected(Rejected.Reason.VALIDATION, message);
+        }
+        return value;
+    }
+
+    private Group requireGroup(String groupId) {
+        Group group = groups.findById(groupId);
+        if (group == null) {
             throw new Rejected(Rejected.Reason.NOT_FOUND, "Group not found");
         }
+        return group;
     }
 
     private void requireAllowed(String callerId, String groupId, GroupAction action) {
@@ -198,7 +276,14 @@ public final class GroupService {
     }
 
     private static GroupResponse response(Group group, Role role) {
-        return new GroupResponse(group.getGroupId(), group.getGroupName(), group.getGroupOwnerId(), role);
+        return new GroupResponse(
+            group.getGroupId(),
+            group.getGroupName(),
+            group.getGroupOwnerId(),
+            role,
+            group.getGroupDescription(),
+            group.getGroupAvatar()
+        );
     }
 
     private static String canonical(String value) {

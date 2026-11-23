@@ -5,13 +5,14 @@ info:
   description: |
     Hợp đồng HTTP public của app. Client gọi một URL.
     Quyết định nằm ở doc/contract/decisions.md.
-    Bản này có đăng ký kèm xác minh email, đăng nhập, kiểm tra token, profile, bạn bè, tìm user,
-    tra tên user theo id, nhóm với role admin, hội thoại,     tin TEXT/EMOTION/IMAGE/VIDEO/DOCUMENT, upload media, lịch sử, đã đọc,
-    reaction, và thống kê đã gom.
+    Bản này: đăng ký/verify (TTL 2 phút, verify cấp session gắn deviceId), login email+deviceId (idle 30 ngày), logout/sessions,
+    profile (bio), friends (requests inbox, reject, block), nhóm OWNER|MEMBER (transfer, dissolve),
+    hội thoại (pin/mute/archive), tin TEXT/EMOTION/IMAGE/VIDEO/DOCUMENT/AUDIO, reply/forward/reaction/recall,
+    message request người lạ, stats + ban, upload media.
     Kiểm tra session nằm trong process. File này không có API nội bộ giữa các module.
 servers:
-  - url: https://api.example.com
-    description: URL cloud của tuần hiện tại. P4 thay khi có URL thật.
+  - url: http://localhost:8080
+    description: Local / cloud qua IP EC2 (không domain).
 tags:
   - name: Auth
   - name: Users
@@ -59,21 +60,38 @@ paths:
     get:
       tags: [Auth]
       operationId: verifyEmail
-      summary: Xác minh email và tạo tài khoản
-      description: Link trong email trỏ tới đây (cloud qua trang web /auth/verify). Token hết hạn sau 15 phút kể từ lúc đăng ký.
+      summary: Xác minh email, tạo tài khoản và cấp session
+      description: |
+        Link trong email nên mở SPA `/auth/verify?token=…`; SPA gọi API kèm `deviceId` bền của thiết bị.
+        Token verify hết hạn sau 2 phút (120s). Thành công trả TokenResponse (đã đăng nhập, session gắn device).
       parameters:
         - name: token
           in: query
           required: true
           schema:
             type: string
+        - name: deviceId
+          in: query
+          required: true
+          description: Id thiết bị bền (client lưu local). Cùng user+deviceId → một session.
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 64
+            pattern: '^[A-Za-z0-9_-]+$'
+        - name: deviceLabel
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 128
       responses:
         "200":
-          description: Đã tạo tài khoản. Chưa cấp token đăng nhập.
+          description: Đã tạo tài khoản và cấp accessToken.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/TokenResponse"
         "400":
           description: Link hết hạn hoặc không hợp lệ.
           content:
@@ -115,7 +133,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationError"
         "401":
-          description: Sai username, email, hoặc password.
+          description: Sai email hoặc password, hoặc tài khoản bị ban.
           content:
             application/json:
               schema:
@@ -124,6 +142,125 @@ paths:
                 error:
                   code: UNAUTHENTICATED
                   message: Invalid login or password
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Xoá session hiện tại
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Đã đăng xuất.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      operationId: listSessions
+      summary: Danh sách phiên đang sống của user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /auth/sessions/{sessionId}:
+    delete:
+      tags: [Auth]
+      operationId: revokeSession
+      summary: Đăng xuất từ xa một phiên
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Đã revoke.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth/verify/resend:
+    post:
+      tags: [Auth]
+      operationId: resendVerification
+      summary: Gửi lại email xác minh (rate-limit)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendVerificationRequest"
+      responses:
+        "202":
+          description: Đã gửi lại (hoặc accepted).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterAccepted"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          description: Gửi lại quá nhanh.
+  /auth/password/forgot:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Gửi link đặt lại mật khẩu (luôn 202)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordForgotRequest"
+      responses:
+        "202":
+          description: Accepted (không lộ email có tồn tại hay không).
+  /auth/password/reset:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Đặt mật khẩu mới bằng token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Đã đổi mật khẩu.
+        "400":
+          $ref: "#/components/responses/ValidationError"
+  /auth/password/change:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Đổi mật khẩu khi đã đăng nhập
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "204":
+          description: Đã đổi.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
   /me:
     get:
       tags: [Auth]
@@ -169,19 +306,43 @@ paths:
       tags: [Stats]
       operationId: myActivity
       summary: Hoạt động của user đang đăng nhập
-      description: Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+      description: |
+        Đọc bảng tổng hợp trong schema `analytics`. Không quét schema `messaging`.
+        `from` / `to` (ISO date `yyyy-MM-dd`, gồm cả hai đầu, đều tuỳ chọn) lọc KPI và series theo ngày.
+        Không có khoảng → dùng toàn bộ dữ liệu đã ghi (từ khi deploy aggregates; không backfill).
+        Ngày sai định dạng hoặc `from` sau `to` thì 400.
+        Devices không nằm ở đây — client gọi `GET /auth/sessions`.
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StatsFrom"
+        - $ref: "#/components/parameters/StatsTo"
       responses:
         "200":
-          description: Số lần đăng nhập, tin đã gửi và nhóm đã tạo của đúng user này.
+          description: KPI + series + heatmap + friends + top conversations của đúng user này.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserActivity"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthenticated"
   /friends/requests:
+    get:
+      tags: [Users]
+      operationId: listFriendRequests
+      summary: Lời mời đến và đi
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendRequestList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
     post:
       tags: [Users]
       operationId: sendFriendRequest
@@ -205,6 +366,8 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: Không có user này.
           content:
@@ -255,6 +418,38 @@ paths:
                 error:
                   code: NOT_FOUND
                   message: Friend request not found
+  /friends/requests/{userId}/reject:
+    post:
+      tags: [Users]
+      operationId: rejectFriendRequest
+      summary: Từ chối lời mời đến
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã từ chối.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /friends/requests/{userId}:
+    delete:
+      tags: [Users]
+      operationId: cancelFriendRequest
+      summary: Huỷ lời mời đã gửi
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã huỷ.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /friends:
     get:
       tags: [Users]
@@ -271,6 +466,125 @@ paths:
                 $ref: "#/components/schemas/FriendList"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+  /friends/{userId}:
+    delete:
+      tags: [Users]
+      operationId: unfriend
+      summary: Huỷ kết bạn
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã huỷ kết bạn.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /blocks:
+    get:
+      tags: [Users]
+      operationId: listBlocks
+      summary: Danh sách user đã chặn
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      tags: [Users]
+      operationId: blockUser
+      summary: Chặn user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlockBody"
+      responses:
+        "204":
+          description: Đã chặn.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /blocks/{userId}:
+    delete:
+      tags: [Users]
+      operationId: unblockUser
+      summary: Bỏ chặn
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã bỏ chặn.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /admin/users/{userId}:
+    get:
+      tags: [Users]
+      operationId: adminUserSummary
+      summary: Tóm tắt hồ sơ + activity của một user (system admin)
+      description: |
+        Chỉ `platformRole = ADMIN`. Hồ sơ từ identity + activity tóm tắt từ analytics
+        (cùng shape `UserActivity`, không bắt buộc `from`/`to`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "200":
+          description: Hồ sơ + activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserSummary"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /admin/users/{userId}/ban:
+    post:
+      tags: [Users]
+      operationId: banUser
+      summary: System admin ban user
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã ban.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /admin/users/{userId}/unban:
+    post:
+      tags: [Users]
+      operationId: unbanUser
+      summary: System admin bỏ ban
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MemberUserId"
+      responses:
+        "204":
+          description: Đã unban.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /users:
     get:
       tags: [Users]
@@ -422,7 +736,7 @@ paths:
     post:
       tags: [Groups]
       operationId: addGroupMember
-      summary: Owner hoặc admin thêm thành viên
+      summary: Owner hoặc member (theo policy) thêm thành viên — add thẳng
       security:
         - bearerAuth: []
       parameters:
@@ -464,8 +778,8 @@ paths:
       operationId: removeGroupMember
       summary: Owner xoá thành viên, hoặc thành viên tự rời
       description: |
-        Owner hoặc admin xoá user khác. Admin không xoá được owner. Thành viên tự rời khi userId là chính mình.
-        Owner không tự rời và không bị xoá.
+        Owner kick user khác. Member tự rời khi userId là chính mình.
+        Owner rời được sau khi transfer; nếu còn một mình thì giải tán nhóm.
       security:
         - bearerAuth: []
       parameters:
@@ -480,32 +794,71 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-  /groups/{groupId}/members/{userId}/role:
-    put:
+  /groups/{groupId}:
+    patch:
       tags: [Groups]
-      operationId: setGroupRole
-      summary: Owner gán hoặc gỡ role admin
-      description: Role nhận ADMIN hoặc MEMBER. Không đổi role của owner.
+      operationId: updateGroup
+      summary: Owner sửa tên / mô tả / avatar nhóm
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/GroupId"
-        - $ref: "#/components/parameters/MemberUserId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SetRoleRequest"
+              $ref: "#/components/schemas/UpdateGroupRequest"
       responses:
         "200":
-          description: Role mới của thành viên.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Group"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Groups]
+      operationId: dissolveGroup
+      summary: Owner giải tán nhóm
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+      responses:
+        "204":
+          description: Đã giải tán.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /groups/{groupId}/transfer-owner:
+    post:
+      tags: [Groups]
+      operationId: transferGroupOwner
+      summary: Owner chuyển quyền cho member khác
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GroupId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferOwnerRequest"
+      responses:
+        "200":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Membership"
-        "400":
-          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -555,7 +908,9 @@ paths:
       summary: Mở hội thoại 1-1 với một user
       description: |
         Một cặp user một hội thoại DIRECT. 201 khi tạo, 200 khi đã có.
-        Gọi với chính mình thì 400.
+        Gọi với chính mình thì 400. Một trong hai bên chặn bên kia (block) thì 403.
+        Chưa là bạn: phía người mở là `OPEN`, phía người nhận là `PENDING` (`pendingRequest = true` khi người nhận xem)
+        cho tới khi họ accept (`POST …/accept-request`), trả lời, hoặc hai bên thành bạn.
       security:
         - bearerAuth: []
       requestBody:
@@ -586,10 +941,27 @@ paths:
       tags: [Messages]
       operationId: listConversations
       summary: Danh sách hội thoại của user hiện tại
-      description: Hoạt động gần nhất trước. `limit` mặc định 50, tối đa 100.
+      description: |
+        Hội thoại ghim (`pinned`) trước, rồi hoạt động gần nhất trước. `limit` mặc định 50, tối đa 100.
+        Mặc định bỏ hội thoại đã lưu trữ (`archived`) và tin nhắn chờ (`pendingRequest`) của người nhận.
+        `archived=true` chỉ liệt kê hội thoại đã lưu trữ. `inbox=requests` chỉ liệt kê tin nhắn chờ (chat 1-1 với
+        người lạ, chưa accept). Hội thoại nhóm không bao giờ vào `requests`.
       security:
         - bearerAuth: []
       parameters:
+        - name: archived
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - name: inbox
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [primary, requests]
+            default: primary
         - name: cursor
           in: query
           required: false
@@ -634,16 +1006,151 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/NotMember"
+  /presence:
+    get:
+      tags: [Messages]
+      operationId: getPresence
+      summary: Trạng thái online của danh sách user
+      description: Dựa trên WebSocket đang mở trong process. `lastSeenAt` khi offline.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Danh sách userId cách nhau bởi dấu phẩy (tối đa 100).
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [presences]
+                properties:
+                  presences:
+                    type: array
+                    items:
+                      type: object
+                      required: [userId, online]
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        online:
+                          type: boolean
+                        lastSeenAt:
+                          type: string
+                          format: date-time
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /me/notifications:
+    get:
+      tags: [Messages]
+      operationId: getNotificationPrefs
+      summary: Cài đặt push của user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefs"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    patch:
+      tags: [Messages]
+      operationId: updateNotificationPrefs
+      summary: Sửa cài đặt push
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationPrefsPatch"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefs"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+  /conversations/{conversationId}/prefs:
+    patch:
+      tags: [Messages]
+      operationId: updateConversationPrefs
+      summary: Ghim, tắt thông báo, lưu trữ hội thoại (riêng từng user)
+      description: |
+        Chỉ field có mặt mới đổi. Body rỗng thì 400. Chỉ ảnh hưởng người gọi.
+        `muted = true`: không gửi push khi offline (socket vẫn nhận event).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateConversationPrefsRequest"
+      responses:
+        "200":
+          description: Prefs sau khi sửa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationPrefs"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/NotMember"
+  /conversations/{conversationId}/accept-request:
+    post:
+      tags: [Messages]
+      operationId: acceptMessageRequest
+      summary: Chấp nhận tin nhắn chờ từ người lạ
+      description: |
+        Chỉ hội thoại DIRECT. Sau khi accept, hội thoại vào inbox mặc định. Gọi lại khi không còn chờ thì vẫn 200.
+        Hội thoại nhóm thì 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Hội thoại sau khi accept.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/NotMember"
   /conversations/{conversationId}/messages:
     post:
       tags: [Messages]
       operationId: sendMessage
-      summary: Gửi tin TEXT, EMOTION, IMAGE, VIDEO hoặc DOCUMENT vào hội thoại đã mở
+      summary: Gửi tin TEXT, EMOTION, IMAGE, VIDEO, DOCUMENT hoặc AUDIO vào hội thoại đã mở
       description: |
         Hội thoại phải được mở trước. Chat 1-1 mở bằng `POST /conversations/direct`.
         Hội thoại nhóm dùng `groupId` làm `conversationId`.
         Media: upload trước bằng `POST /media/uploads`, rồi gửi tin với `body` là URL trả về.
-        Giới hạn: text 4KB, image 5MB, document 10MB, video 20MB (kiểm tra lúc upload).
+        Giới hạn: text 4KB, image 5MB, document 10MB, video 20MB, audio 5MB (kiểm tra lúc upload).
+        Chat 1-1 mà một bên đã chặn bên kia thì 403. Người nhận đang `PENDING` mà gửi tin thì coi như accept.
         Ghi tin trước khi phát event `messaging.message.created`.
         Cùng sender và cùng clientMsgId trả lại tin cũ, không tăng seq.
         Người gửi không thuộc hội thoại thì 403.
@@ -685,10 +1192,18 @@ paths:
         Có `afterSeq`: tin sau mốc đó. Cả hai cùng lúc thì 400.
         Luôn theo `seq` tăng dần. `limit` mặc định 100, tối đa 200.
         Tin đã xoá có `status` là `DELETED` và không có `body`.
+        `q`: chỉ tin TEXT chưa xoá có `body` chứa từ khoá (không phân biệt hoa thường), vẫn dùng
+        `afterSeq` / `beforeSeq` / `limit`. `q` quá 256 ký tự thì 400.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/ConversationId"
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 256
         - name: afterSeq
           in: query
           required: false
@@ -887,10 +1402,10 @@ paths:
     post:
       tags: [Media]
       operationId: uploadMedia
-      summary: Upload file media, nhận URL để gửi tin IMAGE/DOCUMENT/VIDEO
+      summary: Upload file media, nhận URL để gửi tin IMAGE/DOCUMENT/VIDEO/AUDIO
       description: |
-        Multipart field `file`, form field `type` = IMAGE | DOCUMENT | VIDEO.
-        Giới hạn: image 5MB, document 10MB, video 20MB.
+        Multipart field `file`, form field `type` = IMAGE | DOCUMENT | VIDEO | AUDIO.
+        Giới hạn: image 5MB, document 10MB, video 20MB, audio 5MB (MIME `audio/*` thông dụng: mpeg, mp4, aac, ogg, webm, wav, 3gpp, amr).
         Trả `url` dùng làm `body` của tin tương ứng. Phát `messaging.media.uploaded`.
       security:
         - bearerAuth: []
@@ -907,7 +1422,7 @@ paths:
                   format: binary
                 type:
                   type: string
-                  enum: [IMAGE, DOCUMENT, VIDEO]
+                  enum: [IMAGE, DOCUMENT, VIDEO, AUDIO]
                 conversationId:
                   type: string
                   format: uuid
@@ -927,7 +1442,7 @@ paths:
                     type: string
                   type:
                     type: string
-                    enum: [IMAGE, DOCUMENT, VIDEO]
+                    enum: [IMAGE, DOCUMENT, VIDEO, AUDIO]
                   contentType:
                     type: string
                   fileName:
@@ -963,12 +1478,17 @@ paths:
     get:
       tags: [Stats]
       operationId: activityDashboard
-      summary: Tin theo ngày, user hoạt động và top nhóm
+      summary: Dashboard toàn platform (growth, engagement, social, media)
       description: |
         Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
         Không quét schema `messaging`.
+        `from` / `to` (ISO date, gồm cả hai đầu, tuỳ chọn) lọc series và KPI theo ngày.
+        Không có khoảng → toàn bộ dữ liệu đã ghi (không backfill).
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/StatsFrom"
+        - $ref: "#/components/parameters/StatsTo"
       responses:
         "200":
           description: Số liệu đã gom.
@@ -976,6 +1496,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Dashboard"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -1068,6 +1590,22 @@ components:
       bearerFormat: opaque
       description: Session id do Identity cấp trong accessToken. Không phải JWT.
   parameters:
+    StatsFrom:
+      name: from
+      in: query
+      required: false
+      description: Ngày bắt đầu, ISO `yyyy-MM-dd`, gồm cả ngày này.
+      schema:
+        type: string
+        format: date
+    StatsTo:
+      name: to
+      in: query
+      required: false
+      description: Ngày kết thúc, ISO `yyyy-MM-dd`, gồm cả ngày này.
+      schema:
+        type: string
+        format: date
     ConversationId:
       name: conversationId
       in: path
@@ -1158,13 +1696,8 @@ components:
     RegisterRequest:
       type: object
       additionalProperties: false
-      required: [username, email, password]
+      required: [email, password, displayName]
       properties:
-        username:
-          type: string
-          minLength: 3
-          maxLength: 32
-          pattern: "^[a-zA-Z0-9_]+$"
         email:
           type: string
           format: email
@@ -1174,6 +1707,16 @@ components:
           format: password
           minLength: 8
           maxLength: 72
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: "^[a-zA-Z0-9_]+$"
+          description: Tuỳ chọn; nếu thiếu thì derive từ email.
     RegisterAccepted:
       type: object
       additionalProperties: false
@@ -1192,11 +1735,12 @@ components:
     LoginRequest:
       type: object
       additionalProperties: false
-      required: [login, password]
+      required: [login, password, deviceId]
       properties:
         login:
           type: string
-          description: Username hoặc email.
+          format: email
+          description: Chỉ email.
           minLength: 3
           maxLength: 254
         password:
@@ -1204,6 +1748,140 @@ components:
           format: password
           minLength: 8
           maxLength: 72
+        deviceId:
+          type: string
+          description: Id thiết bị bền. Login lại cùng device rotate session, không nhân bản.
+          minLength: 8
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_-]+$'
+        deviceLabel:
+          type: string
+          maxLength: 128
+          description: Nhãn hiển thị (vd. Chrome · macOS).
+        userAgent:
+          type: string
+          maxLength: 512
+    ResendVerificationRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    PasswordForgotRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [token, password]
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+    PasswordChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+        revokeOtherSessions:
+          type: boolean
+          default: false
+    SessionInfo:
+      type: object
+      additionalProperties: false
+      required: [sessionId, createdAt, expiresAt]
+      properties:
+        sessionId:
+          type: string
+        deviceId:
+          type: string
+          description: Id thiết bị gắn session (có thể thiếu trên session cũ trước migrate).
+        deviceLabel:
+          type: string
+        userAgent:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: Gia hạn idle khi còn dùng; absolute max 90 ngày từ createdAt.
+        lastSeenAt:
+          type: string
+          format: date-time
+    SessionList:
+      type: object
+      additionalProperties: false
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionInfo"
+    TransferOwnerRequest:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
+    UpdateGroupRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 280
+        avatar:
+          type: string
+          maxLength: 2048
+    FriendRequestList:
+      type: object
+      additionalProperties: false
+      required: [incoming, outgoing]
+      properties:
+        incoming:
+          type: array
+          items:
+            $ref: "#/components/schemas/FriendRequest"
+        outgoing:
+          type: array
+          items:
+            $ref: "#/components/schemas/FriendRequest"
+    BlockBody:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId:
+          type: string
+          format: uuid
     TokenResponse:
       type: object
       additionalProperties: false
@@ -1244,6 +1922,9 @@ components:
         avatar:
           type: string
           maxLength: 2048
+        bio:
+          type: string
+          maxLength: 280
     UpdateProfileRequest:
       type: object
       additionalProperties: false
@@ -1257,6 +1938,9 @@ components:
           type: string
           maxLength: 2048
           description: Chuỗi rỗng xoá avatar.
+        bio:
+          type: string
+          maxLength: 280
     FriendRequestBody:
       type: object
       additionalProperties: false
@@ -1318,18 +2002,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/UserSummary"
-    SetRoleRequest:
-      type: object
-      additionalProperties: false
-      required: [role]
-      properties:
-        role:
-          type: string
-          enum: [ADMIN, MEMBER]
     UserActivity:
       type: object
       additionalProperties: false
-      required: [logins, messagesSent, groupsCreated]
+      required:
+        - logins
+        - messagesSent
+        - messagesReceived
+        - groupsCreated
+        - activeConversations
+        - messagesByDay
+        - mediaVsText
+        - directVsGroup
+        - heatmap
+        - friends
+        - topConversations
       properties:
         logins:
           type: integer
@@ -1337,7 +2024,126 @@ components:
         messagesSent:
           type: integer
           minimum: 0
+        messagesReceived:
+          type: integer
+          minimum: 0
         groupsCreated:
+          type: integer
+          minimum: 0
+        activeConversations:
+          type: integer
+          minimum: 0
+          description: Số hội thoại có tin gửi trong khoảng.
+        messagesByDay:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageDayCount"
+        mediaVsText:
+          $ref: "#/components/schemas/MediaTextSplit"
+        directVsGroup:
+          $ref: "#/components/schemas/DirectGroupSplit"
+        heatmap:
+          type: array
+          description: Ô heatmap giờ × thứ (0=Mon … 6=Sun, hour 0–23).
+          items:
+            $ref: "#/components/schemas/HeatmapCell"
+        friends:
+          $ref: "#/components/schemas/FriendActivity"
+        topConversations:
+          type: array
+          description: Drill-down tin đã gửi theo hội thoại (giảm dần).
+          items:
+            $ref: "#/components/schemas/ConversationCount"
+        from:
+          type: string
+          format: date
+          description: Có khi request gửi `from`.
+        to:
+          type: string
+          format: date
+          description: Có khi request gửi `to`.
+    MessageDayCount:
+      type: object
+      additionalProperties: false
+      required: [day, sent, received]
+      properties:
+        day:
+          type: string
+          format: date
+        sent:
+          type: integer
+          minimum: 0
+        received:
+          type: integer
+          minimum: 0
+    MediaTextSplit:
+      type: object
+      additionalProperties: false
+      required: [text, media]
+      properties:
+        text:
+          type: integer
+          minimum: 0
+        media:
+          type: integer
+          minimum: 0
+    DirectGroupSplit:
+      type: object
+      additionalProperties: false
+      required: [direct, group]
+      properties:
+        direct:
+          type: integer
+          minimum: 0
+        group:
+          type: integer
+          minimum: 0
+    HeatmapCell:
+      type: object
+      additionalProperties: false
+      required: [weekday, hour, total]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: 0 = Monday … 6 = Sunday
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        total:
+          type: integer
+          minimum: 0
+    FriendActivity:
+      type: object
+      additionalProperties: false
+      required: [count, requestsSent, requestsReceived, acceptRate]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          description: Số bạn hiện tại (lifetime snapshot; không phụ thuộc range).
+        requestsSent:
+          type: integer
+          minimum: 0
+        requestsReceived:
+          type: integer
+          minimum: 0
+        acceptRate:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: accepted / sent trong khoảng; 0 nếu chưa gửi lời mời.
+    ConversationCount:
+      type: object
+      additionalProperties: false
+      required: [conversationId, total]
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        total:
           type: integer
           minimum: 0
     DayCount:
@@ -1348,6 +2154,20 @@ components:
         day:
           type: string
           format: date
+        total:
+          type: integer
+          minimum: 0
+    MediaDayCount:
+      type: object
+      additionalProperties: false
+      required: [day, type, total]
+      properties:
+        day:
+          type: string
+          format: date
+        type:
+          type: string
+          enum: [IMAGE, DOCUMENT, VIDEO, AUDIO]
         total:
           type: integer
           minimum: 0
@@ -1362,10 +2182,40 @@ components:
         total:
           type: integer
           minimum: 0
+    VerifyFunnel:
+      type: object
+      additionalProperties: false
+      required: [registered, verified, firstMessage]
+      properties:
+        registered:
+          type: integer
+          minimum: 0
+        verified:
+          type: integer
+          minimum: 0
+        firstMessage:
+          type: integer
+          minimum: 0
+          description: User đã gửi ≥1 tin trong khoảng (proxy activation).
     Dashboard:
       type: object
       additionalProperties: false
-      required: [messagesByDay, activeUsers, topGroups]
+      required:
+        - messagesByDay
+        - activeUsers
+        - topGroups
+        - dau
+        - wau
+        - mau
+        - newUsersByDay
+        - verifyFunnel
+        - messagesPerActiveUser
+        - activeMessengersRate
+        - friendRequests
+        - friendAcceptRate
+        - groupsCreated
+        - avgMembersPerGroup
+        - mediaByDay
       properties:
         messagesByDay:
           type: array
@@ -1374,10 +2224,66 @@ components:
         activeUsers:
           type: integer
           minimum: 0
+          description: Số user từng active (lifetime distinct).
         topGroups:
           type: array
           items:
             $ref: "#/components/schemas/GroupCount"
+        dau:
+          type: integer
+          minimum: 0
+        wau:
+          type: integer
+          minimum: 0
+        mau:
+          type: integer
+          minimum: 0
+        newUsersByDay:
+          type: array
+          items:
+            $ref: "#/components/schemas/DayCount"
+        verifyFunnel:
+          $ref: "#/components/schemas/VerifyFunnel"
+        messagesPerActiveUser:
+          type: number
+          minimum: 0
+        activeMessengersRate:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Tỉ lệ user active gửi ≥1 tin trong khoảng.
+        friendRequests:
+          type: integer
+          minimum: 0
+        friendAcceptRate:
+          type: number
+          minimum: 0
+          maximum: 1
+        groupsCreated:
+          type: integer
+          minimum: 0
+        avgMembersPerGroup:
+          type: number
+          minimum: 0
+        mediaByDay:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaDayCount"
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+    AdminUserSummary:
+      type: object
+      additionalProperties: false
+      required: [user, activity]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        activity:
+          $ref: "#/components/schemas/UserActivity"
     CreateGroupRequest:
       type: object
       additionalProperties: false
@@ -1411,7 +2317,7 @@ components:
         role:
           type: string
           description: Role của user hiện tại trong nhóm.
-          enum: [OWNER, ADMIN, MEMBER]
+          enum: [OWNER, MEMBER]
     GroupList:
       type: object
       additionalProperties: false
@@ -1434,7 +2340,7 @@ components:
           format: uuid
         role:
           type: string
-          enum: [ADMIN, MEMBER]
+          enum: [OWNER, MEMBER]
     Member:
       type: object
       additionalProperties: false
@@ -1448,7 +2354,7 @@ components:
           description: Tên hiện trên UI. Không trả email.
         role:
           type: string
-          enum: [OWNER, ADMIN, MEMBER]
+          enum: [OWNER, MEMBER]
     MemberList:
       type: object
       additionalProperties: false
@@ -1465,6 +2371,7 @@ components:
         - $ref: "#/components/schemas/SendImageRequest"
         - $ref: "#/components/schemas/SendVideoRequest"
         - $ref: "#/components/schemas/SendDocumentRequest"
+        - $ref: "#/components/schemas/SendAudioRequest"
       discriminator:
         propertyName: type
         mapping:
@@ -1473,6 +2380,7 @@ components:
           IMAGE: "#/components/schemas/SendImageRequest"
           VIDEO: "#/components/schemas/SendVideoRequest"
           DOCUMENT: "#/components/schemas/SendDocumentRequest"
+          AUDIO: "#/components/schemas/SendAudioRequest"
     SendTextRequest:
       type: object
       additionalProperties: false
@@ -1587,6 +2495,79 @@ components:
         replyTo:
           type: string
           format: uuid
+    SendAudioRequest:
+      type: object
+      additionalProperties: false
+      required: [type, body, clientMsgId, mimeType, size]
+      properties:
+        type:
+          type: string
+          enum: [AUDIO]
+        body:
+          type: string
+          description: URL voice note (từ POST /media/uploads).
+        mimeType:
+          type: string
+          description: Phải bắt đầu bằng `audio/`.
+        size:
+          type: integer
+          minimum: 1
+          maximum: 5242880
+        duration:
+          type: integer
+          minimum: 1
+          description: Độ dài, giây. Không bắt buộc.
+        fileName:
+          type: string
+        clientMsgId:
+          type: string
+          format: uuid
+        replyTo:
+          type: string
+          format: uuid
+    UpdateConversationPrefsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        pinned:
+          type: boolean
+        muted:
+          type: boolean
+        archived:
+          type: boolean
+    NotificationPrefs:
+      type: object
+      additionalProperties: false
+      required: [pushEnabled, previewEnabled]
+      properties:
+        pushEnabled:
+          type: boolean
+        previewEnabled:
+          type: boolean
+    NotificationPrefsPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        pushEnabled:
+          type: boolean
+        previewEnabled:
+          type: boolean
+    ConversationPrefs:
+      type: object
+      additionalProperties: false
+      required: [conversationId, pinned, muted, archived]
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        pinned:
+          type: boolean
+        muted:
+          type: boolean
+        archived:
+          type: boolean
     OpenDirectRequest:
       type: object
       additionalProperties: false
@@ -1662,6 +2643,16 @@ components:
         unreadCount:
           type: integer
           minimum: 0
+        pinned:
+          type: boolean
+          description: Của người gọi.
+        muted:
+          type: boolean
+        archived:
+          type: boolean
+        pendingRequest:
+          type: boolean
+          description: "`true` khi người gọi là người nhận của một tin nhắn chờ chưa accept."
     ConversationList:
       type: object
       additionalProperties: false
@@ -1730,11 +2721,25 @@ components:
       oneOf:
         - $ref: "#/components/schemas/TextMessage"
         - $ref: "#/components/schemas/EmotionMessage"
+        - $ref: "#/components/schemas/AudioMessage"
       discriminator:
         propertyName: type
         mapping:
           TEXT: "#/components/schemas/TextMessage"
           EMOTION: "#/components/schemas/EmotionMessage"
+          AUDIO: "#/components/schemas/AudioMessage"
+    AudioMessage:
+      allOf:
+        - $ref: "#/components/schemas/MessageBase"
+        - type: object
+          required: [type]
+          properties:
+            type:
+              type: string
+              enum: [AUDIO]
+            body:
+              type: string
+              description: URL voice note. Vắng khi status là DELETED.
     TextMessage:
       allOf:
         - $ref: "#/components/schemas/MessageBase"
@@ -1795,6 +2800,16 @@ components:
         createdAt:
           type: string
           format: date-time
+        conversationType:
+          type: string
+          enum: [DIRECT, GROUP]
+          description: Có trên event `messaging.message.created` để analytics tách 1-1 / nhóm.
+        recipientIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Member trừ sender; có trên event `messaging.message.created`.
     ErrorResponse:
       type: object
       additionalProperties: false

@@ -58,6 +58,36 @@ class ProfileServiceTest {
     }
 
     @Test
+    void bioIsStoredKeptAndCleared() throws Exception {
+        ObjectMapper json = new ObjectMapper();
+        ProfileView withBio = service.update(userId, ProfilePatch.from(json.readTree("{\"bio\":\"Xin chao\"}")));
+        assertEquals("Xin chao", withBio.getBio());
+        assertEquals("Xin chao", profiles.find(userId).getBio());
+
+        ProfileView renamed = service.update(userId, ProfilePatch.from(json.readTree("{\"displayName\":\"Anh\"}")));
+        assertEquals("Xin chao", renamed.getBio());
+        assertEquals("Anh", renamed.getDisplayName());
+
+        ProfileView cleared = service.update(userId, ProfilePatch.from(json.readTree("{\"bio\":\"\"}")));
+        assertNull(cleared.getBio());
+        assertEquals("Anh", cleared.getDisplayName());
+    }
+
+    @Test
+    void bioOfTwoHundredEightyCharactersIsAcceptedAndLongerIsRejected() throws Exception {
+        ObjectMapper json = new ObjectMapper();
+        ProfileView max = service.update(userId, ProfilePatch.from(json.readTree("{\"bio\":\"" + "x".repeat(280) + "\"}")));
+        assertEquals(280, max.getBio().length());
+
+        ProfileService.Rejected tooLong = assertThrows(
+            ProfileService.Rejected.class,
+            () -> service.update(userId, ProfilePatch.from(json.readTree("{\"bio\":\"" + "x".repeat(281) + "\"}")))
+        );
+        assertEquals(ProfileService.Rejected.Reason.VALIDATION, tooLong.getReason());
+        assertEquals(280, profiles.find(userId).getBio().length());
+    }
+
+    @Test
     void blankNameAndUnknownUserFail() throws Exception {
         ObjectMapper json = new ObjectMapper();
         ProfileService.Rejected blank = assertThrows(
@@ -94,6 +124,28 @@ class ProfileServiceTest {
         @Override
         public Account findById(String userId) {
             return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void updateBannedAt(String userId, java.time.Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
         }
 
         @Override

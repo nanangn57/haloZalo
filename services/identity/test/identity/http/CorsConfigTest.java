@@ -64,7 +64,7 @@ class CorsConfigTest {
         mvc.perform(post("/auth/login")
                 .header(HttpHeaders.ORIGIN, WEB)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"login\":\"ngoc_anh\",\"password\":\"password1\"}"))
+                .content("{\"login\":\"anh@example.com\",\"password\":\"password1\"}"))
             .andExpect(status().isOk())
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, WEB));
     }

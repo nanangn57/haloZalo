@@ -1,20 +1,25 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate, Link, useSearchParams } from 'react-router-dom'
+import { useNavigate, Link, Navigate, useSearchParams } from 'react-router-dom'
 
 import LoginForm from '../components/auth/LoginForm'
-import { loginApi } from '../../../../core/authService'
-import { saveAuth } from '../../../../core/authSession'
+import { loginApi } from '@core/authService'
+import { hasSession, saveAuth } from '@core/authSession'
 
 function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const verified = searchParams.get('verified') === '1'
+  const resetDone = searchParams.get('reset') === '1'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  if (hasSession()) {
+    return <Navigate to="/chat" replace />
+  }
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -67,12 +72,17 @@ function LoginPage() {
             Email verified. Sign in with your password.
           </p>
         )}
+        {resetDone && (
+          <p className="auth-description" role="status">
+            Password updated. Sign in with your new password.
+          </p>
+        )}
 
         <LoginForm
           email={email}
           password={password}
           error={error}
-          onUsernameChange={setEmail}
+          onEmailChange={setEmail}
           onPasswordChange={setPassword}
           onSubmit={handleLogin}
           isLoading={isLoading}

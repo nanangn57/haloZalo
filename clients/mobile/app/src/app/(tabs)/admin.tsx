@@ -1,23 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
   ScrollView,
+  TextInput,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { getAuth, isPlatformAdmin } from '@core/authSession';
 import {
   getActivityStatsApi,
+  getAdminUserSummaryApi,
   getDashboardStatsApi,
+  rangePreset,
+  type AdminUserSummary,
   type DashboardStats,
+  type DateRange,
 } from '@core/statsService';
 import { getGroupsApi } from '@core/groupService';
+import { banUserApi, unbanUserApi } from '@core/friendService';
+import { findUserApi } from '@core/userService';
 import type { ActivityStats } from '@core/types/stat';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { confirm } from '@/lib/confirm';
 
 function groupLabel(groupId: string, namesById: Record<string, string>): string {
   const named = namesById[groupId]?.trim();
@@ -36,8 +45,14 @@ export default function AdminStatsPage() {
   const [groupNamesById, setGroupNamesById] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<DateRange>(() => rangePreset('7d'));
+  const [preset, setPreset] = useState<'today' | '7d' | '30d' | 'all'>('7d');
+  const [banQuery, setBanQuery] = useState('');
+  const [banBusy, setBanBusy] = useState(false);
+  const [banMessage, setBanMessage] = useState('');
+  const [userSummary, setUserSummary] = useState<AdminUserSummary | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!auth?.accessToken) {
       router.replace('/login');
       return;
@@ -47,9 +62,10 @@ export default function AdminStatsPage() {
       return;
     }
 
+    setLoading(true);
     void Promise.all([
-      getActivityStatsApi(),
-      getDashboardStatsApi(),
+      getActivityStatsApi(range),
+      getDashboardStatsApi(range),
       getGroupsApi().catch(() => []),
     ])
       .then(([totals, board, groups]) => {
@@ -63,12 +79,48 @@ export default function AdminStatsPage() {
           }
         });
         setGroupNamesById(names);
+        setError('');
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load admin stats');
       })
       .finally(() => setLoading(false));
-  }, [auth?.accessToken, router]);
+  }, [auth?.accessToken, range, router]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function runBan(action: 'ban' | 'unban') {
+    const q = banQuery.trim();
+    if (!q) return;
+    setBanBusy(true);
+    setBanMessage('');
+    try {
+      const user = await findUserApi(q);
+      try {
+        setUserSummary(await getAdminUserSummaryApi(user.userId));
+      } catch {
+        setUserSummary(null);
+      }
+      const ok = await confirm(
+        action === 'ban' ? 'Ban user' : 'Unban user',
+        `${action === 'ban' ? 'Ban' : 'Unban'} ${user.displayName || user.username || user.email}?`,
+      );
+      if (!ok) return;
+      if (action === 'ban') {
+        await banUserApi(user.userId);
+        setBanMessage(`Banned ${user.email}`);
+      } else {
+        await unbanUserApi(user.userId);
+        setBanMessage(`Unbanned ${user.email}`);
+      }
+    } catch (err: unknown) {
+      setBanMessage(err instanceof Error ? err.message : 'Ban action failed');
+    } finally {
+      setBanBusy(false);
+    }
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -77,6 +129,81 @@ export default function AdminStatsPage() {
         <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
           Admin-only aggregates across the whole platform.
         </Text>
+        <View style={styles.presetRow}>
+          {([
+            ['today', 'Today'],
+            ['7d', '7d'],
+            ['30d', '30d'],
+            ['all', 'All'],
+          ] as const).map(([key, label]) => (
+            <Pressable
+              key={key}
+              style={[
+                styles.preset,
+                {
+                  backgroundColor: preset === key ? theme.primary : theme.backgroundElement,
+                  borderColor: theme.border,
+                },
+              ]}
+              onPress={() => {
+                setPreset(key);
+                setRange(key === 'all' ? {} : rangePreset(key));
+              }}
+            >
+              <Text
+                style={{
+                  color: preset === key ? '#fff' : theme.text,
+                  fontWeight: '600',
+                  fontSize: 13,
+                }}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <View
+          style={[
+            styles.section,
+            { borderColor: theme.border, backgroundColor: theme.backgroundElement },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>Ban / unban</Text>
+          <TextInput
+            style={[styles.input, { borderColor: theme.border, color: theme.text }]}
+            placeholder="Email or username"
+            placeholderTextColor={theme.textMuted}
+            value={banQuery}
+            onChangeText={setBanQuery}
+            autoCapitalize="none"
+          />
+          <View style={styles.banRow}>
+            <Pressable
+              style={[styles.btn, { backgroundColor: theme.danger, opacity: banBusy ? 0.6 : 1 }]}
+              disabled={banBusy}
+              onPress={() => void runBan('ban')}
+            >
+              <Text style={styles.btnText}>Ban</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.btn, { backgroundColor: theme.primary, opacity: banBusy ? 0.6 : 1 }]}
+              disabled={banBusy}
+              onPress={() => void runBan('unban')}
+            >
+              <Text style={styles.btnText}>Unban</Text>
+            </Pressable>
+          </View>
+          {userSummary ? (
+            <Text style={[styles.muted, { color: theme.textSecondary }]}>
+              Summary — sent {userSummary.activity.messagesSent}, received{' '}
+              {userSummary.activity.messagesReceived}, friends{' '}
+              {userSummary.activity.friends.count}
+            </Text>
+          ) : null}
+          {banMessage ? (
+            <Text style={[styles.muted, { color: theme.textSecondary }]}>{banMessage}</Text>
+          ) : null}
+        </View>
         {loading ? <ActivityIndicator color={theme.primary} /> : null}
         {error ? (
           <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
@@ -100,9 +227,29 @@ export default function AdminStatsPage() {
               },
             ]}
           >
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Active users</Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              DAU / WAU / MAU
+            </Text>
             <Text style={[styles.big, { color: theme.primary }]}>
-              {dashboard.activeUsers}
+              {dashboard.dau} / {dashboard.wau} / {dashboard.mau}
+            </Text>
+            <Text style={[styles.line, { color: theme.textSecondary }]}>
+              Active lifetime {dashboard.activeUsers} · msgs/active{' '}
+              {dashboard.messagesPerActiveUser.toFixed(1)} · messengers{' '}
+              {Math.round(dashboard.activeMessengersRate * 100)}%
+            </Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Funnel</Text>
+            <Text style={[styles.line, { color: theme.textSecondary }]}>
+              Registered {dashboard.verifyFunnel.registered} · verified{' '}
+              {dashboard.verifyFunnel.verified} · first msg{' '}
+              {dashboard.verifyFunnel.firstMessage}
+            </Text>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Social</Text>
+            <Text style={[styles.line, { color: theme.textSecondary }]}>
+              Friend requests {dashboard.friendRequests} · accept{' '}
+              {Math.round(dashboard.friendAcceptRate * 100)}% · groups{' '}
+              {dashboard.groupsCreated} · avg members{' '}
+              {dashboard.avgMembersPerGroup.toFixed(1)}
             </Text>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>
               Messages by day
@@ -116,6 +263,19 @@ export default function AdminStatsPage() {
                   style={[styles.line, { color: theme.textSecondary }]}
                 >
                   {day.day}: {day.total}
+                </Text>
+              ))
+            )}
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Media by day</Text>
+            {dashboard.mediaByDay.length === 0 ? (
+              <Text style={[styles.muted, { color: theme.textMuted }]}>No media yet</Text>
+            ) : (
+              dashboard.mediaByDay.map((day) => (
+                <Text
+                  key={`${day.day}-${day.type}`}
+                  style={[styles.line, { color: theme.textSecondary }]}
+                >
+                  {day.day} {day.type}: {day.total}
                 </Text>
               ))
             )}
@@ -192,4 +352,27 @@ const styles = StyleSheet.create({
   line: { marginBottom: 4 },
   big: { fontSize: 32, fontWeight: '700', marginBottom: 8, letterSpacing: -0.5 },
   muted: { fontSize: 13 },
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: Spacing.three },
+  preset: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  banRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  input: {
+    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  btn: {
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignSelf: 'flex-start',
+  },
+  btnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
 });

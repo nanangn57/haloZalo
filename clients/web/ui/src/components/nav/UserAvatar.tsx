@@ -1,4 +1,5 @@
 import type { User } from '../../types/user'
+import Avatar from '../common/Avatar'
 
 
 interface UserItemProps {
@@ -11,13 +12,7 @@ function UserAvatar({
     return(
         <div>
             {/* Avatar */}
-            <img
-            src={user.avatar}
-            alt={user.name}
-            className="rounded-circle me-2"
-            width="48"
-            height="48"
-            />
+            <Avatar name={user.name} src={user.avatar} size={48} className="me-2" />
         </div>
     )
 }

@@ -26,6 +26,7 @@ import org.springframework.context.annotation.FilterType;
         "media",
         "member",
         "message",
+        "presence",
         "push",
         "reaction",
         "realtime",

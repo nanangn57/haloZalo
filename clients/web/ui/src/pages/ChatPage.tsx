@@ -2,7 +2,11 @@
 import { useLocation, useParams } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 
-import type { Conversation } from '@core/types/conversation'
+import type {
+  Conversation,
+  ConversationPrefsPatch,
+} from '@core/types/conversation'
+import { applyConversationPrefs } from '@core/conversationPrefs'
 import {
   getConversationsApi,
   createDirectConversationApi,
@@ -22,6 +26,8 @@ import ConversationItem from '../components/chat/ConversationItem'
 import ChatHeader from '../components/chat/ChatHeader'
 import ChatMessages from '../components/chat/ChatMessages'
 import MesToolbar from '../components/chat/MesToolBar'
+import MediaGalleryPanel from '../components/chat/MediaGalleryPanel'
+import { useVoiceRecorder } from '../hooks/useVoiceRecorder'
 // import UserInfoPanel from '../components/user/UserPanel'
 
 import {
@@ -29,8 +35,17 @@ import {
   getMessagesApi,
   createGroupConversationApi,
   markConversationReadApi,
+  deleteMessageApi,
+  addReactionApi,
+  removeReactionApi,
+  listReactionsApi,
+  forwardMessageApi,
+  updateConversationPrefsApi,
   type EmotionCode,
+  type MessageReaction,
+  type ReactionCode,
 } from '@core/messageService'
+import { getInitials } from '@core/avatar'
 import { uploadMediaApi, type MediaUploadType } from '@core/mediaService'
 import { getGroupMembersApi, getGroupsApi } from '@core/groupService'
 import { socketClient } from '@core/socketClient'
@@ -43,6 +58,9 @@ import EmojiPicker, {
 // ======================================================
 // TYPES
 // ======================================================
+
+// Loại chọn từ hộp thoại file. AUDIO đi đường ghi âm riêng.
+type FilePickType = Exclude<MediaUploadType, 'AUDIO'>
 
 interface ChatNavigationState {
   conversationId: string
@@ -131,6 +149,15 @@ function ChatPage() {
 
   const [newMessage, setNewMessage] = useState('')
 
+  // Reply / forward / reactions / recall
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null)
+  const [forwardTarget, setForwardTarget] = useState<Message | null>(null)
+  const [forwardingTo, setForwardingTo] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [reactionsByMessage, setReactionsByMessage] = useState<
+    Record<string, MessageReaction[]>
+  >({})
+
   const [showEmojiPicker, setShowEmojiPicker] =
     useState(false)
 
@@ -138,7 +165,9 @@ function ChatPage() {
   const [showSocketDebug, setShowSocketDebug] = useState(false)
   const [uploadingMedia, setUploadingMedia] = useState(false)
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
-  const mediaTypeRef = useRef<MediaUploadType>('IMAGE')
+  const mediaTypeRef = useRef<FilePickType>('IMAGE')
+  const [showGallery, setShowGallery] = useState(false)
+  const voice = useVoiceRecorder()
 
   // Group members
   const [groupMembers, setGroupMembers] =
@@ -456,6 +485,33 @@ function ChatPage() {
 
         setMessages(result.messages)
         setMessageLoadError(null)
+        setReplyTarget(null)
+        setReactionsByMessage({})
+
+        // Reaction không nằm trong trang tin: lấy cho các tin gần nhất.
+        // Endpoint chưa có thì listReactionsApi trả [] nên UI không vỡ.
+        const recent = result.messages
+          .filter(
+            (message) =>
+              message.messageId && !message.deleted && message.type !== 'EMOTION',
+          )
+          .slice(-30)
+        void Promise.all(
+          recent.map((message) =>
+            listReactionsApi(currentConversationId, message.messageId as string)
+              .then((items) => [message.messageId as string, items] as const)
+              .catch(() => null),
+          ),
+        ).then((entries) => {
+          if (!isMounted) return
+          setReactionsByMessage((previous) => {
+            const next = { ...previous }
+            entries.forEach((entry) => {
+              if (entry && entry[1].length > 0) next[entry[0]] = entry[1]
+            })
+            return next
+          })
+        })
 
         const maxSeq = result.messages.reduce(
           (max, message) =>
@@ -584,6 +640,49 @@ function ChatPage() {
         return
       }
 
+      if (event.type === 'messaging.message.deleted') {
+        const payload = event.payload as { messageId?: string }
+        if (!payload.messageId) return
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.messageId === payload.messageId
+              ? { ...message, content: '', deleted: true }
+              : message,
+          ),
+        )
+        return
+      }
+
+      if (
+        event.type === 'messaging.reaction.added' ||
+        event.type === 'messaging.reaction.removed'
+      ) {
+        const payload = event.payload as {
+          messageId?: string
+          userId?: string
+          code?: ReactionCode
+        }
+        if (!payload.messageId || !payload.userId || !payload.code) return
+        const { messageId, userId, code } = payload
+        setReactionsByMessage((previous) => {
+          const current = previous[messageId] ?? []
+          const without = current.filter(
+            (item) => !(item.userId === userId && item.code === code),
+          )
+          if (event.type === 'messaging.reaction.removed') {
+            return { ...previous, [messageId]: without }
+          }
+          return {
+            ...previous,
+            [messageId]: [
+              ...without,
+              { userId, code, createdAt: event.occurredAt },
+            ],
+          }
+        })
+        return
+      }
+
       if (event.type !== 'messaging.message.created') {
         return
       }
@@ -597,6 +696,8 @@ function ChatPage() {
         body: string
         clientMsgId: string
         createdAt: string
+        replyTo?: string
+        forwardedFrom?: string
       }
 
       if (
@@ -622,6 +723,8 @@ function ChatPage() {
           ? Math.floor(createdAt / 1000)
           : Math.floor(Date.now() / 1000),
         status: 'sent',
+        replyTo: payload.replyTo,
+        forwardedFrom: payload.forwardedFrom,
       })
 
       if (
@@ -703,7 +806,7 @@ function ChatPage() {
 
   // First letter of the name, shown instead of an avatar (no avatar yet).
   function initialsOf(name: string): string {
-    return name.trim().charAt(0).toUpperCase()
+    return getInitials(name, 1)
   }
 
   function memberDisplayNames(
@@ -909,6 +1012,7 @@ function ChatPage() {
       selectedConversation.conversationId
 
     const clientMsgId = crypto.randomUUID()
+    const replyToId = replyTarget?.messageId
 
     // Optimistic message.
     const optimisticMessage: Message = {
@@ -918,6 +1022,7 @@ function ChatPage() {
       type: 'TEXT',
       content,
       clientMsgId,
+      replyTo: replyToId,
       sentAt: Math.floor(Date.now() / 1000),
       status: 'sending',
     }
@@ -928,6 +1033,7 @@ function ChatPage() {
     ])
 
     setNewMessage('')
+    setReplyTarget(null)
     setShowEmojiPicker(false)
     lastTypingSentRef.current = false
     socketClient.sendTyping(conversationId, false)
@@ -939,6 +1045,7 @@ function ChatPage() {
           type: 'TEXT',
           body: content,
           clientMsgId,
+          ...(replyToId ? { replyTo: replyToId } : {}),
         },
       )
 
@@ -988,7 +1095,114 @@ function ChatPage() {
     }
   }
 
-  function pickMedia(type: MediaUploadType) {
+  // --------------------------------------------------
+  // MESSAGE ACTIONS: recall / react / reply / forward
+  // --------------------------------------------------
+
+  async function handleRecall(message: Message) {
+    if (!message.messageId || message.senderId !== currentUserId) return
+    if (!window.confirm('Recall this message for everyone?')) return
+
+    setActionError(null)
+    try {
+      await deleteMessageApi(message.conversationId, message.messageId)
+      setMessages((previous) =>
+        previous.map((item) =>
+          item.messageId === message.messageId
+            ? { ...item, content: '', deleted: true }
+            : item,
+        ),
+      )
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'Cannot recall message.',
+      )
+    }
+  }
+
+  async function handleToggleReaction(message: Message, code: ReactionCode) {
+    const messageId = message.messageId
+    if (!messageId) return
+
+    const mine = (reactionsByMessage[messageId] ?? []).some(
+      (item) => item.userId === currentUserId && item.code === code,
+    )
+
+    // Optimistic update, rollback on failure.
+    const apply = (adding: boolean) =>
+      setReactionsByMessage((previous) => {
+        const current = previous[messageId] ?? []
+        const without = current.filter(
+          (item) => !(item.userId === currentUserId && item.code === code),
+        )
+        return {
+          ...previous,
+          [messageId]: adding
+            ? [
+                ...without,
+                {
+                  userId: currentUserId,
+                  code,
+                  createdAt: new Date().toISOString(),
+                },
+              ]
+            : without,
+        }
+      })
+
+    setActionError(null)
+    apply(!mine)
+    try {
+      if (mine) {
+        await removeReactionApi(message.conversationId, messageId, code)
+      } else {
+        await addReactionApi(message.conversationId, messageId, code)
+      }
+    } catch (err) {
+      apply(mine)
+      setActionError(
+        err instanceof Error ? err.message : 'Cannot update reaction.',
+      )
+    }
+  }
+
+  async function handleForwardTo(target: Conversation) {
+    const source = forwardTarget
+    if (!source?.messageId) return
+
+    setForwardingTo(target.conversationId)
+    setActionError(null)
+    try {
+      if (target.type === 'GROUP') {
+        await createGroupConversationApi(target.conversationId)
+      }
+      const saved = await forwardMessageApi(target.conversationId, {
+        messageId: source.messageId,
+        clientMsgId: crypto.randomUUID(),
+      })
+      if (target.conversationId === selectedConversation?.conversationId) {
+        setMessages((previous) =>
+          previous.some((item) => item.messageId === saved.messageId)
+            ? previous
+            : [...previous, saved],
+        )
+      }
+      setForwardTarget(null)
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'Cannot forward message.',
+      )
+    } finally {
+      setForwardingTo(null)
+    }
+  }
+
+  function senderNameOf(userId: string): string {
+    const user = usersById[userId]
+    return user ? displayName(user) : 'User'
+  }
+
+  function pickMedia(type: FilePickType) {
     mediaTypeRef.current = type
     mediaInputRef.current?.click()
   }
@@ -1030,6 +1244,72 @@ function ChatPage() {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploadingMedia(false)
+    }
+  }
+
+  // Voice note: giữ nút mic để ghi, nhả ra thì upload AUDIO rồi gửi tin AUDIO.
+  async function handleVoiceStop() {
+    const conversationId = selectedConversation?.conversationId
+    const clip = await voice.stop()
+    if (!clip || !conversationId) return
+
+    setActionError(null)
+    setUploadingMedia(true)
+    try {
+      const uploaded = await uploadMediaApi(clip.blob, 'AUDIO', {
+        fileName: clip.fileName,
+        conversationId,
+      })
+      const saved = await sendMessageApi(conversationId, {
+        type: 'AUDIO',
+        body: uploaded.url,
+        clientMsgId: crypto.randomUUID(),
+        mimeType: uploaded.contentType || clip.mimeType,
+        size: uploaded.size,
+        duration: clip.durationSec,
+        fileName: uploaded.fileName,
+      })
+      setMessages((previous) => [...previous, saved])
+    } catch (err) {
+      console.error('Cannot send voice message:', err)
+      setActionError(
+        err instanceof Error ? err.message : 'Cannot send voice message.',
+      )
+    } finally {
+      setUploadingMedia(false)
+    }
+  }
+
+  // Pin / mute / archive từ menu của hội thoại. Server chưa hỗ trợ thì giữ nguyên.
+  async function handleUpdatePrefs(
+    conversation: Conversation,
+    patch: ConversationPrefsPatch,
+  ) {
+    setActionError(null)
+    try {
+      const ok = await updateConversationPrefsApi(
+        conversation.conversationId,
+        patch,
+      )
+      if (!ok) {
+        setActionError('Server does not support conversation preferences yet.')
+        return
+      }
+      setConversations((previous) =>
+        applyConversationPrefs(previous, conversation.conversationId, patch),
+      )
+      if (
+        patch.archived &&
+        selectedConversationRef.current?.conversationId ===
+          conversation.conversationId
+      ) {
+        setSelectedConversation(null)
+        setMessages([])
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'Cannot update conversation.',
+      )
     }
   }
 
@@ -1261,8 +1541,11 @@ function ChatPage() {
             {!isLoading &&
               !error &&
               conversations.length === 0 && (
-                <div className="p-3 text-muted small">
-                  No conversations found.
+                <div className="p-3 app-empty-state">
+                  <p className="mb-2 fw-semibold">Chưa có hội thoại</p>
+                  <p className="mb-0 small text-muted">
+                    Tìm bạn bằng email ở Contacts, hoặc tạo nhóm để bắt đầu chat.
+                  </p>
                 </div>
               )}
 
@@ -1279,11 +1562,15 @@ function ChatPage() {
                     title={displayInfo.title}
                     avatar={displayInfo.avatar}
                     initials={displayInfo.initials}
+                    currentUserId={currentUserId}
                     active={
                       selectedConversation?.conversationId ===
                       conversation.conversationId
                     }
                     onClick={handleSelectConversation}
+                    onUpdatePrefs={(target, patch) =>
+                      void handleUpdatePrefs(target, patch)
+                    }
                   />
                 )
               })}
@@ -1315,6 +1602,9 @@ function ChatPage() {
                 : headerUser
                   ? initialsOf(headerUser.name)
                   : '?'
+            }
+            onMediaClick={
+              selectedConversation ? () => setShowGallery(true) : undefined
             }
           />
           <button
@@ -1357,6 +1647,14 @@ function ChatPage() {
             <ChatMessages
               messages={visibleMessages}
               currentUserId={currentUserId}
+              reactions={reactionsByMessage}
+              getSenderName={senderNameOf}
+              onReply={setReplyTarget}
+              onForward={setForwardTarget}
+              onRecall={(message) => void handleRecall(message)}
+              onToggleReaction={(message, code) =>
+                void handleToggleReaction(message, code)
+              }
             />
           )
         ) : (
@@ -1372,6 +1670,38 @@ function ChatPage() {
           className="chat-composer flex-shrink-0 position-relative"
           onSubmit={handleSendMessage}
         >
+          {actionError ? (
+            <div className="text-danger small px-3 pt-2" role="alert">
+              {actionError}
+            </div>
+          ) : null}
+
+          {replyTarget ? (
+            <div className="chat-reply-banner">
+              <div className="chat-reply-banner-copy">
+                <strong>
+                  Replying to{' '}
+                  {replyTarget.senderId === currentUserId
+                    ? 'yourself'
+                    : senderNameOf(replyTarget.senderId)}
+                </strong>
+                <span>
+                  {replyTarget.type === 'TEXT'
+                    ? replyTarget.content
+                    : `[${replyTarget.type.toLowerCase()}]`}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="app-icon-button"
+                aria-label="Cancel reply"
+                onClick={() => setReplyTarget(null)}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+
           <MesToolbar
             disabled={!selectedConversation || uploadingMedia}
             emojiOpen={showEmojiPicker}
@@ -1387,7 +1717,22 @@ function ChatPage() {
             onImageClick={() => pickMedia('IMAGE')}
             onFileClick={() => pickMedia('DOCUMENT')}
             onVideoClick={() => pickMedia('VIDEO')}
+            recording={voice.status === 'recording'}
+            onVoiceStart={() => void voice.start()}
+            onVoiceStop={() => void handleVoiceStop()}
           />
+
+          {voice.status === 'recording' ? (
+            <div className="text-danger small px-3 pt-1" role="status">
+              <i className="bi bi-record-circle" aria-hidden="true" /> Recording…
+              release to send
+            </div>
+          ) : null}
+          {voice.error ? (
+            <div className="text-danger small px-3 pt-1" role="alert">
+              {voice.error}
+            </div>
+          ) : null}
 
           <input
             ref={mediaInputRef}
@@ -1537,6 +1882,82 @@ function ChatPage() {
           </div>
         ) : null}
       </main>
+
+      {showGallery && selectedConversation ? (
+        <MediaGalleryPanel
+          messages={visibleMessages}
+          getSenderName={senderNameOf}
+          onClose={() => setShowGallery(false)}
+        />
+      ) : null}
+
+      {forwardTarget ? (
+        <div
+          className="app-modal-backdrop"
+          role="presentation"
+          onClick={() => setForwardTarget(null)}
+        >
+          <div
+            className="app-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forward-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="app-modal-header">
+              <h2 id="forward-dialog-title">Forward to…</h2>
+              <button
+                type="button"
+                className="app-icon-button"
+                aria-label="Close"
+                onClick={() => setForwardTarget(null)}
+              >
+                <i className="bi bi-x-lg" aria-hidden="true" />
+              </button>
+            </div>
+
+            {conversations.length === 0 ? (
+              <p className="text-muted">No conversations to forward to.</p>
+            ) : (
+              <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                {conversations.map((conversation) => {
+                  const info = getConversationDisplayInfo(conversation)
+                  return (
+                    <button
+                      key={conversation.conversationId}
+                      type="button"
+                      className="conversation-item"
+                      disabled={forwardingTo !== null}
+                      onClick={() => void handleForwardTo(conversation)}
+                    >
+                      <span
+                        className={`conversation-avatar ${
+                          conversation.type === 'GROUP' ? 'is-group' : 'is-direct'
+                        }`}
+                        aria-hidden="true"
+                      >
+                        {info.initials}
+                      </span>
+                      <span className="conversation-copy">
+                        <span className="conversation-title">{info.title}</span>
+                      </span>
+                      {forwardingTo === conversation.conversationId ? (
+                        <span className="small text-muted">Sending…</span>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {actionError ? (
+              <div className="auth-alert auth-alert-error mt-3" role="alert">
+                {actionError}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {/* ============================================ */}
       {/* RIGHT USER INFO PANEL */}

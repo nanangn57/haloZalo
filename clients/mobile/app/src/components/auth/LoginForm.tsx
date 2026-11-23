@@ -7,7 +7,7 @@ type LoginFormProps = {
   email: string;
   password: string;
   error: string;
-  onUsernameChange: (value: string) => void;
+  onEmailChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
@@ -17,7 +17,7 @@ export default function LoginForm({
   email,
   password,
   error,
-  onUsernameChange,
+  onEmailChange,
   onPasswordChange,
   onSubmit,
   isLoading,
@@ -27,7 +27,7 @@ export default function LoginForm({
   return (
     <View style={styles.formContainer}>
       <View style={styles.inputGroup}>
-        <Text style={[styles.label, { color: theme.text }]}>Email or username</Text>
+        <Text style={[styles.label, { color: theme.text }]}>Email</Text>
         <TextInput
           style={[
             styles.input,
@@ -40,7 +40,7 @@ export default function LoginForm({
           placeholder="you@example.com"
           placeholderTextColor={theme.textMuted}
           value={email}
-          onChangeText={onUsernameChange}
+          onChangeText={onEmailChange}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -68,6 +68,8 @@ export default function LoginForm({
         <Text style={[styles.errorText, { color: theme.danger }]}>{error}</Text>
       ) : null}
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Sign in"
         style={[
           styles.button,
           { backgroundColor: theme.primary },

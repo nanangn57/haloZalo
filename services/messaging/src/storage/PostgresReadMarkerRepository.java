@@ -53,11 +53,12 @@ public final class PostgresReadMarkerRepository implements ReadMarkerRepository 
         args.add(Sql.uuid(userId));
         args.add(Sql.uuid(userId));
         conversationIds.forEach(id -> args.add(Sql.uuid(id)));
+        // A SYSTEM message has no sender and is a notice, not something to catch up on: it is never unread.
         // Each count walks the (conversation_id, seq) index from the marker onwards.
         jdbc.query(
             "SELECT c.id::text AS id, COALESCE(r.last_read_seq, 0) AS last_read, "
                 + "(SELECT count(*) FROM messages m WHERE m.conversation_id = c.id "
-                + "AND m.seq > COALESCE(r.last_read_seq, 0) AND m.sender_id <> ? AND m.status <> 'DELETED') AS unread "
+                + "AND m.seq > COALESCE(r.last_read_seq, 0) AND m.sender_id <> ? AND m.type <> 'SYSTEM' AND m.status <> 'DELETED') AS unread "
                 + "FROM conversations c LEFT JOIN read_markers r ON r.conversation_id = c.id AND r.user_id = ? "
                 + "WHERE c.id IN (" + String.join(", ", Collections.nCopies(conversationIds.size(), "?")) + ")",
             row -> {

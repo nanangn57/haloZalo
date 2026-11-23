@@ -19,7 +19,7 @@ export interface EventEnvelope<TPayload = unknown> {
 /**
  * Message types defined by the current API contract.
  */
-export type ApiMessageType = 'TEXT' | 'EMOTION'
+export type ApiMessageType = 'TEXT' | 'EMOTION' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO'
 
 /**
  * messaging.message.created
@@ -35,6 +35,8 @@ export interface MessageCreatedPayload {
   body: string
   clientMsgId: string
   createdAt: string
+  replyTo?: string
+  forwardedFrom?: string
 }
 
 export type MessageCreatedEvent =

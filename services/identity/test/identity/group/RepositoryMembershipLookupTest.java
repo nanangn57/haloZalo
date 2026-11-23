@@ -64,6 +64,11 @@ class RepositoryMembershipLookupTest {
         }
 
         @Override
+        public void deleteByGroup(String groupId) {
+            rows.removeIf(row -> row.getGroupId().equals(groupId));
+        }
+
+        @Override
         public Membership find(String groupId, String userId) {
             return rows.stream()
                 .filter(row -> row.getGroupId().equals(groupId) && row.getUserId().equals(userId))

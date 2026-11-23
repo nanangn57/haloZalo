@@ -16,5 +16,7 @@ export function mapEventToMessage(
       new Date(payload.createdAt).getTime() / 1000
     ),
     status: 'sent',
+    replyTo: payload.replyTo,
+    forwardedFrom: payload.forwardedFrom,
   }
 }

@@ -1,14 +1,14 @@
 import type { FormEvent } from 'react'
 
 interface RegisterFormProps {
-  username: string
+  displayName: string
   email: string
   password: string
   confirmPassword: string
   error: string
   message: string
   isLoading: boolean
-  onUsernameChange: (value: string) => void
+  onDisplayNameChange: (value: string) => void
   onEmailChange: (value: string) => void
   onPasswordChange: (value: string) => void
   onConfirmPasswordChange: (value: string) => void
@@ -16,14 +16,14 @@ interface RegisterFormProps {
 }
 
 function RegisterForm({
-  username,
+  displayName,
   email,
   password,
   confirmPassword,
   error,
   message,
   isLoading,
-  onUsernameChange,
+  onDisplayNameChange,
   onEmailChange,
   onPasswordChange,
   onConfirmPasswordChange,
@@ -31,26 +31,6 @@ function RegisterForm({
 }: RegisterFormProps) {
   return (
     <form className="auth-form" method="post" onSubmit={onSubmit}>
-      <div>
-        <label htmlFor="username" className="app-form-label">
-          Username
-        </label>
-        <input
-          id="username"
-          className="app-input"
-          value={username}
-          onChange={(e) => onUsernameChange(e.target.value)}
-          minLength={3}
-          maxLength={32}
-          pattern="[a-zA-Z0-9_]+"
-          autoComplete="username"
-          required
-        />
-        <p className="auth-hint">
-          3–32 characters: letters, numbers, and underscore only.
-        </p>
-      </div>
-
       <div>
         <label htmlFor="email" className="app-form-label">
           Email
@@ -65,6 +45,23 @@ function RegisterForm({
           autoComplete="email"
           required
         />
+      </div>
+
+      <div>
+        <label htmlFor="displayName" className="app-form-label">
+          Display name
+        </label>
+        <input
+          id="displayName"
+          className="app-input"
+          value={displayName}
+          onChange={(e) => onDisplayNameChange(e.target.value)}
+          minLength={1}
+          maxLength={64}
+          autoComplete="name"
+          required
+        />
+        <p className="auth-hint">Name your friends will see (1–64 characters).</p>
       </div>
 
       <div>

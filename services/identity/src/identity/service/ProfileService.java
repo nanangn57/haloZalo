@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 public final class ProfileService {
     private static final int NAME_MAX = 64;
     private static final int AVATAR_MAX = 2048;
+    private static final int BIO_MAX = 280;
 
     private final AccountRepository accounts;
     private final ProfileRepository profiles;
@@ -30,19 +31,23 @@ public final class ProfileService {
 
     public ProfileView update(String userId, ProfilePatch patch) {
         Account account = requireAccount(userId);
-        if (patch == null || (!patch.hasDisplayName() && !patch.hasAvatar())) {
+        if (patch == null || (!patch.hasDisplayName() && !patch.hasAvatar() && !patch.hasBio())) {
             throw new Rejected(Rejected.Reason.VALIDATION, "Nothing to update");
         }
         Profile current = profiles.find(account.getUserId());
         String displayName = current == null ? null : current.getDisplayName();
         String avatar = current == null ? null : current.getAvatar();
+        String bio = current == null ? null : current.getBio();
         if (patch.hasDisplayName()) {
             displayName = name(patch.getDisplayName());
         }
         if (patch.hasAvatar()) {
             avatar = avatar(patch.getAvatar());
         }
-        Profile saved = new Profile(account.getUserId(), displayName, avatar);
+        if (patch.hasBio()) {
+            bio = bio(patch.getBio());
+        }
+        Profile saved = new Profile(account.getUserId(), displayName, avatar, bio);
         profiles.save(saved);
         return view(account, saved);
     }
@@ -72,6 +77,16 @@ public final class ProfileService {
         return value;
     }
 
+    private static String bio(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (value.length() > BIO_MAX) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid bio");
+        }
+        return value;
+    }
+
     private static ProfileView view(Account account, Profile profile) {
         return new ProfileView(
             account.getUserId(),
@@ -79,7 +94,8 @@ public final class ProfileService {
             account.getEmail(),
             account.getPlatformRole(),
             profile == null ? null : profile.getDisplayName(),
-            profile == null ? null : profile.getAvatar()
+            profile == null ? null : profile.getAvatar(),
+            profile == null ? null : profile.getBio()
         );
     }
 

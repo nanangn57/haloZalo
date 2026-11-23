@@ -4,14 +4,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 public final class GroupRolePolicyRegistry implements RolePolicyRegistry {
-    private final RolePolicyRegistry members = new OwnerMemberPolicyRegistry();
-    private final RolePolicy admin = new AdminPolicy();
+    private final RolePolicyRegistry roles = new OwnerMemberPolicyRegistry();
 
     @Override
     public RolePolicy getPolicy(Role role) {
-        if (role == Role.ADMIN) {
-            return admin;
-        }
-        return members.getPolicy(role);
+        return roles.getPolicy(role);
     }
 }

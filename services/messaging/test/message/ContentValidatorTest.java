@@ -36,4 +36,19 @@ class ContentValidatorTest {
         assertNotNull(ContentValidator.problem(new MessageContent.Document("https://cdn/a.pdf", "a.pdf", "application/pdf",
             ContentValidator.DOCUMENT_MAX_BYTES + 1)));
     }
+
+    @Test
+    void audioNeedsAnAudioMimeTypeAndAtMost5MB() {
+        assertNull(ContentValidator.problem(new MessageContent.Audio("https://cdn/v.m4a", "audio/mp4", 1, null, null)));
+        assertNull(ContentValidator.problem(new MessageContent.Audio(
+            "https://cdn/v.m4a", "Audio/MP4", ContentValidator.AUDIO_MAX_BYTES, 12, "v.m4a")));
+        assertNotNull(ContentValidator.problem(new MessageContent.Audio(" ", "audio/mp4", 10, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Audio("https://cdn/v.m4a", null, 10, null, null)));
+        assertEquals("Audio mimeType must be audio/*",
+            ContentValidator.problem(new MessageContent.Audio("https://cdn/v.pdf", "application/pdf", 10, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Audio("https://cdn/v.m4a", "audio/mp4", 0, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Audio(
+            "https://cdn/v.m4a", "audio/mp4", ContentValidator.AUDIO_MAX_BYTES + 1, null, null)));
+        assertNotNull(ContentValidator.problem(new MessageContent.Audio("https://cdn/v.m4a", "audio/mp4", 10, 0, null)));
+    }
 }

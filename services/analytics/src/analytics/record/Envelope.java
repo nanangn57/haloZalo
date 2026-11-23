@@ -1,6 +1,8 @@
 package analytics.record;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -56,6 +58,34 @@ final class Envelope {
             return null;
         }
         return text(payload, name);
+    }
+
+    Integer intField(String name) {
+        if (payload == null || !payload.isObject()) {
+            return null;
+        }
+        JsonNode value = payload.get(name);
+        if (value == null || value.isNull() || !value.isNumber()) {
+            return null;
+        }
+        return value.intValue();
+    }
+
+    List<String> stringList(String name) {
+        if (payload == null || !payload.isObject()) {
+            return List.of();
+        }
+        JsonNode value = payload.get(name);
+        if (value == null || !value.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : value) {
+            if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                values.add(item.asText());
+            }
+        }
+        return values;
     }
 
     private static String text(JsonNode node, String field) {

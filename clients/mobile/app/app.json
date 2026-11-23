@@ -33,6 +33,12 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow haloZalo to record voice messages."
+        }
       ]
     ],
     "experiments": {

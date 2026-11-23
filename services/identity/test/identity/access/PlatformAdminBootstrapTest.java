@@ -68,6 +68,28 @@ class PlatformAdminBootstrapTest {
         }
 
         @Override
+        public void updateBannedAt(String userId, java.time.Instant bannedAt) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withBannedAt(bannedAt));
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public void updatePasswordHash(String userId, String passwordHash) {
+            for (int i = 0; i < rows.size(); i++) {
+                Account current = rows.get(i);
+                if (current.getUserId().equals(userId)) {
+                    rows.set(i, current.withPasswordHash(passwordHash));
+                    return;
+                }
+            }
+        }
+
+        @Override
         public void updatePlatformRole(String userId, PlatformRole role) {
             for (int i = 0; i < rows.size(); i++) {
                 Account current = rows.get(i);

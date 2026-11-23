@@ -15,7 +15,7 @@ function MainLayout({ children }: MainLayoutProps) {
   const currentUser: User = {
     id: authUser?.userId ?? '',
     name: authUser?.displayName || authUser?.username || 'User',
-    avatar: 'https://i.pravatar.cc/150?img=10',
+    avatar: authUser?.avatar ?? '',
     online: true,
     lastSeen: 0,
     unread: 0,
@@ -25,7 +25,10 @@ function MainLayout({ children }: MainLayoutProps) {
     <div className="d-flex vh-100 overflow-hidden">
       <NavBar currentUser={currentUser} />
 
-      <div className="flex-grow-1 overflow-hidden" style={{ minWidth: 0 }}>
+      <div
+        className="flex-grow-1 overflow-hidden d-flex flex-column"
+        style={{ minWidth: 0, minHeight: 0 }}
+      >
         {children}
       </div>
     </div>

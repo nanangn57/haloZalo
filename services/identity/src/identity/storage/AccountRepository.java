@@ -3,6 +3,7 @@ package identity.storage;
 import identity.account.Account;
 import identity.account.PlatformRole;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +31,13 @@ public interface AccountRepository {
     Account findById(String userId);
 
     void updatePlatformRole(String userId, PlatformRole role);
+
+    /**
+     * Sets or clears the ban mark. Pass {@code null} to lift the ban.
+     */
+    void updateBannedAt(String userId, Instant bannedAt);
+
+    void updatePasswordHash(String userId, String passwordHash);
 
     /**
      * Accounts for these ids, in the order given. Ids without an account are left out.

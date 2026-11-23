@@ -56,6 +56,20 @@ public final class PostgresMembershipRepository implements MembershipRepository 
         }
     }
     @Override
+    public void deleteByGroup(String groupId) {
+        String sql = "DELETE FROM identity.memberships WHERE group_id = ?";
+        Connection connection = DataSourceUtils.getConnection(dataSource);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, groupId);
+            statement.executeUpdate();
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not delete group memberships", ex);
+        } finally {
+            DataSourceUtils.releaseConnection(connection, dataSource);
+        }
+    }
+
+    @Override
     public Membership find(String groupId, String userId) {
         String sql = "SELECT group_id, user_id, joined_at, role FROM identity.memberships WHERE group_id = ? AND user_id = ?";
         try (Connection connection = dataSource.getConnection();
@@ -111,14 +125,16 @@ public final class PostgresMembershipRepository implements MembershipRepository 
     @Override
     public void updateRole(String groupId, String userId, Role role) {
         String sql = "UPDATE identity.memberships SET role = ? WHERE group_id = ? AND user_id = ?";
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
+        Connection connection = DataSourceUtils.getConnection(dataSource);
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, role.name());
             statement.setString(2, groupId);
             statement.setString(3, userId);
             statement.executeUpdate();
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not update membership role", ex);
+        } finally {
+            DataSourceUtils.releaseConnection(connection, dataSource);
         }
     }
 
@@ -127,7 +143,12 @@ public final class PostgresMembershipRepository implements MembershipRepository 
             rows.getString("group_id"),
             rows.getString("user_id"),
             rows.getObject("joined_at", OffsetDateTime.class).toInstant(),
-            Role.valueOf(rows.getString("role"))
+            role(rows.getString("role"))
         );
+    }
+
+    /** Groups only have OWNER and MEMBER. A leftover ADMIN row from before counts as MEMBER. */
+    private static Role role(String stored) {
+        return "OWNER".equals(stored) ? Role.OWNER : Role.MEMBER;
     }
 }

@@ -18,6 +18,25 @@ USER_A = os.environ.get("HALOZALO_USER_A", "ngoc_anh")
 USER_B = os.environ.get("HALOZALO_USER_B", "huy")
 PASSWORD = os.environ.get("HALOZALO_PASSWORD", "password1")
 
+# Seed usernames → email (login chỉ nhận email).
+_LOGIN_EMAIL = {
+    "ngoc_anh": "anh@example.com",
+    "huy": "huy@example.com",
+}
+
+
+def login_email(login: str) -> str:
+    if "@" in login:
+        return login
+    return _LOGIN_EMAIL.get(login, f"{login}@example.com")
+
+
+def device_id(suffix: str = "e2e") -> str:
+    """deviceId bền theo process+suffix — khớp pattern Identity."""
+    return f"e2e-{suffix}-" + uuid.uuid4().hex[:16]
+
+
+
 
 @dataclass
 class Check:
@@ -110,11 +129,24 @@ def req(
             return err.code, {"raw": text}
 
 
-def login(username: str = USER_A, password: str = PASSWORD) -> tuple[str, dict[str, Any]]:
-    status, body = req("POST", "/auth/login", body={"login": username, "password": password})
+def login(
+    username: str = USER_A,
+    password: str = PASSWORD,
+    *,
+    device: str | None = None,
+    device_label: str = "e2e",
+) -> tuple[str, dict[str, Any]]:
+    email = login_email(username)
+    body = {
+        "login": email,
+        "password": password,
+        "deviceId": device or device_id(email.split("@")[0]),
+        "deviceLabel": device_label,
+    }
+    status, resp = req("POST", "/auth/login", body=body)
     if status != 200:
-        raise RuntimeError(f"login failed for {username}: {status} {body}")
-    return body["accessToken"], body["user"]
+        raise RuntimeError(f"login failed for {email}: {status} {resp}")
+    return resp["accessToken"], resp["user"]
 
 
 def ws_url(token: str) -> str:

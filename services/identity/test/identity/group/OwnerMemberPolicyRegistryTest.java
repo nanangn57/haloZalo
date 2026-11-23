@@ -11,11 +11,14 @@ class OwnerMemberPolicyRegistryTest {
     private final OwnerMemberPolicyRegistry registry = new OwnerMemberPolicyRegistry();
 
     @Test
-    void ownerMayAddAndRemoveButNotLeave() {
+    void ownerMayManageGroupButNotLeave() {
         RolePolicy policy = registry.getPolicy(Role.OWNER);
 
         assertTrue(policy.alows(GroupAction.ADD_MEMBER));
         assertTrue(policy.alows(GroupAction.REMOVE_MEMBER));
+        assertTrue(policy.alows(GroupAction.TRANSFER_OWNER));
+        assertTrue(policy.alows(GroupAction.DISSOLVE));
+        assertTrue(policy.alows(GroupAction.UPDATE_GROUP));
         assertFalse(policy.alows(GroupAction.LEAVE));
         assertSame(policy, registry.getPolicy(Role.OWNER));
     }
@@ -27,6 +30,17 @@ class OwnerMemberPolicyRegistryTest {
         assertTrue(policy.alows(GroupAction.LEAVE));
         assertFalse(policy.alows(GroupAction.ADD_MEMBER));
         assertFalse(policy.alows(GroupAction.REMOVE_MEMBER));
+        assertFalse(policy.alows(GroupAction.TRANSFER_OWNER));
+        assertFalse(policy.alows(GroupAction.DISSOLVE));
+        assertFalse(policy.alows(GroupAction.UPDATE_GROUP));
+    }
+
+    @Test
+    void groupRegistryServesTheSameTwoRoles() {
+        GroupRolePolicyRegistry groupRegistry = new GroupRolePolicyRegistry();
+
+        assertTrue(groupRegistry.getPolicy(Role.OWNER).alows(GroupAction.DISSOLVE));
+        assertTrue(groupRegistry.getPolicy(Role.MEMBER).alows(GroupAction.LEAVE));
     }
 
     @Test

@@ -1,0 +1,60 @@
+.conversation-row {
+  position: relative;
+}
+
+.conversation-more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--app-text-muted);
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+
+.conversation-row:hover .conversation-more,
+.conversation-more:focus-visible,
+.conversation-more[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.conversation-more:hover {
+  background: var(--app-surface-secondary);
+}
+
+.conversation-menu {
+  position: absolute;
+  z-index: 30;
+  top: 34px;
+  right: 8px;
+  min-width: 160px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: var(--app-bg);
+  box-shadow: var(--app-shadow);
+}
+
+.conversation-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-text);
+  text-align: left;
+  font-size: 14px;
+}
+
+.conversation-menu-item:hover,
+.conversation-menu-item:focus-visible {
+  background: var(--app-surface-hover);
+}
