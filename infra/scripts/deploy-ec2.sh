@@ -27,8 +27,13 @@ if [[ "$ALLOW_DIRTY" != "1" ]]; then
   fi
 fi
 
+# Match @{upstream} when set. Deploy host must not keep hand edits to tracked
+# files (nginx templates, compose, …) — those broke CD ff-merge repeatedly.
+# Untracked infra/.env is preserved by reset --hard.
 if git -C "$ROOT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-  git -C "$ROOT_DIR" pull --ff-only || true
+  upstream="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}')"
+  git -C "$ROOT_DIR" fetch --prune origin || true
+  git -C "$ROOT_DIR" reset --hard "$upstream" || true
 fi
 
 set -a
