@@ -181,8 +181,13 @@ function loadExpoFileSystem(): ExpoLegacyFileSystem | null {
     return null
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('expo-file-system/legacy') as ExpoLegacyFileSystem
+    // Web `tsc` has no Node `require`; RN provides it on globalThis.
+    const requireFn = (globalThis as { require?: (moduleId: string) => unknown })
+      .require
+    if (typeof requireFn !== 'function') {
+      return null
+    }
+    return requireFn('expo-file-system/legacy') as ExpoLegacyFileSystem
   } catch {
     return null
   }
@@ -193,7 +198,6 @@ async function uploadNativeWithFileSystem(
   uploadUrl: string,
   headers: Record<string, string>,
   type: MediaUploadType,
-  fileName: string,
   contentType: string,
   conversationId: string | undefined,
   onProgress?: (ratio: number) => void,
@@ -327,7 +331,6 @@ export async function uploadMediaApi(
         uploadUrl,
         headers,
         type,
-        fileName,
         mime,
         options?.conversationId,
         options?.onProgress,
