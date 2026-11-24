@@ -1,0 +1,154 @@
+name: Deploy cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch, tag, or SHA)"
+        required: true
+        default: "dev"
+        type: string
+      allow_dirty:
+        description: "Pass ALLOW_DIRTY=1 to deploy-ec2.sh (needed when infra/.env is untracked)"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to EC2 via SSM
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      HALOZALO_REPO_PATH: ${{ vars.HALOZALO_REPO_PATH }}
+      DEPLOY_HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+    steps:
+      - name: Validate required vars and secrets
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          missing=0
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION EC2_INSTANCE_ID HALOZALO_REPO_PATH DEPLOY_HEALTH_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::$name is not set (GitHub Actions secret or variable)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Send deploy command via SSM
+        id: send
+        env:
+          DEPLOY_REF: ${{ inputs.ref }}
+          ALLOW_DIRTY: ${{ inputs.allow_dirty && '1' || '0' }}
+        run: |
+          set -euo pipefail
+
+          # Shell-escape values injected into the remote script.
+          REPO_PATH_Q=$(printf '%q' "$HALOZALO_REPO_PATH")
+          DEPLOY_REF_Q=$(printf '%q' "$DEPLOY_REF")
+          ALLOW_DIRTY_Q=$(printf '%q' "$ALLOW_DIRTY")
+          ORIGIN_REF_Q=$(printf '%q' "refs/remotes/origin/${DEPLOY_REF}")
+          ORIGIN_MERGE_Q=$(printf '%q' "origin/${DEPLOY_REF}")
+
+          # Remote: pull ref, then run existing deploy-ec2.sh on the host.
+          # Secrets stay in infra/.env on EC2; never passed from GitHub.
+          REMOTE_SCRIPT=$(cat <<EOF
+          set -euo pipefail
+          cd ${REPO_PATH_Q}
+          git fetch --prune origin
+          git checkout ${DEPLOY_REF_Q}
+          if git show-ref --verify --quiet ${ORIGIN_REF_Q}; then
+            git merge --ff-only ${ORIGIN_MERGE_Q}
+          fi
+          chmod +x infra/scripts/deploy-ec2.sh
+          cd infra
+          if [[ ${ALLOW_DIRTY_Q} == "1" ]]; then
+            ALLOW_DIRTY=1 ./scripts/deploy-ec2.sh
+          else
+            ./scripts/deploy-ec2.sh
+          fi
+          EOF
+          )
+
+          REMOTE_SCRIPT=$(printf '%s\n' "$REMOTE_SCRIPT" | sed 's/^          //')
+          PARAMS=$(jq -n --arg script "$REMOTE_SCRIPT" '{commands: [$script]}')
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "haloZalo deploy ${DEPLOY_REF}" \
+            --parameters "$PARAMS" \
+            --timeout-seconds 2400 \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM CommandId=$COMMAND_ID"
+
+      - name: Wait for SSM command and print output
+        env:
+          COMMAND_ID: ${{ steps.send.outputs.command_id }}
+        run: |
+          set -euo pipefail
+          STATUS="InProgress"
+          for _ in $(seq 1 120); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+            echo "SSM status: $STATUS"
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) break ;;
+            esac
+            sleep 15
+          done
+
+          INV=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --output json)
+
+          echo "$INV" | jq -r '.StandardOutputContent // empty'
+          STDERR=$(echo "$INV" | jq -r '.StandardErrorContent // empty')
+          if [[ -n "$STDERR" ]]; then
+            echo "::group::SSM stderr"
+            echo "$STDERR"
+            echo "::endgroup::"
+          fi
+
+          FINAL=$(echo "$INV" | jq -r '.Status')
+          if [[ "$FINAL" != "Success" ]]; then
+            echo "::error::SSM command finished with status=$FINAL"
+            exit 1
+          fi
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          echo "Checking $DEPLOY_HEALTH_URL"
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$DEPLOY_HEALTH_URL"; then
+              echo
+              echo "Health OK"
+              exit 0
+            fi
+            echo "Attempt $i failed; retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::Health check failed for $DEPLOY_HEALTH_URL"
+          exit 1

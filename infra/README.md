@@ -108,6 +108,32 @@ Media cloud: `MESSAGING_MEDIA_BACKEND=s3` — upload `POST /media/uploads`; obje
 
 Renew cert định kỳ: `./scripts/renew-cert.sh` (cron).
 
+### CD (GitHub Actions)
+
+Một nút deploy từ nhánh `dev` (hoặc ref khác): **Actions → Deploy cloud → Run workflow**.
+
+Workflow [`.github/workflows/deploy-cloud.yml`](../.github/workflows/deploy-cloud.yml) gọi AWS SSM `SendCommand` trên EC2, `git pull` rồi chạy `infra/scripts/deploy-ec2.sh`. Secrets app (`infra/.env`) **không** đưa lên GitHub — vẫn chỉ nằm trên host.
+
+**Prerequisite trên EC2**
+
+- SSM Agent + instance profile có `AmazonSSMManagedInstanceCore` (và S3 media như hiện tại)
+- Repo đã clone (path khớp biến `HALOZALO_REPO_PATH`)
+- `infra/.env` đã điền (RDS, S3, SMTP, `DOMAIN`, …)
+- Docker Compose v2
+
+**GitHub secrets / variables** (Settings → Secrets and variables → Actions)
+
+| Name | Loại | Ví dụ / ghi chú |
+|---|---|---|
+| `AWS_ACCESS_KEY_ID` | secret | IAM user chỉ cần `ssm:SendCommand`, `ssm:GetCommandInvocation` |
+| `AWS_SECRET_ACCESS_KEY` | secret | |
+| `AWS_REGION` | variable | `ap-southeast-1` |
+| `EC2_INSTANCE_ID` | variable | `i-…` |
+| `HALOZALO_REPO_PATH` | variable | `/home/ssm-user/haloZalo` |
+| `DEPLOY_HEALTH_URL` | variable | `https://halozalo.nltuanthanh.io.vn/actuator/health` |
+
+Inputs khi bấm Run workflow: `ref` (mặc định `dev`), `allow_dirty` (mặc định `true` — cần khi `.env`/nginx bake làm tree dirty trên EC2).
+
 ### E2E trỏ cloud / app
 
 E2E gọi path monolith (`/auth/login`, `/media/...`, `/ws`). Qua nginx public cần hai prefix khác nhau — chạy trực tiếp vào container `app`:

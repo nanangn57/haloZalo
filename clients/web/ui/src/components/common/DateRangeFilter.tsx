@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { rangePreset, type DateRange } from '@core/statsService'
 
 interface DateRangeFilterProps {
@@ -24,13 +24,18 @@ function DateRangeFilter({ value, onApply, disabled }: DateRangeFilterProps) {
   const [from, setFrom] = useState(value.from ?? '')
   const [to, setTo] = useState(value.to ?? '')
   const [preset, setPreset] = useState<Preset>(() => matchPreset(value))
+  const [syncedFrom, setSyncedFrom] = useState(value.from)
+  const [syncedTo, setSyncedTo] = useState(value.to)
   const invalid = Boolean(from && to && from > to)
 
-  useEffect(() => {
+  // Reset draft fields when the controlled value changes (React-recommended render sync).
+  if (value.from !== syncedFrom || value.to !== syncedTo) {
+    setSyncedFrom(value.from)
+    setSyncedTo(value.to)
     setFrom(value.from ?? '')
     setTo(value.to ?? '')
     setPreset(matchPreset(value))
-  }, [value.from, value.to])
+  }
 
   function applyPreset(next: Preset) {
     setPreset(next)

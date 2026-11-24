@@ -137,6 +137,7 @@ cd infra
 - Domain: `https://halozalo.nltuanthanh.io.vn`
 - Health: `https://halozalo.nltuanthanh.io.vn/actuator/health`
 - Deploy: `infra/scripts/deploy-ec2.sh` — khi `DB_HOST` trỏ RDS thì chỉ `up app nginx`, không chạy container Postgres
+- CD một nút: GitHub Actions → **Deploy cloud** → Run workflow (SSM trên EC2; xem [infra/README.md](infra/README.md#cd-github-actions))
 - Env mẫu: [infra/.env.example](infra/.env.example) — `DOMAIN`, `DB_HOST`, `DB_*`, SMTP (`IDENTITY_MAIL_*`, `SPRING_MAIL_*`), S3, ba key `VITE_*`
 - Chi tiết RDS / SMTP / SG: [infra/README.md](infra/README.md)
 - Mobile cloud: `EXPO_PUBLIC_API_*` / `EXPO_PUBLIC_WS_BASE_URL` trỏ `https://$DOMAIN/api/...` và `wss://$DOMAIN/api/messaging`
