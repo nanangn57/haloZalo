@@ -63,6 +63,17 @@ public final class PostgresDashboardQuery implements DashboardQuery {
     static final String SELECT_VERIFICATIONS =
         "SELECT COALESCE(SUM(total),0) FROM analytics.verifications_by_day "
             + "WHERE (?::date IS NULL OR day >= ?::date) AND (?::date IS NULL OR day <= ?::date)";
+    static final String SELECT_VERIFIED_COHORT =
+        "SELECT COUNT(*) FROM analytics.user_registrations r "
+            + "INNER JOIN analytics.user_verifications v ON v.user_id = r.user_id "
+            + "WHERE (?::date IS NULL OR r.day >= ?::date) AND (?::date IS NULL OR r.day <= ?::date)";
+    static final String SELECT_FIRST_MESSAGE_COHORT =
+        "SELECT COUNT(*) FROM analytics.user_registrations r "
+            + "INNER JOIN analytics.user_activity a ON a.user_id = r.user_id AND a.messages_sent > 0 "
+            + "WHERE (?::date IS NULL OR r.day >= ?::date) AND (?::date IS NULL OR r.day <= ?::date)";
+    static final String SELECT_PLATFORM_HEATMAP =
+        "SELECT weekday, hour, COALESCE(SUM(messages_sent),0) AS total "
+            + "FROM analytics.user_hour_weekday GROUP BY weekday, hour ORDER BY weekday, hour";
     static final String SELECT_MESSENGERS =
         "SELECT COUNT(DISTINCT user_id) FROM analytics.user_activity_by_day "
             + "WHERE messages_sent > 0 AND (?::date IS NULL OR day >= ?::date) AND (?::date IS NULL OR day <= ?::date)";
@@ -258,8 +269,37 @@ public final class PostgresDashboardQuery implements DashboardQuery {
     }
 
     @Override
+    public long verifiedInRegistrationCohort(DateRange range) {
+        return countRange(SELECT_VERIFIED_COHORT, range);
+    }
+
+    @Override
+    public long firstMessageInRegistrationCohort(DateRange range) {
+        return countRange(SELECT_FIRST_MESSAGE_COHORT, range);
+    }
+
+    @Override
     public long messengersInRange(DateRange range) {
         return countRange(SELECT_MESSENGERS, range);
+    }
+
+    @Override
+    public List<HeatmapCell> platformHeatmap() {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(SELECT_PLATFORM_HEATMAP);
+             ResultSet rows = statement.executeQuery()) {
+            List<HeatmapCell> cells = new ArrayList<>();
+            while (rows.next()) {
+                cells.add(new HeatmapCell(
+                    rows.getInt("weekday"),
+                    rows.getInt("hour"),
+                    rows.getLong("total")
+                ));
+            }
+            return cells;
+        } catch (SQLException ex) {
+            throw new IllegalStateException("Could not read platform heatmap", ex);
+        }
     }
 
     @Override

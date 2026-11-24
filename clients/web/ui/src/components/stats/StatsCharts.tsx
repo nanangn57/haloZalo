@@ -307,6 +307,13 @@ export function Heatmap({ cells }: { cells: HeatmapCell[] }) {
   )
 }
 
+const MEDIA_LEGEND = [
+  { type: 'IMAGE', label: 'Image' },
+  { type: 'DOCUMENT', label: 'Document' },
+  { type: 'VIDEO', label: 'Video' },
+  { type: 'AUDIO', label: 'Audio' },
+] as const
+
 export function SimpleLine({
   days,
   label,
@@ -314,15 +321,112 @@ export function SimpleLine({
   days: DayTotal[]
   label: string
 }) {
-  if (days.length === 0 || days.every((day) => day.total === 0)) {
+  const meaningful = days.filter((day) => day.total > 0)
+  if (days.length === 0 || meaningful.length === 0) {
     return <EmptyChart message={`No ${label} in this period.`} />
   }
-  const asMessages: MessageDayTotal[] = days.map((day) => ({
-    day: day.day,
-    sent: day.total,
-    received: 0,
-  }))
-  return <LineChart series={asMessages} height={200} />
+
+  const height = 200
+  const width = 720
+  const padL = 36
+  const padR = 16
+  const padT = 18
+  const padB = 32
+  const plotW = width - padL - padR
+  const plotH = height - padT - padB
+  const max = Math.max(1, ...days.map((day) => day.total))
+  const step = days.length === 1 ? 0 : plotW / (days.length - 1)
+  const points = days.map((day, index) => {
+    const x = padL + index * step
+    const y = padT + plotH - (day.total / max) * plotH
+    return { x, y, value: day.total, day: day.day }
+  })
+  const line = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`)
+    .join(' ')
+  const area =
+    points.length === 0
+      ? ''
+      : `${line} L${points[points.length - 1].x},${padT + plotH} L${points[0].x},${padT + plotH} Z`
+  const tickCount = max <= 4 ? max : 4
+  const ticks = Array.from({ length: tickCount + 1 }, (_, index) =>
+    Math.round((max / tickCount) * (tickCount - index)),
+  )
+  const sparse = meaningful.length <= 2
+
+  return (
+    <div className="activity-chart-frame">
+      {sparse ? (
+        <p className="activity-chart-note">
+          Sparse period — {meaningful.length} active day
+          {meaningful.length === 1 ? '' : 's'} in range.
+        </p>
+      ) : null}
+      <svg
+        className="activity-chart"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`${label} by day`}
+      >
+          <defs>
+            <linearGradient id="simpleArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--app-primary)" stopOpacity="0.28" />
+              <stop
+                offset="100%"
+                stopColor="var(--app-primary)"
+                stopOpacity="0.02"
+              />
+            </linearGradient>
+          </defs>
+          {ticks.map((value, index) => {
+            const y = padT + (plotH / tickCount) * index
+            return (
+              <g key={`${value}-${index}`}>
+                <line
+                  x1={padL}
+                  x2={width - padR}
+                  y1={y}
+                  y2={y}
+                  className="activity-chart-grid"
+                />
+                <text
+                  x={padL - 8}
+                  y={y + 4}
+                  textAnchor="end"
+                  className="activity-chart-axis"
+                >
+                  {value}
+                </text>
+              </g>
+            )
+          })}
+          <path d={area} fill="url(#simpleArea)" />
+          <path d={line} className="activity-line activity-line-sent" fill="none" />
+          {points.map((point) => (
+            <circle
+              key={point.day}
+              cx={point.x}
+              cy={point.y}
+              r={3.5}
+              className="activity-chart-dot sent"
+            >
+              <title>{`${point.day}: ${point.value}`}</title>
+            </circle>
+          ))}
+          {points.map((point) => (
+            <text
+              key={`label-${point.day}`}
+              x={point.x}
+              y={height - 10}
+              textAnchor="middle"
+              className="activity-chart-label"
+            >
+              {point.day.slice(5)}
+            </text>
+          ))}
+      </svg>
+    </div>
+  )
 }
 
 export function MediaStack({ days }: { days: MediaDayTotal[] }) {
@@ -330,10 +434,12 @@ export function MediaStack({ days }: { days: MediaDayTotal[] }) {
     return <EmptyChart message="No media uploads in this period." />
   }
   const byDay = new Map<string, Record<string, number>>()
+  const totalsByType: Record<string, number> = {}
   for (const row of days) {
     const bucket = byDay.get(row.day) ?? {}
     bucket[row.type] = (bucket[row.type] ?? 0) + row.total
     byDay.set(row.day, bucket)
+    totalsByType[row.type] = (totalsByType[row.type] ?? 0) + row.total
   }
   const labels = [...byDay.keys()].sort()
   const max = Math.max(
@@ -342,30 +448,50 @@ export function MediaStack({ days }: { days: MediaDayTotal[] }) {
       Object.values(byDay.get(day) ?? {}).reduce((sum, value) => sum + value, 0),
     ),
   )
+  const legendTypes = MEDIA_LEGEND.filter((item) => (totalsByType[item.type] ?? 0) > 0)
+  const extraTypes = Object.keys(totalsByType).filter(
+    (type) => !MEDIA_LEGEND.some((item) => item.type === type),
+  )
   return (
-    <div className="activity-media-bars">
-      {labels.map((day) => {
-        const bucket = byDay.get(day) ?? {}
-        const total = Object.values(bucket).reduce((sum, value) => sum + value, 0)
-        return (
-          <div key={day} className="activity-media-col">
-            <div
-              className="activity-media-stack"
-              style={{ height: `${Math.max(12, (total / max) * 140)}px` }}
-            >
-              {Object.entries(bucket).map(([type, value]) => (
-                <span
-                  key={type}
-                  className={`media-${type.toLowerCase()}`}
-                  style={{ flex: value }}
-                  title={`${type}: ${value}`}
-                />
-              ))}
+    <div>
+      <ul className="activity-legend mb-3">
+        {legendTypes.map((item) => (
+          <li key={item.type}>
+            <span className={`swatch media-${item.type.toLowerCase()}`} />
+            {item.label} {totalsByType[item.type]}
+          </li>
+        ))}
+        {extraTypes.map((type) => (
+          <li key={type}>
+            <span className={`swatch media-${type.toLowerCase()}`} />
+            {type} {totalsByType[type]}
+          </li>
+        ))}
+      </ul>
+      <div className="activity-media-bars">
+        {labels.map((day) => {
+          const bucket = byDay.get(day) ?? {}
+          const total = Object.values(bucket).reduce((sum, value) => sum + value, 0)
+          return (
+            <div key={day} className="activity-media-col">
+              <div
+                className="activity-media-stack"
+                style={{ height: `${Math.max(12, (total / max) * 140)}px` }}
+              >
+                {Object.entries(bucket).map(([type, value]) => (
+                  <span
+                    key={type}
+                    className={`media-${type.toLowerCase()}`}
+                    style={{ flex: value }}
+                    title={`${type}: ${value}`}
+                  />
+                ))}
+              </div>
+              <span>{day.slice(5)}</span>
             </div>
-            <span>{day.slice(5)}</span>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }

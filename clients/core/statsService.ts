@@ -106,6 +106,7 @@ export interface DashboardStats {
   groupsCreated: number
   avgMembersPerGroup: number
   mediaByDay: MediaDayTotal[]
+  heatmap: HeatmapCell[]
   from?: string
   to?: string
 }
@@ -185,6 +186,7 @@ export function normalizeDashboardStats(
     groupsCreated: numberOr(raw?.groupsCreated, 0),
     avgMembersPerGroup: numberOr(raw?.avgMembersPerGroup, 0),
     mediaByDay: Array.isArray(raw?.mediaByDay) ? raw.mediaByDay : [],
+    heatmap: Array.isArray(raw?.heatmap) ? raw.heatmap : [],
     from: raw?.from,
     to: raw?.to,
   }

@@ -46,7 +46,13 @@ import {
   type ReactionCode,
 } from '@core/messageService'
 import { getInitials } from '@core/avatar'
-import { uploadMediaApi, type MediaUploadType } from '@core/mediaService'
+import {
+  assertMediaWithinLimit,
+  guessMimeType,
+  mediaMessageBody,
+  uploadMediaApi,
+  type MediaUploadType,
+} from '@core/mediaService'
 import { getGroupMembersApi, getGroupsApi } from '@core/groupService'
 import { getPresenceApi } from '@core/presenceService'
 import { socketClient } from '@core/socketClient'
@@ -1118,14 +1124,10 @@ function ChatPage() {
 
     const content = newMessage.trim()
 
-    if (
-        !content ||
-        !selectedConversation ||
-        isLoadingMessages ||
-        messageLoadError
-      ) {
-        return
-      }
+    // Still allow send if history failed to load — composer should not be locked.
+    if (!content || !selectedConversation || isLoadingMessages) {
+      return
+    }
 
     const conversationId =
       selectedConversation.conversationId
@@ -1194,7 +1196,7 @@ function ChatPage() {
   }
 
   async function handleSendEmotion(code: EmotionCode) {
-    if (!selectedConversation || isLoadingMessages || messageLoadError) {
+    if (!selectedConversation || isLoadingMessages) {
       return
     }
 
@@ -1321,32 +1323,71 @@ function ChatPage() {
     return user ? displayName(user) : 'User'
   }
 
+  function acceptFor(type: FilePickType): string {
+    switch (type) {
+      case 'IMAGE':
+        return 'image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif'
+      case 'VIDEO':
+        return 'video/mp4,video/webm,video/quicktime,video/x-m4v,.mp4,.webm,.mov,.m4v'
+      default:
+        return '*/*'
+    }
+  }
+
   function pickMedia(type: FilePickType) {
     mediaTypeRef.current = type
-    mediaInputRef.current?.click()
+    const input = mediaInputRef.current
+    if (input) {
+      input.accept = acceptFor(type)
+      input.click()
+    }
+  }
+
+  function fileForUpload(file: File, type: FilePickType): File {
+    if (file.type && file.type !== 'application/octet-stream') {
+      return file
+    }
+    const mime = guessMimeType(file.name || 'upload.bin', type)
+    return new File([file], file.name || `upload.${mime.split('/')[1] || 'bin'}`, {
+      type: mime,
+      lastModified: file.lastModified,
+    })
+  }
+
+  function resolvePickType(file: File, requested: FilePickType): FilePickType {
+    const mime = (file.type || guessMimeType(file.name || 'upload.bin', requested)).toLowerCase()
+    if (mime.startsWith('video/')) return 'VIDEO'
+    if (mime.startsWith('image/') && requested === 'IMAGE') return 'IMAGE'
+    return requested
   }
 
   async function handleMediaSelected(
     event: React.ChangeEvent<HTMLInputElement>,
   ) {
-    const file = event.target.files?.[0]
+    const raw = event.target.files?.[0]
     event.target.value = ''
-    if (!file || !selectedConversation) return
+    if (!raw || !selectedConversation) return
 
     const conversationId = selectedConversation.conversationId
-    const type = mediaTypeRef.current
+    const type = resolvePickType(raw, mediaTypeRef.current)
+    const file = fileForUpload(raw, type)
     setUploadingMedia(true)
+    setError(null)
     try {
+      assertMediaWithinLimit(type, file.size)
       const uploaded = await uploadMediaApi(file, type, {
         fileName: file.name,
+        contentType: file.type,
+        size: file.size,
         conversationId,
       })
+      const body = mediaMessageBody(uploaded.url)
       const clientMsgId = crypto.randomUUID()
       const saved =
         type === 'DOCUMENT'
           ? await sendMessageApi(conversationId, {
               type: 'DOCUMENT',
-              body: uploaded.url,
+              body,
               clientMsgId,
               fileName: uploaded.fileName,
               mimeType: uploaded.contentType,
@@ -1354,7 +1395,7 @@ function ChatPage() {
             })
           : await sendMessageApi(conversationId, {
               type,
-              body: uploaded.url,
+              body,
               clientMsgId,
             })
       setMessages((previous) => [...previous, saved])
@@ -1381,7 +1422,7 @@ function ChatPage() {
       })
       const saved = await sendMessageApi(conversationId, {
         type: 'AUDIO',
-        body: uploaded.url,
+        body: mediaMessageBody(uploaded.url),
         clientMsgId: crypto.randomUUID(),
         mimeType: uploaded.contentType || clip.mimeType,
         size: uploaded.size,
@@ -1861,6 +1902,7 @@ function ChatPage() {
             ref={mediaInputRef}
             type="file"
             className="d-none"
+            accept="image/*,video/*,*/*"
             onChange={handleMediaSelected}
           />
 
@@ -1948,7 +1990,6 @@ function ChatPage() {
                 !selectedConversation ||
                 !newMessage.trim() ||
                 isLoadingMessages ||
-                Boolean(messageLoadError) ||
                 uploadingMedia
               }
             >

@@ -7,6 +7,7 @@ import type { Message } from '@core/types/message';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import AudioBubble from './AudioBubble';
+import VideoBubble from './VideoBubble';
 
 const FILTERS: { key: GalleryMediaType | 'ALL'; label: string }[] = [
   { key: 'ALL', label: 'All' },
@@ -65,15 +66,21 @@ export default function MediaGalleryModal({
         </View>
       );
     }
+    if (item.type === 'VIDEO') {
+      return (
+        <View style={styles.row}>
+          <VideoBubble url={item.url} surface={theme.border} accent={theme.primary} />
+          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{when}</Text>
+        </View>
+      );
+    }
     return (
-      <Pressable onPress={() => openUrl(item.url)} style={styles.row} accessibilityLabel={`Open ${item.type.toLowerCase()}`}>
+      <Pressable onPress={() => openUrl(item.url)} style={styles.row} accessibilityLabel="Open file">
         <View style={[styles.thumb, styles.iconThumb, { backgroundColor: theme.backgroundElement }]}>
-          <Ionicons name={ICON[item.type]} size={28} color={theme.primary} />
+          <Ionicons name={ICON.DOCUMENT} size={28} color={theme.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.text, fontWeight: '600' }}>
-            {item.type === 'VIDEO' ? 'Video' : 'File'}
-          </Text>
+          <Text style={{ color: theme.text, fontWeight: '600' }}>File</Text>
           <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{when}</Text>
         </View>
       </Pressable>

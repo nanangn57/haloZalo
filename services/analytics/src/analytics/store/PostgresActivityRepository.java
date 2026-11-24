@@ -71,6 +71,10 @@ public final class PostgresActivityRepository implements ActivityRepository, Act
     static final String INSERT_VERIFICATION =
         "INSERT INTO analytics.verifications_by_day (day, total) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET "
             + "total = analytics.verifications_by_day.total + 1";
+    static final String INSERT_USER_REGISTRATION =
+        "INSERT INTO analytics.user_registrations (user_id, day) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING";
+    static final String INSERT_USER_VERIFICATION =
+        "INSERT INTO analytics.user_verifications (user_id, day) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING";
     static final String INSERT_FRIEND_DAY =
         "INSERT INTO analytics.friend_by_day (day, requests_sent, requests_accepted) VALUES (?, ?, ?) "
             + "ON CONFLICT (day) DO UPDATE SET "
@@ -144,9 +148,13 @@ public final class PostgresActivityRepository implements ActivityRepository, Act
         try (Connection connection = dataSource.getConnection()) {
             LocalDate day = note.occurredAt().atOffset(ZoneOffset.UTC).toLocalDate();
             if (ActivityTypes.REGISTERED.equals(note.type())) {
-                bumpDayTotal(connection, INSERT_REGISTRATION, day);
+                if (rememberUserDay(connection, INSERT_USER_REGISTRATION, note.actorId(), day)) {
+                    bumpDayTotal(connection, INSERT_REGISTRATION, day);
+                }
             } else if (ActivityTypes.VERIFIED.equals(note.type())) {
-                bumpDayTotal(connection, INSERT_VERIFICATION, day);
+                if (rememberUserDay(connection, INSERT_USER_VERIFICATION, note.actorId(), day)) {
+                    bumpDayTotal(connection, INSERT_VERIFICATION, day);
+                }
             } else if (ActivityTypes.LOGGED_IN.equals(note.type())) {
                 markActive(connection, note.actorId(), day);
                 addUser(connection, note.actorId(), 1, 0, 0, 0, 0);
@@ -222,6 +230,23 @@ public final class PostgresActivityRepository implements ActivityRepository, Act
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setDate(1, Date.valueOf(day));
             statement.executeUpdate();
+        }
+    }
+
+    /** @return true when this user was recorded for the first time */
+    private static boolean rememberUserDay(
+        Connection connection,
+        String sql,
+        String userId,
+        LocalDate day
+    ) throws SQLException {
+        if (userId == null || userId.isBlank()) {
+            return false;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, userId);
+            statement.setDate(2, Date.valueOf(day));
+            return statement.executeUpdate() == 1;
         }
     }
 

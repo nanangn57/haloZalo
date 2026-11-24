@@ -29,6 +29,15 @@ final class LocalMediaStoreTest {
     }
 
     @Test
+    void openKeepsUploadedVideoContentTypeEvenWithoutProbeableExtension() throws Exception {
+        LocalMediaStore store = new LocalMediaStore(temp.toString(), "http://localhost:8080");
+        MediaStore.Stored stored = store.store(new byte[] {9, 9, 9}, "video/mp4", "clip.bin");
+        try (MediaStore.Opened opened = store.open(stored.id())) {
+            assertEquals("video/mp4", opened.contentType());
+        }
+    }
+
+    @Test
     void openMissingThrows() throws Exception {
         LocalMediaStore store = new LocalMediaStore(temp.toString(), "http://localhost:8080");
         assertThrows(Exception.class, () -> store.open("00000000-0000-4000-8000-000000000001"));

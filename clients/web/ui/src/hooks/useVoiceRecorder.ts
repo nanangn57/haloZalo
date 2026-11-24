@@ -68,6 +68,18 @@ export function useVoiceRecorder() {
 
     const run = (async () => {
       try {
+        // Mic only works on https or localhost — LAN IP (http://192.168.x.x) is blocked.
+        if (
+          typeof window !== 'undefined' &&
+          !window.isSecureContext &&
+          window.location.hostname !== 'localhost' &&
+          window.location.hostname !== '127.0.0.1'
+        ) {
+          setError(
+            'Microphone needs https or localhost. Open http://localhost:5173 instead of a LAN IP.',
+          )
+          return
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         const mimeType = pickMimeType()
         const recorder = new MediaRecorder(
@@ -81,7 +93,8 @@ export function useVoiceRecorder() {
         streamRef.current = stream
         recorderRef.current = recorder
         startedAtRef.current = Date.now()
-        recorder.start()
+        // timeslice so short holds still produce chunks on some browsers
+        recorder.start(200)
         setStatus('recording')
       } catch (err) {
         const denied =
@@ -90,7 +103,9 @@ export function useVoiceRecorder() {
         setError(
           denied
             ? 'Microphone permission denied. Allow it in the browser to send voice messages.'
-            : 'Cannot access the microphone.',
+            : err instanceof Error
+              ? err.message
+              : 'Cannot access the microphone.',
         )
       }
     })()

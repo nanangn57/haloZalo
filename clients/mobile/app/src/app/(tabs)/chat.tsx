@@ -36,7 +36,13 @@ import {
   type ReactionCode,
 } from '@core/messageService';
 import { confirmAction } from '@/lib/confirm';
-import { uploadMediaApi, type MediaUploadType } from '@core/mediaService';
+import {
+  assertMediaWithinLimit,
+  guessMimeType,
+  mediaMessageBody,
+  uploadMediaApi,
+  type MediaUploadType,
+} from '@core/mediaService';
 import { lookupUsersApi } from '@core/userService';
 import { getGroupsApi } from '@core/groupService';
 import { getPresenceApi } from '@core/presenceService';
@@ -670,40 +676,53 @@ export default function ChatPage() {
     fileName: string,
     mimeType: string,
     durationSec?: number,
+    sizeBytes?: number | null,
   ) => {
     if (!selectedConversation) return;
     setSending(true);
     setError('');
     try {
-      const blob = await (await fetch(uri)).blob();
-      const uploaded = await uploadMediaApi(blob, type, {
-        fileName,
-        conversationId: selectedConversation.conversationId,
-      });
+      const contentType =
+        mimeType && mimeType !== 'application/octet-stream'
+          ? mimeType
+          : guessMimeType(fileName, type);
+      assertMediaWithinLimit(type, sizeBytes);
+      // Native multipart { uri, name, type } — Blob upload often strips MIME on device.
+      const uploaded = await uploadMediaApi(
+        { uri, name: fileName, type: contentType },
+        type,
+        {
+          fileName,
+          contentType,
+          size: sizeBytes ?? undefined,
+          conversationId: selectedConversation.conversationId,
+        },
+      );
+      const body = mediaMessageBody(uploaded.url);
       const clientMsgId = uuid();
       const conversationId = selectedConversation.conversationId;
       let sent: Message;
       if (type === 'DOCUMENT') {
         sent = await sendMessageApi(conversationId, {
           type: 'DOCUMENT',
-          body: uploaded.url,
+          body,
           clientMsgId,
           fileName: uploaded.fileName,
-          mimeType: uploaded.contentType || mimeType,
+          mimeType: uploaded.contentType || contentType,
           size: uploaded.size,
         });
       } else if (type === 'AUDIO') {
         sent = await sendMessageApi(conversationId, {
           type: 'AUDIO',
-          body: uploaded.url,
+          body,
           clientMsgId,
           fileName: uploaded.fileName,
-          mimeType: uploaded.contentType || mimeType,
+          mimeType: uploaded.contentType || contentType,
           size: uploaded.size,
           ...(durationSec ? { duration: durationSec } : {}),
         });
       } else {
-        sent = await sendMessageApi(conversationId, { type, body: uploaded.url, clientMsgId });
+        sent = await sendMessageApi(conversationId, { type, body, clientMsgId });
       }
       upsertMessage(sent);
     } catch (err: unknown) {
@@ -714,25 +733,48 @@ export default function ChatPage() {
   };
 
   const pickImage = async (asVideo: boolean) => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError('Media library permission is required');
-      return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError('Media library permission is required');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: asVideo ? ['videos'] : ['images'],
+        quality: 0.8,
+        videoMaxDuration: 120,
+        // Prefer a filesystem copy Expo can multipart-upload (avoids ph:// / incomplete assets).
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+        // iOS: compress gallery videos toward the 20MB server limit.
+        ...(asVideo && Platform.OS === 'ios'
+          ? {
+              videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+              videoExportPreset: ImagePicker.VideoExportPreset.H264_640x480,
+            }
+          : {}),
+      });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const type: MediaUploadType = asVideo ? 'VIDEO' : 'IMAGE';
+      const uriExt = asset.uri.split('?')[0].split('.').pop()?.toLowerCase();
+      const safeExt =
+        uriExt && uriExt.length <= 5 && /^[a-z0-9]+$/.test(uriExt)
+          ? uriExt
+          : asVideo
+            ? 'mp4'
+            : 'jpg';
+      const fileName =
+        asset.fileName ??
+        (asVideo ? `video-${Date.now()}.${safeExt}` : `image-${Date.now()}.jpg`);
+      const mimeType =
+        asset.mimeType && asset.mimeType !== 'application/octet-stream'
+          ? asset.mimeType
+          : guessMimeType(fileName, type);
+      await sendUploaded(type, asset.uri, fileName, mimeType, undefined, asset.fileSize);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to pick media');
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: asVideo
-        ? ImagePicker.MediaTypeOptions.Videos
-        : ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-    });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    await sendUploaded(
-      asVideo ? 'VIDEO' : 'IMAGE',
-      asset.uri,
-      asset.fileName ?? (asVideo ? 'video.mp4' : 'image.jpg'),
-      asset.mimeType ?? (asVideo ? 'video/mp4' : 'image/jpeg'),
-    );
   };
 
   const pickDocument = async () => {
@@ -743,18 +785,34 @@ export default function ChatPage() {
       'DOCUMENT',
       asset.uri,
       asset.name,
-      asset.mimeType ?? 'application/octet-stream',
+      asset.mimeType ?? guessMimeType(asset.name, 'DOCUMENT'),
     );
   };
 
-  const startVoice = async () => {
-    if (!selectedConversation || sending || recordingLiveRef.current || voiceRef.current) return;
+  /** Tap mic once to record; tap again to stop & send (hold-to-record fights the permission sheet). */
+  const toggleVoice = async () => {
+    if (!selectedConversation || sending) return;
+
+    if (recordingLiveRef.current && voiceRef.current) {
+      const recorder = voiceRef.current;
+      voiceRef.current = null;
+      recordingLiveRef.current = false;
+      setRecording(false);
+      try {
+        const clip = await recorder.stop();
+        await sendUploaded('AUDIO', clip.uri, clip.fileName, clip.mimeType, clip.durationSec);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Cannot send voice message');
+      }
+      return;
+    }
+
+    if (voiceRef.current) return;
     setError('');
     const recorder = new VoiceRecorder();
     voiceRef.current = recorder;
     try {
       await recorder.start();
-      // Nhả tay trước khi start xong → stopVoice đã clear ref; hủy clip.
       if (voiceRef.current !== recorder) {
         void recorder.cancel();
         return;
@@ -770,23 +828,10 @@ export default function ChatPage() {
       setError(
         err instanceof VoiceRecorderError && err.code === 'permission-denied'
           ? 'Microphone permission denied. Enable it in Settings to send voice messages.'
-          : 'Cannot start recording',
+          : err instanceof Error
+            ? err.message
+            : 'Cannot start recording',
       );
-    }
-  };
-
-  const stopVoice = async () => {
-    const recorder = voiceRef.current;
-    const wasLive = recordingLiveRef.current;
-    voiceRef.current = null;
-    recordingLiveRef.current = false;
-    setRecording(false);
-    if (!recorder || !wasLive) return;
-    try {
-      const clip = await recorder.stop();
-      await sendUploaded('AUDIO', clip.uri, clip.fileName, clip.mimeType, clip.durationSec);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Cannot send voice message');
     }
   };
 
@@ -973,13 +1018,12 @@ export default function ChatPage() {
             onImagePress={() => void pickImage(false)}
             onFilePress={() => void pickDocument()}
             onVideoPress={() => void pickImage(true)}
-            onVoiceStart={() => void startVoice()}
-            onVoiceStop={() => void stopVoice()}
+            onVoiceToggle={() => void toggleVoice()}
           />
 
           {recording ? (
             <Text style={[styles.recordingHint, { color: theme.danger }]} accessibilityLiveRegion="polite">
-              Recording… release to send
+              Recording… tap mic again to send
             </Text>
           ) : null}
 

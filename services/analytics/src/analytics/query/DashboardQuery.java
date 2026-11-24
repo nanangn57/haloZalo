@@ -25,6 +25,12 @@ public interface DashboardQuery {
 
     long verifications(DateRange range);
 
+    /** Users registered in range who also have a verification row (cohort). */
+    long verifiedInRegistrationCohort(DateRange range);
+
+    /** Users registered in range who have sent ≥1 message lifetime (cohort). */
+    long firstMessageInRegistrationCohort(DateRange range);
+
     long messengersInRange(DateRange range);
 
     long activeInRange(DateRange range);
@@ -38,4 +44,6 @@ public interface DashboardQuery {
     double avgMembersPerGroup(DateRange range);
 
     List<MediaDayTotal> mediaByDay(DateRange range);
+
+    List<HeatmapCell> platformHeatmap();
 }

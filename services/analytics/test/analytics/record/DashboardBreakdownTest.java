@@ -118,6 +118,47 @@ class DashboardBreakdownTest {
         assertThrows(DashboardService.MissingSession.class, () -> new DashboardService(new MemoryBreakdown()).mine(" "));
     }
 
+    @Test
+    void verifyFunnelUsesRegistrationCohortNotAllMessengers() {
+        MemoryBreakdown stored = new MemoryBreakdown();
+        AggregateActivityRecorder recorder = new AggregateActivityRecorder(stored, stored);
+        recorder.record(envelopeAt(
+            "reg-anh",
+            ActivityTypes.REGISTERED,
+            "2026-10-25T08:00:00Z",
+            "{\"userId\":\"" + ANH + "\"}"
+        ));
+        recorder.record(envelopeAt(
+            "ver-anh",
+            ActivityTypes.VERIFIED,
+            "2026-10-25T08:01:00Z",
+            "{\"userId\":\"" + ANH + "\"}"
+        ));
+        recorder.record(envelopeAt(
+            "msg-anh",
+            ActivityTypes.MESSAGE_CREATED,
+            "2026-10-25T12:00:00Z",
+            "{\"senderId\":\"" + ANH + "\",\"conversationId\":\"" + DIRECT
+                + "\",\"conversationType\":\"DIRECT\",\"recipientIds\":[\"" + BINH + "\"],\"type\":\"TEXT\"}"
+        ));
+        // Older messenger outside registration cohort for the filtered window.
+        recorder.record(envelopeAt(
+            "msg-binh-old",
+            ActivityTypes.MESSAGE_CREATED,
+            "2026-09-01T12:00:00Z",
+            "{\"senderId\":\"" + BINH + "\",\"conversationId\":\"" + DIRECT
+                + "\",\"conversationType\":\"DIRECT\",\"recipientIds\":[\"" + ANH + "\"],\"type\":\"TEXT\"}"
+        ));
+
+        Dashboard dashboard = new DashboardService(stored).current(
+            DateRange.parse("2026-10-20", "2026-10-31")
+        );
+        assertEquals(1, dashboard.getVerifyFunnel().getRegistered());
+        assertEquals(1, dashboard.getVerifyFunnel().getVerified());
+        assertEquals(1, dashboard.getVerifyFunnel().getFirstMessage());
+        assertTrue(dashboard.getVerifyFunnel().getFirstMessage() <= dashboard.getVerifyFunnel().getRegistered());
+    }
+
     private static String envelope(String eventId, String type, String payload) {
         return envelopeAt(eventId, type, "2026-10-25T00:00:00Z", payload);
     }
@@ -142,6 +183,8 @@ class DashboardBreakdownTest {
         private final Map<String, Map<LocalDate, long[]>> byDay = new HashMap<>();
         private final Map<String, Long> friends = new HashMap<>();
         private final Map<LocalDate, Set<String>> activeByDay = new HashMap<>();
+        private final Map<String, LocalDate> registrations = new HashMap<>();
+        private final Map<String, LocalDate> verifications = new HashMap<>();
 
         @Override
         public boolean recordIfNew(String eventId, String type, Instant occurredAt) {
@@ -156,7 +199,11 @@ class DashboardBreakdownTest {
         @Override
         public void note(ActivityNote note) {
             LocalDate day = note.occurredAt().atOffset(ZoneOffset.UTC).toLocalDate();
-            if (ActivityTypes.LOGGED_IN.equals(note.type())) {
+            if (ActivityTypes.REGISTERED.equals(note.type())) {
+                registrations.putIfAbsent(note.actorId(), day);
+            } else if (ActivityTypes.VERIFIED.equals(note.type())) {
+                verifications.putIfAbsent(note.actorId(), day);
+            } else if (ActivityTypes.LOGGED_IN.equals(note.type())) {
                 users.add(note.actorId());
                 activeByDay.computeIfAbsent(day, ignored -> new HashSet<>()).add(note.actorId());
                 bumpLifetime(note.actorId(), 0, 1);
@@ -251,7 +298,16 @@ class DashboardBreakdownTest {
 
         @Override
         public List<DayTotal> registrationsByDay(DateRange range) {
-            return List.of();
+            Map<LocalDate, Long> byRegDay = new HashMap<>();
+            registrations.forEach((userId, day) -> {
+                if (range.contains(day)) {
+                    byRegDay.merge(day, 1L, Long::sum);
+                }
+            });
+            List<DayTotal> rows = new ArrayList<>();
+            byRegDay.forEach((day, total) -> rows.add(new DayTotal(day.toString(), total)));
+            rows.sort((a, b) -> a.getDay().compareTo(b.getDay()));
+            return rows;
         }
 
         @Override
@@ -261,7 +317,26 @@ class DashboardBreakdownTest {
 
         @Override
         public long verifications(DateRange range) {
-            return 0;
+            return verifications.values().stream().filter(range::contains).count();
+        }
+
+        @Override
+        public long verifiedInRegistrationCohort(DateRange range) {
+            return registrations.entrySet().stream()
+                .filter(entry -> range.contains(entry.getValue()))
+                .filter(entry -> verifications.containsKey(entry.getKey()))
+                .count();
+        }
+
+        @Override
+        public long firstMessageInRegistrationCohort(DateRange range) {
+            return registrations.entrySet().stream()
+                .filter(entry -> range.contains(entry.getValue()))
+                .filter(entry -> {
+                    long[] life = lifetime.get(entry.getKey());
+                    return life != null && life[1] > 0;
+                })
+                .count();
         }
 
         @Override
@@ -296,6 +371,11 @@ class DashboardBreakdownTest {
 
         @Override
         public List<MediaDayTotal> mediaByDay(DateRange range) {
+            return List.of();
+        }
+
+        @Override
+        public List<HeatmapCell> platformHeatmap() {
             return List.of();
         }
 

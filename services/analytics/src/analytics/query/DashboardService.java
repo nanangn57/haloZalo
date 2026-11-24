@@ -27,6 +27,7 @@ public final class DashboardService {
         long friendRequests = query.friendRequests(range);
         long friendAccepted = query.friendAccepted(range);
         List<DayTotal> registrations = query.registrationsByDay(range);
+        long registered = query.sumDayTotal(registrations);
         return new Dashboard(
             messages,
             query.activeUsers(),
@@ -35,7 +36,11 @@ public final class DashboardService {
             query.distinctActive(anchor.minusDays(6), anchor),
             query.distinctActive(anchor.minusDays(29), anchor),
             registrations,
-            new VerifyFunnel(query.sumDayTotal(registrations), query.verifications(range), messengers),
+            new VerifyFunnel(
+                registered,
+                query.verifiedInRegistrationCohort(range),
+                query.firstMessageInRegistrationCohort(range)
+            ),
             activeInRange == 0 ? 0 : (double) messageTotal / activeInRange,
             activeInRange == 0 ? 0 : (double) messengers / activeInRange,
             friendRequests,
@@ -43,6 +48,7 @@ public final class DashboardService {
             query.groupsCreated(range),
             query.avgMembersPerGroup(range),
             query.mediaByDay(range),
+            query.platformHeatmap(),
             range
         );
     }
