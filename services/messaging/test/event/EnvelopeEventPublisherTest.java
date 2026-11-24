@@ -17,6 +17,7 @@ import com.jayway.jsonpath.JsonPath;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -125,7 +126,10 @@ class EnvelopeEventPublisherTest {
         assertEquals("messaging", JsonPath.read(recorded.get(0), "$.producer"));
         assertEquals(MESSAGE.getMessageId(), JsonPath.read(recorded.get(0), "$.payload.messageId"));
         assertEquals("GROUP", JsonPath.read(recorded.get(0), "$.payload.conversationType"));
-        assertEquals(List.of("bob", "carol"), JsonPath.read(recorded.get(0), "$.payload.recipientIds"));
+        // recipientIds come from a Set — order is not guaranteed.
+        assertEquals(
+            Set.of("bob", "carol"),
+            new HashSet<>(JsonPath.<List<String>>read(recorded.get(0), "$.payload.recipientIds")));
     }
 
     @Test
