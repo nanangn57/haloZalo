@@ -408,7 +408,13 @@ export default function ContactsPage() {
           <Text style={styles.label}>Display name</Text>
           <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} />
           <Text style={styles.label}>Avatar URL</Text>
-          <TextInput style={styles.input} value={avatar} onChangeText={setAvatar} autoCapitalize="none" />
+          <TextInput
+            style={styles.input}
+            value={avatar}
+            onChangeText={setAvatar}
+            autoCapitalize="none"
+            placeholder="https://… (empty = initials)"
+          />
           <Pressable
             style={styles.button}
             onPress={() => {

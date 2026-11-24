@@ -263,7 +263,7 @@ function NavBar({ currentUser }: UserItemProps) {
                     className="app-input"
                     value={editAvatar}
                     onChange={(event) => setEditAvatar(event.target.value)}
-                    placeholder="https://…"
+                    placeholder="https://… (để trống = chữ cái viết tắt)"
                   />
                 </div>
 

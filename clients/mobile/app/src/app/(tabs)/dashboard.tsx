@@ -80,7 +80,7 @@ const SECONDARY_KPIS: {
   {
     key: 'groupsCreated',
     label: 'Groups',
-    description: 'Groups you own',
+    description: 'Groups you created',
     icon: 'people-outline',
     color: '#0284c7',
   },
