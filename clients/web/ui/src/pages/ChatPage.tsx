@@ -48,8 +48,15 @@ import {
 import { getInitials } from '@core/avatar'
 import { uploadMediaApi, type MediaUploadType } from '@core/mediaService'
 import { getGroupMembersApi, getGroupsApi } from '@core/groupService'
+import { getPresenceApi } from '@core/presenceService'
 import { socketClient } from '@core/socketClient'
 import type { MessagingEvent, SocketStatus } from '@core/socketClient'
+
+/** Chat header cần phản hồi nhanh hơn Contacts (30s). */
+const PRESENCE_POLL_MS = 5_000
+
+/** Trang tin khi mở hội thoại / scroll lên tải thêm. */
+const HISTORY_PAGE_SIZE = 10
 
 import EmojiPicker, {
   type EmojiClickData,
@@ -146,6 +153,10 @@ function ChatPage() {
 
   const [messageLoadError, setMessageLoadError] =
     useState<string | null>(null)
+
+  const [hasMoreOlder, setHasMoreOlder] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const loadingOlderRef = useRef(false)
 
   const [newMessage, setNewMessage] = useState('')
 
@@ -478,12 +489,15 @@ function ChatPage() {
 
         if (!isMounted) return
 
-        // STEP 2: Load message history.
-        const result = await getMessagesApi(currentConversationId)
+        // STEP 2: Load newest page only; scroll-up loads older via beforeSeq.
+        const result = await getMessagesApi(currentConversationId, {
+          limit: HISTORY_PAGE_SIZE,
+        })
 
         if (!isMounted) return
 
         setMessages(result.messages)
+        setHasMoreOlder(result.hasMore)
         setMessageLoadError(null)
         setReplyTarget(null)
         setReactionsByMessage({})
@@ -531,6 +545,7 @@ function ChatPage() {
 
         if (isMounted) {
           setMessages([])
+          setHasMoreOlder(false)
 
           setMessageLoadError(
             err instanceof Error
@@ -622,23 +637,8 @@ function ChatPage() {
         return
       }
 
-      if (event.type === 'messaging.presence') {
-        const payload = event.payload as {
-          conversationId?: string
-          userId?: string
-          status?: string
-        }
-        if (
-          !payload.conversationId ||
-          payload.conversationId !==
-            selectedConversationRef.current?.conversationId ||
-          payload.userId === currentUserId
-        ) {
-          return
-        }
-        setPeerOnline(payload.status === 'online')
-        return
-      }
+      // messaging.presence = “đang mở hội thoại này” (ephemeral). Online/Offline trên
+      // header lấy từ GET /presence (socket đang mở), xem effect refreshPeerPresence.
 
       if (event.type === 'messaging.message.deleted') {
         const payload = event.payload as { messageId?: string }
@@ -916,24 +916,78 @@ function ChatPage() {
     )
   })()
 
+  const selectedConversationId = selectedConversation?.conversationId
+  const selectedConversationType = selectedConversation?.type
+  const selectedMemberIdsKey =
+    selectedConversation?.memberIds.join(',') ?? ''
+
   useEffect(() => {
-    const conversationId = selectedConversation?.conversationId
     lastTypingSentRef.current = false
-    if (!conversationId) {
+    if (!selectedConversationId) {
       return
     }
-    // Reset ephemeral UI after paint so we do not sync-setState in the effect body.
-    const reset = window.setTimeout(() => {
-      setTypingUserId(null)
-      setPeerOnline(false)
-    }, 0)
-    socketClient.sendPresence(conversationId, 'online')
-    return () => {
-      window.clearTimeout(reset)
-      socketClient.sendPresence(conversationId, 'offline')
-      socketClient.sendTyping(conversationId, false)
+
+    const peerId =
+      selectedConversationType === 'DIRECT'
+        ? selectedMemberIdsKey
+            .split(',')
+            .filter(Boolean)
+            .find((userId) => userId !== currentUserId)
+        : undefined
+
+    let cancelled = false
+    let pollTimer: ReturnType<typeof setInterval> | undefined
+
+    const refreshPeerPresence = () => {
+      if (!peerId) {
+        return
+      }
+      void getPresenceApi([peerId])
+        .then((result) => {
+          if (cancelled) {
+            return
+          }
+          if (
+            selectedConversationRef.current?.conversationId !==
+            selectedConversationId
+          ) {
+            return
+          }
+          setPeerOnline(result[peerId]?.online === true)
+        })
+        .catch(() => undefined)
     }
-  }, [selectedConversation?.conversationId])
+
+    // Reset typing after paint. Presence: không flash Offline trước khi /presence trả lời;
+    // chỉ coi offline khi không có peer hoặc API nói offline.
+    const kickoff = window.setTimeout(() => {
+      setTypingUserId(null)
+      if (!peerId) {
+        setPeerOnline(false)
+        return
+      }
+      refreshPeerPresence()
+      pollTimer = window.setInterval(refreshPeerPresence, PRESENCE_POLL_MS)
+      window.addEventListener('focus', refreshPeerPresence)
+    }, 0)
+
+    socketClient.sendPresence(selectedConversationId, 'online')
+    return () => {
+      cancelled = true
+      window.clearTimeout(kickoff)
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer)
+      }
+      window.removeEventListener('focus', refreshPeerPresence)
+      socketClient.sendPresence(selectedConversationId, 'offline')
+      socketClient.sendTyping(selectedConversationId, false)
+    }
+  }, [
+    selectedConversationId,
+    selectedConversationType,
+    selectedMemberIdsKey,
+    currentUserId,
+  ])
 
   // Resolve subtitle.
   const chatSubtitle = (() => {
@@ -986,6 +1040,71 @@ function ChatPage() {
     // setShowUserInfo(false)
     setShowEmojiPicker(false)
     setNewMessage('')
+  }
+
+  async function handleLoadOlderMessages(): Promise<boolean> {
+    const conversation = selectedConversation
+    if (
+      !conversation ||
+      loadingOlderRef.current ||
+      !hasMoreOlder
+    ) {
+      return false
+    }
+
+    const oldestSeq = visibleMessages.reduce<number | null>(
+      (min, message) => {
+        if (typeof message.seq !== 'number') {
+          return min
+        }
+        return min === null ? message.seq : Math.min(min, message.seq)
+      },
+      null,
+    )
+    if (oldestSeq === null) {
+      return false
+    }
+
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    try {
+      const page = await getMessagesApi(conversation.conversationId, {
+        beforeSeq: oldestSeq,
+        limit: HISTORY_PAGE_SIZE,
+      })
+      if (page.messages.length === 0) {
+        setHasMoreOlder(false)
+        return false
+      }
+
+      const seen = new Set(
+        visibleMessages.map(
+          (message) => message.messageId ?? message.id,
+        ),
+      )
+      const older = page.messages.filter((message) => {
+        const key = message.messageId ?? message.id
+        if (seen.has(key)) {
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+      if (older.length === 0) {
+        setHasMoreOlder(page.hasMore)
+        return false
+      }
+
+      setMessages((previous) => [...older, ...previous])
+      setHasMoreOlder(page.hasMore)
+      return true
+    } catch (err) {
+      console.error('Cannot load older messages:', err)
+      return false
+    } finally {
+      loadingOlderRef.current = false
+      setLoadingOlder(false)
+    }
   }
 
   // --------------------------------------------------
@@ -1647,6 +1766,10 @@ function ChatPage() {
             <ChatMessages
               messages={visibleMessages}
               currentUserId={currentUserId}
+              conversationId={selectedConversation.conversationId}
+              hasMoreOlder={hasMoreOlder}
+              loadingOlder={loadingOlder}
+              onLoadOlder={handleLoadOlderMessages}
               reactions={reactionsByMessage}
               getSenderName={senderNameOf}
               onReply={setReplyTarget}

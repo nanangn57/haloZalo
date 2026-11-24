@@ -37,16 +37,20 @@ function toPresence(raw: RawPresence, fallbackUserId?: string): UserPresence | n
   }
 }
 
-// Chấp nhận `{ presence: [...] }`, `{ users: [...] }`, mảng trần, hoặc map `{ [userId]: {...} | boolean }`.
+// OpenAPI: `{ presences: [...] }`. Cũng chấp nhận `presence` / `users`, mảng trần, hoặc map.
 function parsePresence(data: unknown): UserPresence[] {
   if (!data || typeof data !== 'object') {
     return []
   }
 
+  const body = data as {
+    presences?: unknown
+    presence?: unknown
+    users?: unknown
+  }
   const list = Array.isArray(data)
     ? data
-    : (data as { presence?: unknown }).presence
-      ?? (data as { users?: unknown }).users
+    : body.presences ?? body.presence ?? body.users
 
   if (Array.isArray(list)) {
     return list
@@ -54,8 +58,11 @@ function parsePresence(data: unknown): UserPresence[] {
       .filter((item): item is UserPresence => item !== null)
   }
 
-  const source = (list && typeof list === 'object' ? list : data) as Record<string, unknown>
-  return Object.entries(source)
+  if (!list || typeof list !== 'object' || Array.isArray(list)) {
+    return []
+  }
+
+  return Object.entries(list as Record<string, unknown>)
     .map(([userId, value]) => {
       if (typeof value === 'boolean') {
         return { userId, online: value } as UserPresence

@@ -1,12 +1,21 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { Message } from '@core/types/message'
 import type { MessageReaction, ReactionCode } from '@core/messageService'
 import { resolveMediaUrl } from '@core/mediaService'
 import './ChatMessages.css'
 
+const NEAR_BOTTOM_PX = 96
+const LOAD_OLDER_THRESHOLD_PX = 64
+
 interface ChatMessageProps {
   messages: Message[]
   currentUserId: string
+  /** Đổi khi đổi hội thoại → nhảy xuống tin mới nhất. */
+  conversationId?: string
+  hasMoreOlder?: boolean
+  loadingOlder?: boolean
+  /** Trả true nếu có tin cũ được prepend. */
+  onLoadOlder?: () => boolean | Promise<boolean>
   // Reaction đang gắn theo messageId (reactions API + sự kiện WebSocket)
   reactions?: Record<string, MessageReaction[]>
   // Tên người gửi cho khối trả lời; mặc định "Bạn" / "Người dùng"
@@ -198,6 +207,10 @@ function replySnippet(message: Message | undefined): string {
 function ChatMessages({
   messages,
   currentUserId,
+  conversationId,
+  hasMoreOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
   reactions = {},
   getSenderName,
   onReply,
@@ -207,11 +220,60 @@ function ChatMessages({
 }: ChatMessageProps) {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const scrollAnchorRef = useRef<{ height: number; top: number } | null>(null)
+  const loadingOlderGuardRef = useRef(false)
 
   const byMessageId = new Map<string, Message>()
   messages.forEach((message) => {
     if (message.messageId) byMessageId.set(message.messageId, message)
   })
+
+  function scrollToLatest(behavior: ScrollBehavior = 'auto') {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior })
+  }
+
+  // Mở hội thoại / đổi hội thoại: luôn thấy tin mới nhất.
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true
+    scrollAnchorRef.current = null
+    scrollToLatest('auto')
+    const raf = window.requestAnimationFrame(() => scrollToLatest('auto'))
+    return () => window.cancelAnimationFrame(raf)
+  }, [conversationId])
+
+  // Tin mới ở cuối → giữ đáy nếu đang xem gần đáy. Tin cũ prepend → giữ vị trí đọc.
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (!el) return
+    const anchor = scrollAnchorRef.current
+    if (anchor) {
+      el.scrollTop = anchor.top + (el.scrollHeight - anchor.height)
+      scrollAnchorRef.current = null
+      return
+    }
+    if (stickToBottomRef.current) {
+      scrollToLatest('auto')
+    }
+  }, [messages])
+
+  // Ảnh/media làm cao thêm: nếu đang stick thì kéo lại đáy.
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current && !scrollAnchorRef.current) {
+        scrollToLatest('auto')
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [conversationId])
 
   function startPress(id: string) {
     cancelPress()
@@ -222,6 +284,41 @@ function ChatMessages({
     if (pressTimer.current) {
       clearTimeout(pressTimer.current)
       pressTimer.current = null
+    }
+  }
+
+  async function handleScroll() {
+    const el = listRef.current
+    if (!el) return
+
+    const distanceFromBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottomRef.current = distanceFromBottom < NEAR_BOTTOM_PX
+
+    if (
+      !onLoadOlder ||
+      !hasMoreOlder ||
+      loadingOlder ||
+      loadingOlderGuardRef.current ||
+      el.scrollTop > LOAD_OLDER_THRESHOLD_PX
+    ) {
+      return
+    }
+
+    scrollAnchorRef.current = {
+      height: el.scrollHeight,
+      top: el.scrollTop,
+    }
+    loadingOlderGuardRef.current = true
+    try {
+      const loaded = await onLoadOlder()
+      if (!loaded) {
+        scrollAnchorRef.current = null
+      }
+    } catch {
+      scrollAnchorRef.current = null
+    } finally {
+      loadingOlderGuardRef.current = false
     }
   }
 
@@ -237,7 +334,19 @@ function ChatMessages({
     userId === currentUserId ? 'You' : (getSenderName?.(userId) ?? 'User')
 
   return (
-    <div className="chat-messages" onClick={() => setMenuFor(null)}>
+    <div
+      ref={listRef}
+      className="chat-messages"
+      onClick={() => setMenuFor(null)}
+      onScroll={() => {
+        void handleScroll()
+      }}
+    >
+      {loadingOlder ? (
+        <div className="chat-messages-loading-older" aria-live="polite">
+          Loading older messages…
+        </div>
+      ) : null}
       {messages.map((message) => {
         const isMine = message.senderId === currentUserId
         const isMedia =
@@ -415,6 +524,7 @@ function ChatMessages({
           </div>
         )
       })}
+      <div ref={bottomRef} className="chat-messages-end" aria-hidden="true" />
     </div>
   )
 }
