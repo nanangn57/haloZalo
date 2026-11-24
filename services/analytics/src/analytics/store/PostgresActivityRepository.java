@@ -161,10 +161,15 @@ public final class PostgresActivityRepository implements ActivityRepository, Act
                 addUserDay(connection, note.actorId(), day, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             } else if (ActivityTypes.GROUP_CREATED.equals(note.type())) {
                 int members = note.memberCount() == null || note.memberCount() < 1 ? 1 : note.memberCount();
+                // Count once per groupId even if an older live publish used a random event id
+                // and reconcile later emits the deterministic "grp" id.
+                boolean firstSight = !knownGroup(connection, note.subjectId());
                 rememberGroup(connection, note.subjectId(), members);
-                addUser(connection, note.actorId(), 0, 0, 0, 1, 0);
-                addUserDay(connection, note.actorId(), day, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0);
-                addGroupsDay(connection, day, members);
+                if (firstSight) {
+                    addUser(connection, note.actorId(), 0, 0, 0, 1, 0);
+                    addUserDay(connection, note.actorId(), day, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0);
+                    addGroupsDay(connection, day, members);
+                }
             } else if (ActivityTypes.FRIEND_REQUEST_SENT.equals(note.type())) {
                 addUserDay(connection, note.fromUserId(), day, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0);
                 addUserDay(connection, note.toUserId(), day, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0);

@@ -7,10 +7,11 @@
 ref/
 skills-lock.json
 
-# doc/: only contract, requirement, timeline are tracked
+# doc/: only contract, requirement, timeline, test are tracked
 doc/**
 !doc/requirement.md
 !doc/timeline.md
+!doc/test.md
 !doc/contract/
 !doc/contract/**
 

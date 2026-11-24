@@ -5,6 +5,7 @@ import javax.sql.DataSource;
 import analytics.record.ActivityRecorder;
 import analytics.record.AggregateActivityRecorder;
 import analytics.query.DashboardQuery;
+import analytics.query.FriendsCountLookup;
 import analytics.store.ActivityBreakdown;
 import analytics.store.ActivityRepository;
 import analytics.store.AnalyticsSchema;
@@ -32,8 +33,8 @@ public class AppAnalyticsConfiguration {
     }
 
     @Bean
-    DashboardQuery dashboardQuery(DataSource dataSource) {
-        return new PostgresDashboardQuery(dataSource);
+    DashboardQuery dashboardQuery(DataSource dataSource, FriendsCountLookup friendsCount) {
+        return new PostgresDashboardQuery(dataSource, friendsCount);
     }
 
     @Bean

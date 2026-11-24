@@ -1,5 +1,7 @@
 package app;
 
+import identity.event.LoggingEventPublisher;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,5 +16,14 @@ class IdentityAnalyticsReconcileTest {
         assertEquals(first, again);
         assertNotEquals(first, other);
         assertEquals(36, first.length());
+    }
+
+    @Test
+    void groupReconcileIdMatchesLivePublisher() {
+        String groupId = "11111111-2222-4333-8444-555555555555";
+        assertEquals(
+            LoggingEventPublisher.groupEventId(groupId),
+            IdentityAnalyticsReconcile.deterministicId("grp", groupId)
+        );
     }
 }

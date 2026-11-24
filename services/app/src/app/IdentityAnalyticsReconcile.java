@@ -46,20 +46,23 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
         int registered = 0;
         int friends = 0;
         int groups = 0;
+        int syncedFriends = 0;
         try (Connection connection = dataSource.getConnection()) {
             registered = reconcileAccounts(connection);
             rebuildRegistrationDays(connection);
             friends = reconcileFriends(connection);
+            syncedFriends = syncFriendsCounts(connection);
             groups = reconcileGroups(connection);
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not reconcile identity → analytics", ex);
         }
-        if (registered > 0 || friends > 0 || groups > 0) {
+        if (registered > 0 || friends > 0 || groups > 0 || syncedFriends > 0) {
             log.info(
-                "Identity analytics reconcile applied accountEvents={} friendEvents={} groupEvents={}",
+                "Identity analytics reconcile applied accountEvents={} friendEvents={} groupEvents={} friendsCountRows={}",
                 registered,
                 friends,
-                groups
+                groups,
+                syncedFriends
             );
         }
     }
@@ -99,11 +102,28 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
         }
     }
 
-    private int reconcileFriends(Connection connection) throws SQLException {
-        // Skip when social aggregates already exist (live events or ops seed) to avoid double count.
-        if (tableHasRows(connection, "analytics.friend_by_day")) {
-            return 0;
+    /**
+     * Absolute snapshot of current friendships into analytics.user_activity.friends_count.
+     * Event replay alone drifts (seed rows, skipped reconcile when friend_by_day exists, unfriend).
+     */
+    private int syncFriendsCounts(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE analytics.user_activity SET friends_count = 0");
         }
+        String sql =
+            "INSERT INTO analytics.user_activity "
+                + "(user_id, logins, messages_sent, messages_received, groups_created, friends_count) "
+                + "SELECT user_id, 0, 0, 0, 0, COUNT(*) FROM identity.friendships GROUP BY user_id "
+                + "ON CONFLICT (user_id) DO UPDATE SET friends_count = EXCLUDED.friends_count";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            return statement.executeUpdate();
+        }
+    }
+
+    private int reconcileFriends(Connection connection) throws SQLException {
+        // Always attempt; deterministic event ids + recorded_events keep re-runs idempotent.
+        // Do not skip when friend_by_day already has rows — that left personal sent/received at 0
+        // for seed / pre-recorder friendships (e.g. anh ↔ huy).
         int applied = 0;
         String pending = "SELECT from_user_id, to_user_id FROM identity.friend_requests";
         try (PreparedStatement statement = connection.prepareStatement(pending);
@@ -129,9 +149,10 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
                 String from = rows.getString("user_id");
                 String to = rows.getString("friend_id");
                 Instant at = Instant.now();
+                // Same "frs"/"fra" ids as LoggingEventPublisher so live + reconcile never double-count.
                 if (record(
                     ActivityTypes.FRIEND_REQUEST_SENT,
-                    deterministicId("frs-acc", from + ":" + to),
+                    deterministicId("frs", from + ":" + to),
                     at,
                     friendPayload(from, to)
                 )) {
@@ -151,9 +172,9 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
     }
 
     private int reconcileGroups(Connection connection) throws SQLException {
-        if (tableHasRows(connection, "analytics.groups_by_day")) {
-            return 0;
-        }
+        // Always attempt; deterministic "grp" event ids + recorded_events / known_groups keep
+        // re-runs idempotent. Do not skip when groups_by_day already has rows — that left
+        // personal groupsCreated at 0 for groups created before the recorder (cloud seed/QA).
         String sql =
             "SELECT g.group_id, g.owner_id, g.created_at, "
                 + "(SELECT COUNT(*) FROM identity.memberships m WHERE m.group_id = g.group_id) AS members "
@@ -163,6 +184,9 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
              ResultSet rows = statement.executeQuery()) {
             while (rows.next()) {
                 String groupId = rows.getString("group_id");
+                if (groupAlreadyCounted(connection, groupId)) {
+                    continue;
+                }
                 String ownerId = rows.getString("owner_id");
                 Instant at = rows.getTimestamp("created_at").toInstant();
                 int members = Math.max(1, rows.getInt("members"));
@@ -174,6 +198,18 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
             }
         }
         return applied;
+    }
+
+    /** True when analytics already counted this group (live random id or prior reconcile). */
+    private static boolean groupAlreadyCounted(Connection connection, String groupId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+            "SELECT 1 FROM analytics.known_groups WHERE group_id = ?"
+        )) {
+            statement.setString(1, groupId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        }
     }
 
     private boolean record(String type, String eventId, Instant occurredAt, String payload) {
@@ -202,13 +238,6 @@ public final class IdentityAnalyticsReconcile implements ApplicationRunner {
             }
         } catch (SQLException ex) {
             return false;
-        }
-    }
-
-    private static boolean tableHasRows(Connection connection, String table) throws SQLException {
-        try (Statement statement = connection.createStatement();
-             ResultSet rows = statement.executeQuery("SELECT 1 FROM " + table + " LIMIT 1")) {
-            return rows.next();
         }
     }
 

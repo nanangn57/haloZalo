@@ -41,18 +41,56 @@ class LoggingEventPublisherTest {
     }
 
     @Test
+    void friendEventsUseStableIdsSoReconcileCannotDoubleCount() {
+        String from = "11111111-1111-4111-8111-111111111111";
+        String to = "33333333-3333-4333-8333-333333333333";
+        assertEquals(
+            LoggingEventPublisher.friendEventId("frs", from, to),
+            LoggingEventPublisher.friendEventId("frs", from, to)
+        );
+        assertNotEquals(
+            LoggingEventPublisher.friendEventId("frs", from, to),
+            LoggingEventPublisher.friendEventId("fra", from, to)
+        );
+
+        MemoryActivities stored = new MemoryActivities();
+        LoggingEventPublisher publisher = new LoggingEventPublisher(new AggregateActivityRecorder(stored));
+        publisher.publishFriendRequestSent(from, to);
+        publisher.publishFriendRequestSent(from, to);
+        publisher.publishFriendRequestAccepted(from, to);
+        publisher.publishFriendRequestAccepted(from, to);
+        assertEquals(1, stored.count("identity.friend.request_sent"));
+        assertEquals(1, stored.count("identity.friend.request_accepted"));
+    }
+
+    @Test
     void groupEnvelopeCarriesTheContract() {
+        String groupId = "11111111-2222-4333-8444-555555555555";
         String envelope = LoggingEventPublisher.groupEnvelope(
-            "11111111-2222-4333-8444-555555555555",
+            groupId,
             "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
         );
 
         assertTrue(envelope.contains("\"type\":\"identity.group.created\""));
         assertTrue(envelope.contains("\"producer\":\"identity\""));
-        assertTrue(envelope.contains("\"groupId\":\"11111111-2222-4333-8444-555555555555\""));
+        assertTrue(envelope.contains("\"groupId\":\"" + groupId + "\""));
         assertTrue(envelope.contains("\"ownerId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\""));
         assertTrue(envelope.contains("\"memberCount\":1"));
+        assertTrue(envelope.contains("\"eventId\":\"" + LoggingEventPublisher.groupEventId(groupId) + "\""));
         assertFalse(envelope.contains("name"));
+    }
+
+    @Test
+    void groupEventIdIsStablePerGroup() {
+        String groupId = "11111111-2222-4333-8444-555555555555";
+        assertEquals(
+            LoggingEventPublisher.groupEventId(groupId),
+            LoggingEventPublisher.groupEventId(groupId)
+        );
+        assertNotEquals(
+            LoggingEventPublisher.groupEventId(groupId),
+            LoggingEventPublisher.groupEventId("22222222-2222-4333-8444-555555555555")
+        );
     }
 
     @Test

@@ -114,6 +114,16 @@ class DashboardBreakdownTest {
     }
 
     @Test
+    void groupCreatedCountsOncePerGroupIdEvenWithDifferentEventIds() {
+        MemoryBreakdown stored = new MemoryBreakdown();
+        AggregateActivityRecorder recorder = new AggregateActivityRecorder(stored, stored);
+        String payload = "{\"groupId\":\"" + GROUP + "\",\"ownerId\":\"" + ANH + "\",\"memberCount\":2}";
+        recorder.record(envelope("random-live-id", ActivityTypes.GROUP_CREATED, payload));
+        recorder.record(envelope("deterministic-grp-id", ActivityTypes.GROUP_CREATED, payload));
+        assertEquals(1, new DashboardService(stored).mine(ANH).getGroupsCreated());
+    }
+
+    @Test
     void missingSessionIsRejected() {
         assertThrows(DashboardService.MissingSession.class, () -> new DashboardService(new MemoryBreakdown()).mine(" "));
     }
@@ -209,9 +219,11 @@ class DashboardBreakdownTest {
                 bumpLifetime(note.actorId(), 0, 1);
                 bumpDay(note.actorId(), day, 0, 1);
             } else if (ActivityTypes.GROUP_CREATED.equals(note.type())) {
-                groups.add(note.subjectId());
-                bumpLifetime(note.actorId(), 3, 1);
-                bumpDay(note.actorId(), day, 3, 1);
+                boolean firstSight = groups.add(note.subjectId());
+                if (firstSight) {
+                    bumpLifetime(note.actorId(), 3, 1);
+                    bumpDay(note.actorId(), day, 3, 1);
+                }
             } else if (ActivityTypes.MESSAGE_CREATED.equals(note.type())) {
                 days.merge(day.toString(), 1L, Long::sum);
                 users.add(note.actorId());

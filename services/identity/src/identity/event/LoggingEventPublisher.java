@@ -1,5 +1,6 @@
 package identity.event;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -64,6 +65,7 @@ public final class LoggingEventPublisher implements EventPublisher {
     @Override
     public void publishFriendRequestSent(String fromUserId, String toUserId) {
         deliver(wrap(
+            friendEventId("frs", fromUserId, toUserId),
             "identity.friend.request_sent",
             "{\"fromUserId\":\"" + fromUserId + "\",\"toUserId\":\"" + toUserId + "\"}"
         ));
@@ -72,6 +74,7 @@ public final class LoggingEventPublisher implements EventPublisher {
     @Override
     public void publishFriendRequestAccepted(String fromUserId, String toUserId) {
         deliver(wrap(
+            friendEventId("fra", fromUserId, toUserId),
             "identity.friend.request_accepted",
             "{\"fromUserId\":\"" + fromUserId + "\",\"toUserId\":\"" + toUserId + "\"}"
         ));
@@ -135,6 +138,7 @@ public final class LoggingEventPublisher implements EventPublisher {
     static String groupEnvelope(String groupId, String ownerId, int memberCount) {
         int members = memberCount < 1 ? 1 : memberCount;
         return wrap(
+            groupEventId(groupId),
             "identity.group.created",
             "{\"groupId\":\"" + groupId + "\",\"ownerId\":\"" + ownerId + "\",\"memberCount\":" + members + "}"
         );
@@ -164,12 +168,33 @@ public final class LoggingEventPublisher implements EventPublisher {
     }
 
     private static String wrap(String type, String payload) {
+        return wrap(UUID.randomUUID().toString(), type, payload);
+    }
+
+    private static String wrap(String eventId, String type, String payload) {
         return "{"
-            + "\"eventId\":\"" + UUID.randomUUID() + "\","
+            + "\"eventId\":\"" + eventId + "\","
             + "\"type\":\"" + type + "\","
             + "\"occurredAt\":\"" + Instant.now() + "\","
             + "\"producer\":\"identity\","
             + "\"payload\":" + payload
             + "}";
+    }
+
+    /**
+     * Stable ids shared with {@code IdentityAnalyticsReconcile} so seed backfill and live
+     * publishes do not double-count the same from→to pair.
+     */
+    static String friendEventId(String kind, String fromUserId, String toUserId) {
+        return UUID.nameUUIDFromBytes(
+            ("halozalo:" + kind + ":" + fromUserId + ":" + toUserId).getBytes(StandardCharsets.UTF_8)
+        ).toString();
+    }
+
+    /** Stable id shared with reconcile {@code deterministicId("grp", groupId)}. */
+    public static String groupEventId(String groupId) {
+        return UUID.nameUUIDFromBytes(
+            ("halozalo:grp:" + groupId).getBytes(StandardCharsets.UTF_8)
+        ).toString();
     }
 }

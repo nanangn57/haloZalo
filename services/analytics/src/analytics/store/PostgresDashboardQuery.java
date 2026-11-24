@@ -17,6 +17,7 @@ import analytics.query.DateRange;
 import analytics.query.DayTotal;
 import analytics.query.DirectGroupSplit;
 import analytics.query.FriendActivity;
+import analytics.query.FriendsCountLookup;
 import analytics.query.GroupTotal;
 import analytics.query.HeatmapCell;
 import analytics.query.MediaDayTotal;
@@ -93,9 +94,15 @@ public final class PostgresDashboardQuery implements DashboardQuery {
             + "WHERE (?::date IS NULL OR day >= ?::date) AND (?::date IS NULL OR day <= ?::date) ORDER BY day, type";
 
     private final DataSource dataSource;
+    private final FriendsCountLookup friendsCount;
 
     public PostgresDashboardQuery(DataSource dataSource) {
+        this(dataSource, FriendsCountLookup.NONE);
+    }
+
+    public PostgresDashboardQuery(DataSource dataSource, FriendsCountLookup friendsCount) {
         this.dataSource = dataSource;
+        this.friendsCount = friendsCount == null ? FriendsCountLookup.NONE : friendsCount;
     }
 
     @Override
@@ -139,15 +146,7 @@ public final class PostgresDashboardQuery implements DashboardQuery {
     @Override
     public UserActivity activityOf(String userId, DateRange range) {
         try (Connection connection = dataSource.getConnection()) {
-            long friendsCount = 0;
-            try (PreparedStatement statement = connection.prepareStatement(SELECT_FRIENDS)) {
-                statement.setString(1, userId);
-                try (ResultSet rows = statement.executeQuery()) {
-                    if (rows.next()) {
-                        friendsCount = rows.getLong("friends_count");
-                    }
-                }
-            }
+            long friendsCountValue = resolveFriendsCount(connection, userId);
             long logins = 0;
             long sent = 0;
             long received = 0;
@@ -235,12 +234,24 @@ public final class PostgresDashboardQuery implements DashboardQuery {
                 new MediaTextSplit(text, media),
                 new DirectGroupSplit(direct, group),
                 heatmap,
-                new FriendActivity(friendsCount, friendSent, friendReceived, acceptRate),
+                new FriendActivity(friendsCountValue, friendSent, friendReceived, acceptRate),
                 top,
                 range
             );
         } catch (SQLException ex) {
             throw new IllegalStateException("Could not read user activity", ex);
+        }
+    }
+
+    private long resolveFriendsCount(Connection connection, String userId) throws SQLException {
+        if (friendsCount != FriendsCountLookup.NONE) {
+            return friendsCount.currentCount(userId);
+        }
+        try (PreparedStatement statement = connection.prepareStatement(SELECT_FRIENDS)) {
+            statement.setString(1, userId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong("friends_count") : 0L;
+            }
         }
     }
 
