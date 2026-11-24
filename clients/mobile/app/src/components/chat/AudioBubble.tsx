@@ -1,18 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio, type AVPlaybackStatus } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer, type AudioStatus } from 'expo-audio';
 
-function formatClock(millis: number): string {
-  const total = Math.max(0, Math.round(millis / 1000));
+function formatClock(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  const secs = total % 60;
+  return `${minutes}:${String(secs).padStart(2, '0')}`;
 }
 
 /** Voice note: nút play/pause + thời lượng. Sound chỉ tải khi bấm play lần đầu. */
 export default function AudioBubble({ url, color }: { url: string; color: string }) {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -21,41 +21,47 @@ export default function AudioBubble({ url, color }: { url: string; color: string
 
   useEffect(() => {
     return () => {
-      void soundRef.current?.unloadAsync().catch(() => undefined);
-      soundRef.current = null;
+      playerRef.current?.remove();
+      playerRef.current = null;
     };
   }, []);
 
-  const onStatus = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (status.error) setFailed(true);
+  const onStatus = (status: AudioStatus) => {
+    if (status.error) {
+      setFailed(true);
       return;
     }
-    setPosition(status.positionMillis);
-    if (status.durationMillis) setDuration(status.durationMillis);
-    setPlaying(status.isPlaying);
+    if (!status.isLoaded) return;
+    setPosition(status.currentTime);
+    if (status.duration > 0) setDuration(status.duration);
+    setPlaying(status.playing);
     if (status.didJustFinish) {
       setPlaying(false);
       setPosition(0);
-      void soundRef.current?.setPositionAsync(0).catch(() => undefined);
+      void playerRef.current?.seekTo(0).catch(() => undefined);
     }
   };
 
   const toggle = async () => {
     if (!url || loading) return;
     try {
-      if (!soundRef.current) {
+      if (!playerRef.current) {
         setLoading(true);
         setFailed(false);
-        await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true }, onStatus);
-        soundRef.current = sound;
+        await setAudioModeAsync({ playsInSilentMode: true });
+        const player = createAudioPlayer({ uri: url }, { updateInterval: 250 });
+        player.addListener('playbackStatusUpdate', onStatus);
+        playerRef.current = player;
+        player.play();
         return;
       }
       if (playing) {
-        await soundRef.current.pauseAsync();
+        playerRef.current.pause();
       } else {
-        await soundRef.current.playAsync();
+        if (duration > 0 && playerRef.current.currentTime >= duration - 0.05) {
+          await playerRef.current.seekTo(0);
+        }
+        playerRef.current.play();
       }
     } catch {
       setFailed(true);

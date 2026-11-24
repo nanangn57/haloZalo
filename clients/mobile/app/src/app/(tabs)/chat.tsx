@@ -39,6 +39,7 @@ import { confirmAction } from '@/lib/confirm';
 import { uploadMediaApi, type MediaUploadType } from '@core/mediaService';
 import { lookupUsersApi } from '@core/userService';
 import { getGroupsApi } from '@core/groupService';
+import { getPresenceApi } from '@core/presenceService';
 import { socketClient } from '@core/socketClient';
 import { applyConversationPrefs } from '@core/conversationPrefs';
 import type { Conversation, ConversationPrefsPatch } from '@core/types/conversation';
@@ -48,6 +49,12 @@ import * as DocumentPicker from 'expo-document-picker';
 import { VoiceRecorder, VoiceRecorderError } from '@/lib/voiceRecorder';
 import { useTheme } from '@/hooks/use-theme';
 import { Radius, Spacing } from '@/constants/theme';
+
+/** Cùng chu kỳ với Contacts: presence dựa trên socket thật. */
+const PRESENCE_POLL_MS = 30_000;
+
+/** Trang tin khi mở hội thoại / scroll lên tải thêm. */
+const HISTORY_PAGE_SIZE = 10;
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -85,6 +92,9 @@ export default function ChatPage() {
   const [newMessage, setNewMessage] = useState('');
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [socketStatus, setSocketStatus] = useState('disconnected');
@@ -213,8 +223,11 @@ export default function ChatPage() {
     setLoadingMessages(true);
     setError('');
     try {
-      const page = await getMessagesApi(conversation.conversationId);
+      const page = await getMessagesApi(conversation.conversationId, {
+        limit: HISTORY_PAGE_SIZE,
+      });
       setMessages(page.messages);
+      setHasMoreOlder(page.hasMore);
       setReplyTarget(null);
       setReactionsByMessage({});
       // Reaction không nằm trong trang tin; endpoint chưa có thì listReactionsApi trả [].
@@ -247,8 +260,56 @@ export default function ChatPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load messages');
       setMessages([]);
+      setHasMoreOlder(false);
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  const handleLoadOlderMessages = async (): Promise<boolean> => {
+    const conversation = selectedConversation;
+    if (!conversation || loadingOlderRef.current || !hasMoreOlder) {
+      return false;
+    }
+
+    const oldestSeq = messages.reduce<number | null>((min, message) => {
+      if (typeof message.seq !== 'number') return min;
+      return min === null ? message.seq : Math.min(min, message.seq);
+    }, null);
+    if (oldestSeq === null) return false;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await getMessagesApi(conversation.conversationId, {
+        beforeSeq: oldestSeq,
+        limit: HISTORY_PAGE_SIZE,
+      });
+      if (page.messages.length === 0) {
+        setHasMoreOlder(false);
+        return false;
+      }
+
+      const seen = new Set(messages.map((message) => message.messageId ?? message.id));
+      const older = page.messages.filter((message) => {
+        const key = message.messageId ?? message.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (older.length === 0) {
+        setHasMoreOlder(page.hasMore);
+        return false;
+      }
+
+      setMessages((previous) => [...older, ...previous]);
+      setHasMoreOlder(page.hasMore);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
     }
   };
 
@@ -328,21 +389,8 @@ export default function ChatPage() {
         setTypingUserId(payload.typing ? payload.userId || null : null);
         return;
       }
-      if (event.type === 'messaging.presence') {
-        const payload = event.payload as {
-          conversationId?: string;
-          userId?: string;
-          status?: string;
-        };
-        if (
-          payload.conversationId !== selectedRef.current?.conversationId ||
-          payload.userId === currentUserId
-        ) {
-          return;
-        }
-        setPeerOnline(payload.status === 'online');
-        return;
-      }
+      // messaging.presence = đang mở hội thoại (ephemeral). Header Online/Offline
+      // lấy từ GET /presence — xem effect refreshPeerPresence bên dưới.
       if (event.type === 'messaging.message.deleted') {
         const payload = event.payload as { messageId?: string };
         if (!payload.messageId) return;
@@ -444,18 +492,56 @@ export default function ChatPage() {
     };
   }, [currentUserId, upsertMessage]);
 
+  const selectedConversationId = selectedConversation?.conversationId;
+  const selectedConversationType = selectedConversation?.type;
+  const selectedMemberIdsKey = selectedConversation?.memberIds.join(',') ?? '';
+
   useEffect(() => {
-    const conversationId = selectedConversation?.conversationId;
+    lastTypingSentRef.current = false;
     setTypingUserId(null);
     setPeerOnline(false);
-    lastTypingSentRef.current = false;
-    if (!conversationId) return;
-    socketClient.sendPresence(conversationId, 'online');
-    return () => {
-      socketClient.sendPresence(conversationId, 'offline');
-      socketClient.sendTyping(conversationId, false);
+    if (!selectedConversationId) return;
+
+    const peerId =
+      selectedConversationType === 'DIRECT'
+        ? selectedMemberIdsKey
+            .split(',')
+            .filter(Boolean)
+            .find((userId) => userId !== currentUserId)
+        : undefined;
+
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const refreshPeerPresence = () => {
+      if (!peerId) return;
+      void getPresenceApi([peerId])
+        .then((result) => {
+          if (cancelled) return;
+          if (selectedRef.current?.conversationId !== selectedConversationId) return;
+          setPeerOnline(result[peerId]?.online === true);
+        })
+        .catch(() => undefined);
     };
-  }, [selectedConversation?.conversationId]);
+
+    if (peerId) {
+      refreshPeerPresence();
+      pollTimer = setInterval(refreshPeerPresence, PRESENCE_POLL_MS);
+    }
+
+    socketClient.sendPresence(selectedConversationId, 'online');
+    return () => {
+      cancelled = true;
+      if (pollTimer !== undefined) clearInterval(pollTimer);
+      socketClient.sendPresence(selectedConversationId, 'offline');
+      socketClient.sendTyping(selectedConversationId, false);
+    };
+  }, [
+    selectedConversationId,
+    selectedConversationType,
+    selectedMemberIdsKey,
+    currentUserId,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -829,6 +915,7 @@ export default function ChatPage() {
         onBack={() => {
           setSelectedConversation(null);
           setMessages([]);
+          setHasMoreOlder(false);
           setShowEmojiPicker(false);
           setShowEmotionBar(false);
           void loadConversations();
@@ -843,6 +930,10 @@ export default function ChatPage() {
           <ChatMessages
             messages={messages}
             currentUserId={currentUserId}
+            conversationId={selectedConversation.conversationId}
+            hasMoreOlder={hasMoreOlder}
+            loadingOlder={loadingOlder}
+            onLoadOlder={handleLoadOlderMessages}
             reactions={reactionsByMessage}
             getSenderName={senderNameOf}
             onLongPress={setActionTarget}

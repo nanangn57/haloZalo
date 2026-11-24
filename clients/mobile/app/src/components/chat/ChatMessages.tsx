@@ -1,5 +1,15 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Linking, Pressable } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  Linking,
+  Pressable,
+  ActivityIndicator,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '@core/types/message';
@@ -7,6 +17,9 @@ import type { MessageReaction, ReactionCode } from '@core/messageService';
 import { resolveMediaUrl } from '@core/mediaService';
 import { useTheme } from '@/hooks/use-theme';
 import AudioBubble from './AudioBubble';
+
+const LOAD_OLDER_THRESHOLD_PX = 64;
+const NEAR_BOTTOM_PX = 96;
 
 const EMOTION_LABEL: Record<string, string> = {
   like: '👍',
@@ -154,6 +167,10 @@ function replySnippet(message: Message | undefined): string {
 export default function ChatMessages({
   messages,
   currentUserId,
+  conversationId,
+  hasMoreOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
   reactions = {},
   getSenderName,
   onLongPress,
@@ -161,6 +178,10 @@ export default function ChatMessages({
 }: {
   messages: Message[];
   currentUserId: string;
+  conversationId?: string;
+  hasMoreOlder?: boolean;
+  loadingOlder?: boolean;
+  onLoadOlder?: () => boolean | Promise<boolean>;
   reactions?: Record<string, MessageReaction[]>;
   getSenderName?: (userId: string) => string;
   // Giữ lâu một tin để mở menu: reply / react / forward / recall.
@@ -168,6 +189,10 @@ export default function ChatMessages({
   onToggleReaction?: (message: Message, code: ReactionCode) => void;
 }) {
   const theme = useTheme();
+  const listRef = useRef<FlatList<Message>>(null);
+  const stickToBottomRef = useRef(true);
+  const loadingOlderGuardRef = useRef(false);
+  const pendingInitialScrollRef = useRef(true);
 
   const byMessageId = new Map<string, Message>();
   messages.forEach((message) => {
@@ -177,12 +202,62 @@ export default function ChatMessages({
   const senderName = (userId: string) =>
     userId === currentUserId ? 'You' : (getSenderName?.(userId) ?? 'User');
 
+  useEffect(() => {
+    pendingInitialScrollRef.current = true;
+    stickToBottomRef.current = true;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (pendingInitialScrollRef.current || stickToBottomRef.current) {
+      requestAnimationFrame(() => {
+        listRef.current?.scrollToEnd({ animated: !pendingInitialScrollRef.current });
+        pendingInitialScrollRef.current = false;
+      });
+    }
+  }, [messages, conversationId]);
+
+  async function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - contentOffset.y - layoutMeasurement.height;
+    stickToBottomRef.current = distanceFromBottom < NEAR_BOTTOM_PX;
+
+    if (
+      !onLoadOlder ||
+      !hasMoreOlder ||
+      loadingOlder ||
+      loadingOlderGuardRef.current ||
+      contentOffset.y > LOAD_OLDER_THRESHOLD_PX
+    ) {
+      return;
+    }
+
+    loadingOlderGuardRef.current = true;
+    try {
+      await onLoadOlder();
+    } finally {
+      loadingOlderGuardRef.current = false;
+    }
+  }
+
   return (
     <FlatList
+      ref={listRef}
       data={messages}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
       extraData={reactions}
+      maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+      onScroll={(event) => {
+        void handleScroll(event);
+      }}
+      scrollEventThrottle={16}
+      ListHeaderComponent={
+        loadingOlder ? (
+          <ActivityIndicator style={{ marginVertical: 8 }} color={theme.primary} />
+        ) : null
+      }
       renderItem={({ item }) => {
         const isMine = item.senderId === currentUserId;
         const persisted = Boolean(item.messageId) && item.status !== 'sending';
