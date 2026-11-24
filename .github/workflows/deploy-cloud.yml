@@ -73,8 +73,10 @@ jobs:
 
           # Remote: pull ref, then run existing deploy-ec2.sh on the host.
           # Secrets stay in infra/.env on EC2; never passed from GitHub.
+          # SSM Run Command runs as root; repo is owned by ssm-user → mark safe.directory.
           REMOTE_SCRIPT=$(cat <<EOF
           set -euo pipefail
+          git config --global --add safe.directory ${REPO_PATH_Q}
           cd ${REPO_PATH_Q}
           git fetch --prune origin
           git checkout ${DEPLOY_REF_Q}
