@@ -214,7 +214,7 @@ Trỏ cloud: xem [infra/e2e/README.md](../infra/e2e/README.md) và [infra/README
 | Đổi `.env` mà app vẫn gọi URL cũ | `npx expo start --clear` |
 | `--tunnel` đòi login | `npx expo login`, hoặc `--tunnel ngrok` + `@expo/ngrok` |
 | Cloud WS offline / 401 | Base `wss://…/api/messaging`; token query; nginx giữ `$args` |
-| Deploy SSM fail vì dirty `docker-compose.yml` trên EC2 | `git checkout -- infra/docker-compose.yml` rồi deploy lại (không patch tay file tracked trên host) |
+| Deploy SSM fail vì dirty file tracked trên EC2 (nginx templates, compose, …) | CD đã `git reset --hard origin/<ref>` — không sửa tay file tracked trên host; chỉ giữ `infra/.env`. Redeploy (push `dev` hoặc Actions → Deploy cloud) |
 | Verify email local | Xem log container (`IDENTITY_MAIL_MODE=log`); cloud: hộp thư Gmail |
 
 ---

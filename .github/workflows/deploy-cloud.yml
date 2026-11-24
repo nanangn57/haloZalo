@@ -68,13 +68,15 @@ jobs:
           REPO_PATH_Q=$(printf '%q' "$HALOZALO_REPO_PATH")
           DEPLOY_REF_Q=$(printf '%q' "$DEPLOY_REF")
           ALLOW_DIRTY_Q=$(printf '%q' "$ALLOW_DIRTY")
-          ORIGIN_REF_Q=$(printf '%q' "refs/remotes/origin/${DEPLOY_REF}")
           ORIGIN_MERGE_Q=$(printf '%q' "origin/${DEPLOY_REF}")
 
-          # Remote: pull ref, then run existing deploy-ec2.sh on the host.
+          # Remote: sync ref, then run existing deploy-ec2.sh on the host.
           # Secrets stay in infra/.env on EC2; never passed from GitHub.
           # AWS-RunShellScript = root, often no $HOME; repo owned by ssm-user.
           # System gitconfig avoids both "HOME not set" and "dubious ownership".
+          # Always reset --hard to origin/<ref>: hand-patched tracked files on EC2
+          # (nginx templates, docker-compose.yml, …) have broken ff-merge many times.
+          # Untracked secrets (infra/.env) are preserved by reset --hard.
           REMOTE_SCRIPT=$(cat <<EOF
           set -euo pipefail
           export HOME=/root
@@ -82,10 +84,9 @@ jobs:
           printf '%s\\n' '[safe]' '	directory = *' '	directory = ${REPO_PATH_Q}' > /etc/gitconfig
           cd ${REPO_PATH_Q}
           git fetch --prune origin
-          git checkout ${DEPLOY_REF_Q}
-          if git show-ref --verify --quiet ${ORIGIN_REF_Q}; then
-            git merge --ff-only ${ORIGIN_MERGE_Q}
-          fi
+          git checkout -B ${DEPLOY_REF_Q} ${ORIGIN_MERGE_Q}
+          git reset --hard ${ORIGIN_MERGE_Q}
+          git status --short || true
           chmod +x infra/scripts/deploy-ec2.sh
           cd infra
           if [[ ${ALLOW_DIRTY_Q} == "1" ]]; then
