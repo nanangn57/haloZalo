@@ -74,9 +74,9 @@ jobs:
           # Secrets stay in infra/.env on EC2; never passed from GitHub.
           # AWS-RunShellScript = root, often no $HOME; repo owned by ssm-user.
           # System gitconfig avoids both "HOME not set" and "dubious ownership".
-          # Always reset --hard to origin/<ref>: hand-patched tracked files on EC2
-          # (nginx templates, docker-compose.yml, …) have broken ff-merge many times.
-          # Untracked secrets (infra/.env) are preserved by reset --hard.
+          # Discard local edits BEFORE branch switch. Plain checkout -B still aborts
+          # when dirty tracked files would be overwritten (nginx templates, compose).
+          # -f + reset --hard; untracked infra/.env is preserved.
           REMOTE_SCRIPT=$(cat <<EOF
           set -euo pipefail
           export HOME=/root
@@ -84,7 +84,8 @@ jobs:
           printf '%s\\n' '[safe]' '	directory = *' '	directory = ${REPO_PATH_Q}' > /etc/gitconfig
           cd ${REPO_PATH_Q}
           git fetch --prune origin
-          git checkout -B ${DEPLOY_REF_Q} ${ORIGIN_MERGE_Q}
+          git reset --hard HEAD
+          git checkout -f -B ${DEPLOY_REF_Q} ${ORIGIN_MERGE_Q}
           git reset --hard ${ORIGIN_MERGE_Q}
           git status --short || true
           chmod +x infra/scripts/deploy-ec2.sh
