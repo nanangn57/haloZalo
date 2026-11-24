@@ -110,7 +110,8 @@ Renew cert định kỳ: `./scripts/renew-cert.sh` (cron).
 
 ### CD (GitHub Actions)
 
-Một nút deploy từ nhánh `dev` (hoặc ref khác): **Actions → Deploy cloud → Run workflow**.
+- **Auto:** mỗi push/merge vào `dev` chạy workflow **Deploy cloud**.
+- **Manual:** Actions → Deploy cloud → Run workflow (chọn `ref` tùy ý).
 
 Workflow [`.github/workflows/deploy-cloud.yml`](../.github/workflows/deploy-cloud.yml) gọi AWS SSM `SendCommand` trên EC2, `git pull` rồi chạy `infra/scripts/deploy-ec2.sh`. Secrets app (`infra/.env`) **không** đưa lên GitHub — vẫn chỉ nằm trên host.
 
