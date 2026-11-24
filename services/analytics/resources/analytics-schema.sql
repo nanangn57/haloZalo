@@ -117,6 +117,24 @@ CREATE TABLE IF NOT EXISTS analytics.media_by_day (
     PRIMARY KEY (day, type)
 );
 
+CREATE TABLE IF NOT EXISTS analytics.user_registrations (
+    user_id VARCHAR(36) NOT NULL,
+    day DATE NOT NULL,
+    PRIMARY KEY (user_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_registrations_day
+    ON analytics.user_registrations (day);
+
+CREATE TABLE IF NOT EXISTS analytics.user_verifications (
+    user_id VARCHAR(36) NOT NULL,
+    day DATE NOT NULL,
+    PRIMARY KEY (user_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_verifications_day
+    ON analytics.user_verifications (day);
+
 -- Existing installs may still have the old known_groups / user_activity shapes.
 ALTER TABLE analytics.known_groups ADD COLUMN IF NOT EXISTS member_count BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE analytics.user_activity ADD COLUMN IF NOT EXISTS messages_received BIGINT NOT NULL DEFAULT 0;

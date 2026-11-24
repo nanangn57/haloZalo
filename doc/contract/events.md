@@ -58,7 +58,7 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 
 `type` của upload là `IMAGE`, `DOCUMENT`, `VIDEO`, hoặc `AUDIO`. Analytics đếm theo `type` trong payload upload để gom `media_by_day`.
 
-Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, `conversationId`, `conversationType`, `recipientIds`, `fromUserId`, `toUserId`, `memberCount`, và `type` (media/message) trong payload để ghi bảng tổng hợp của schema `analytics`. Không đọc bảng schema `messaging`. Không backfill lịch sử — chỉ ghi từ event mới sau khi deploy.
+Analytics đọc `userId`, `ownerId`, `groupId`, `senderId`, `conversationId`, `conversationType`, `recipientIds`, `fromUserId`, `toUserId`, `memberCount`, và `type` (media/message) trong payload để ghi bảng tổng hợp của schema `analytics`. Không đọc bảng schema `messaging`. Aggregate chính từ event mới. Monolith (`services/app`) được phép reconcile idempotent từ schema `identity` sang `analytics` khi thiếu hàng (ví dụ tài khoản tạo trước khi gắn recorder).
 
 `code` của reaction nằm trong bộ `like`, `love`, `haha`, `wow`, `sad`, `angry`.
 

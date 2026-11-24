@@ -14,11 +14,11 @@ interface MesToolBarProps {
   onImagePress?: () => void;
   onFilePress?: () => void;
   onVideoPress?: () => void;
-  onVoiceStart?: () => void;
-  onVoiceStop?: () => void;
+  /** Tap to start; tap again to stop & send (avoids hold+permission race on phone). */
+  onVoiceToggle?: () => void;
 }
 
-/** Icon toolbar khớp web MesToolbar: emoji, reaction, image, file, video, hold-to-record. */
+/** Icon toolbar khớp web MesToolbar: emoji, reaction, image, file, video, voice note. */
 export default function MesToolBar({
   disabled,
   emojiOpen,
@@ -29,8 +29,7 @@ export default function MesToolBar({
   onImagePress,
   onFilePress,
   onVideoPress,
-  onVoiceStart,
-  onVoiceStop,
+  onVoiceToggle,
 }: MesToolBarProps) {
   const theme = useTheme();
 
@@ -96,19 +95,17 @@ export default function MesToolBar({
         </Pressable>
       ) : null}
 
-      {onVoiceStart && onVoiceStop ? (
+      {onVoiceToggle ? (
         <Pressable
           style={[styles.iconButton, recording && { backgroundColor: theme.primarySoft }]}
           disabled={disabled}
           accessibilityLabel={
-            recording ? 'Recording… release to send' : 'Hold to record voice message'
+            recording ? 'Stop and send voice message' : 'Record voice message'
           }
+          accessibilityHint="Tap once to start recording, tap again to send"
           accessibilityState={{ selected: !!recording }}
-          onPressIn={() => {
-            if (!disabled) onVoiceStart();
-          }}
-          onPressOut={() => {
-            if (!disabled) onVoiceStop();
+          onPress={() => {
+            if (!disabled) onVoiceToggle();
           }}
         >
           <Ionicons

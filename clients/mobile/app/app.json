@@ -40,7 +40,15 @@
           "microphonePermission": "Allow haloZalo to record voice messages."
         }
       ],
-      "expo-asset"
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow haloZalo to share photos and videos in chat.",
+          "cameraPermission": "Allow haloZalo to take photos for chat."
+        }
+      ],
+      "expo-asset",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

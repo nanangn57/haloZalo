@@ -20,6 +20,7 @@ public final class Dashboard {
     private final long groupsCreated;
     private final double avgMembersPerGroup;
     private final List<MediaDayTotal> mediaByDay;
+    private final List<HeatmapCell> heatmap;
     private final String from;
     private final String to;
 
@@ -39,6 +40,7 @@ public final class Dashboard {
         long groupsCreated,
         double avgMembersPerGroup,
         List<MediaDayTotal> mediaByDay,
+        List<HeatmapCell> heatmap,
         DateRange range
     ) {
         this.messagesByDay = List.copyOf(messagesByDay);
@@ -56,6 +58,7 @@ public final class Dashboard {
         this.groupsCreated = groupsCreated;
         this.avgMembersPerGroup = avgMembersPerGroup;
         this.mediaByDay = List.copyOf(mediaByDay);
+        this.heatmap = List.copyOf(heatmap);
         this.from = range.from() == null ? null : range.from().toString();
         this.to = range.to() == null ? null : range.to().toString();
     }
@@ -118,6 +121,10 @@ public final class Dashboard {
 
     public List<MediaDayTotal> getMediaByDay() {
         return mediaByDay;
+    }
+
+    public List<HeatmapCell> getHeatmap() {
+        return heatmap;
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -1483,7 +1483,8 @@ paths:
         Chỉ `platformRole = ADMIN`. Đọc bảng tổng hợp trong schema `analytics`.
         Không quét schema `messaging`.
         `from` / `to` (ISO date, gồm cả hai đầu, tuỳ chọn) lọc series và KPI theo ngày.
-        Không có khoảng → toàn bộ dữ liệu đã ghi (không backfill).
+        Không có khoảng → toàn bộ dữ liệu đã ghi.
+        `verifyFunnel` cohort theo ngày đăng ký trong khoảng; `heatmap` là pattern gửi tin toàn platform.
       security:
         - bearerAuth: []
       parameters:
@@ -2196,7 +2197,9 @@ components:
         firstMessage:
           type: integer
           minimum: 0
-          description: User đã gửi ≥1 tin trong khoảng (proxy activation).
+          description: |
+            Trong cohort đã đăng ký trong khoảng, số user đã gửi ≥1 tin (lifetime).
+            Không vượt `registered`.
     Dashboard:
       type: object
       additionalProperties: false
@@ -2216,6 +2219,7 @@ components:
         - groupsCreated
         - avgMembersPerGroup
         - mediaByDay
+        - heatmap
       properties:
         messagesByDay:
           type: array
@@ -2269,6 +2273,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MediaDayCount"
+        heatmap:
+          type: array
+          items:
+            $ref: "#/components/schemas/HeatmapCell"
+          description: Tổng tin gửi theo weekday×hour (UTC) toàn platform.
         from:
           type: string
           format: date

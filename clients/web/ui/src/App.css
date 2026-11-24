@@ -2181,6 +2181,26 @@ hr {
   background: #0b6bcb;
 }
 
+.activity-legend .swatch.media-image,
+.activity-legend-inline .swatch.media-image {
+  background: #0b6bcb;
+}
+
+.activity-legend .swatch.media-document,
+.activity-legend-inline .swatch.media-document {
+  background: #7c5cbf;
+}
+
+.activity-legend .swatch.media-video,
+.activity-legend-inline .swatch.media-video {
+  background: #d9480f;
+}
+
+.activity-legend .swatch.media-audio,
+.activity-legend-inline .swatch.media-audio {
+  background: #22a06b;
+}
+
 .activity-legend .swatch.group {
   background: #7c5cbf;
 }

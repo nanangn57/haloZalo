@@ -73,14 +73,45 @@ class MediaControllerTest {
     }
 
     @Test
+    void videoUploadAcceptsQuicktimeAndInfersMimeFromFileName() throws Exception {
+        uploadNamed("video/quicktime", "clip.mov", "VIDEO", new byte[2048])
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.type").value("VIDEO"))
+            .andExpect(jsonPath("$.contentType").value("video/quicktime"));
+        uploadNamed("application/octet-stream", "phone-clip.mov", "VIDEO", new byte[2048])
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.contentType").value("video/quicktime"));
+        uploadNamed("application/octet-stream", "photo.jpg", "IMAGE", new byte[128])
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.contentType").value("image/jpeg"));
+    }
+
+    @Test
     void baseTypeDropsParametersAndCase() {
         assertEquals("audio/webm", MediaController.baseType("Audio/WebM; codecs=opus"));
         assertEquals("audio/mp4", MediaController.baseType("audio/mp4"));
+        assertEquals("video/quicktime", MediaController.resolveContentType(
+            "application/octet-stream", "clip.MOV", "VIDEO"));
+    }
+
+    @Test
+    void uploadWithoutFilePartReturnsClearValidationError() throws Exception {
+        mvc.perform(multipart("/media/uploads")
+                .param("type", "VIDEO")
+                .header(CurrentUser.HEADER, ALICE))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+            .andExpect(jsonPath("$.error.message").value("file is required"));
     }
 
     private ResultActions upload(String contentType, String type, byte[] bytes) throws Exception {
+        return uploadNamed(contentType, "voice", type, bytes);
+    }
+
+    private ResultActions uploadNamed(String contentType, String fileName, String type, byte[] bytes)
+        throws Exception {
         return mvc.perform(multipart("/media/uploads")
-            .file(new MockMultipartFile("file", "voice", contentType, bytes))
+            .file(new MockMultipartFile("file", fileName, contentType, bytes))
             .param("type", type)
             .header(CurrentUser.HEADER, ALICE));
     }

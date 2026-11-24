@@ -149,14 +149,15 @@ HALOZALO_BASE_URL=http://$APP_IP:8080 HALOZALO_WS_URL=ws://$APP_IP:8080 \
 
 Hoặc smoke HTTP public: health, login `POST /api/identity/auth/login`, upload media qua `/api/messaging/media/uploads`.
 
-`GET /stats` cần user `platformRole=ADMIN` — seed `ngoc_anh`/`huy` là USER nên E2E dashboard stats có thể FAIL dù stack ổn.
+`GET /stats` cần user `platformRole=ADMIN` — seed `ngoc_anh`/`huy` là USER nên E2E dashboard stats có thể FAIL dù stack ổn. Trên cloud, bootstrap qua `IDENTITY_PLATFORM_ADMINS` (mặc định `admin`).
 
 ### Tài khoản mẫu (DB mới / seed)
 
-| username | email | password |
-|---|---|---|
-| ngoc_anh | anh@example.com | password1 |
-| huy | huy@example.com | password1 |
+| username | email | password | role |
+|---|---|---|---|
+| ngoc_anh | anh@example.com | password1 | USER |
+| huy | huy@example.com | password1 | USER |
+| admin | admin@example.com | password1 | ADMIN (cloud; `IDENTITY_PLATFORM_ADMINS`) |
 
 ## Ghi chú
 

@@ -216,6 +216,16 @@ class StatsAccessTest {
         }
 
         @Override
+        public long verifiedInRegistrationCohort(DateRange range) {
+            return 0;
+        }
+
+        @Override
+        public long firstMessageInRegistrationCohort(DateRange range) {
+            return 0;
+        }
+
+        @Override
         public long messengersInRange(DateRange range) {
             return 0;
         }
@@ -247,6 +257,11 @@ class StatsAccessTest {
 
         @Override
         public List<MediaDayTotal> mediaByDay(DateRange range) {
+            return List.of();
+        }
+
+        @Override
+        public List<HeatmapCell> platformHeatmap() {
             return List.of();
         }
     }

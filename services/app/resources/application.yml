@@ -21,8 +21,9 @@ spring:
             required: true
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 21MB
+      # Keep above MediaController VIDEO_MAX (20MB) so oversize videos return a clear 400 message.
+      max-file-size: 25MB
+      max-request-size: 26MB
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/halozalo}
     username: ${SPRING_DATASOURCE_USERNAME:halozalo}

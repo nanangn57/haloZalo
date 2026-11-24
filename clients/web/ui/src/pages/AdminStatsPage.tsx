@@ -12,7 +12,7 @@ import {
 } from '@core/statsService'
 import DateRangeFilter from '../components/common/DateRangeFilter'
 import Avatar from '../components/common/Avatar'
-import { MediaStack, SimpleLine } from '../components/stats/StatsCharts'
+import { Heatmap, MediaStack, SimpleLine } from '../components/stats/StatsCharts'
 import { findUserApi } from '@core/userService'
 import { banUserApi, unbanUserApi } from '@core/friendService'
 import type { AuthUser } from '@core/types/auth'
@@ -355,7 +355,7 @@ export default function AdminStatsPage() {
               <div className="activity-section-heading">
                 <div>
                   <h2>Verify funnel</h2>
-                  <p>Registered → verified → first message.</p>
+                  <p>Cohort by registration day → verified → sent a message.</p>
                 </div>
               </div>
               <ul className="activity-list">
@@ -435,7 +435,7 @@ export default function AdminStatsPage() {
                 <p>Platform-wide outbound messages.</p>
               </div>
             </div>
-            <SimpleLine days={dashboard.messagesByDay} label="messages" />
+            <SimpleLine days={dashboard.messagesByDay} label="Messages" />
           </section>
 
           <section className="activity-panel mb-4">
@@ -446,6 +446,16 @@ export default function AdminStatsPage() {
               </div>
             </div>
             <MediaStack days={dashboard.mediaByDay} />
+          </section>
+
+          <section className="activity-panel mb-4">
+            <div className="activity-section-heading">
+              <div>
+                <h2>When the platform chats</h2>
+                <p>Hour × weekday heatmap (UTC) — all users.</p>
+              </div>
+            </div>
+            <Heatmap cells={dashboard.heatmap} />
           </section>
         </>
       ) : null}

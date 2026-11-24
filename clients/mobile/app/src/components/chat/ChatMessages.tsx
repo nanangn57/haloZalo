@@ -17,6 +17,7 @@ import type { MessageReaction, ReactionCode } from '@core/messageService';
 import { resolveMediaUrl } from '@core/mediaService';
 import { useTheme } from '@/hooks/use-theme';
 import AudioBubble from './AudioBubble';
+import VideoBubble from './VideoBubble';
 
 const LOAD_OLDER_THRESHOLD_PX = 64;
 const NEAR_BOTTOM_PX = 96;
@@ -108,12 +109,10 @@ function MessageBody({
   }
   if (message.type === 'VIDEO') {
     return (
-      <MediaFallback
-        label="Open video"
+      <VideoBubble
         url={mediaUrl}
-        isMine={isMine}
-        mineColor={mineColor}
-        otherColor={otherColor}
+        surface={imageBg}
+        accent={isMine ? mineColor : otherColor}
       />
     );
   }
