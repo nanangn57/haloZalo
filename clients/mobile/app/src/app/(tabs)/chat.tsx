@@ -50,8 +50,8 @@ import { VoiceRecorder, VoiceRecorderError } from '@/lib/voiceRecorder';
 import { useTheme } from '@/hooks/use-theme';
 import { Radius, Spacing } from '@/constants/theme';
 
-/** Cùng chu kỳ với Contacts: presence dựa trên socket thật. */
-const PRESENCE_POLL_MS = 30_000;
+/** Chat header poll nhanh hơn Contacts. */
+const PRESENCE_POLL_MS = 5_000;
 
 /** Trang tin khi mở hội thoại / scroll lên tải thêm. */
 const HISTORY_PAGE_SIZE = 10;
@@ -499,7 +499,6 @@ export default function ChatPage() {
   useEffect(() => {
     lastTypingSentRef.current = false;
     setTypingUserId(null);
-    setPeerOnline(false);
     if (!selectedConversationId) return;
 
     const peerId =
@@ -524,7 +523,9 @@ export default function ChatPage() {
         .catch(() => undefined);
     };
 
-    if (peerId) {
+    if (!peerId) {
+      setPeerOnline(false);
+    } else {
       refreshPeerPresence();
       pollTimer = setInterval(refreshPeerPresence, PRESENCE_POLL_MS);
     }
