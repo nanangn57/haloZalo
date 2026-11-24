@@ -6,6 +6,8 @@
 .impeccable/
 ref/
 skills-lock.json
+AGENT.md
+AGENTS.md
 
 # doc/: only contract, requirement, timeline, test are tracked
 doc/**
@@ -96,3 +98,5 @@ infra/e2e/cloud-quality-report.json
 infra/e2e/cloud-test-summary.md
 infra/e2e/*-report.json
 infra/e2e/*-coverage.json
+
+AGENT.md
