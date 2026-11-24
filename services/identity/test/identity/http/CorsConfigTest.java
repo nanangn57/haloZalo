@@ -60,6 +60,18 @@ class CorsConfigTest {
     }
 
     @Test
+    void patchPreflightForProfileUpdateIsAllowed() throws Exception {
+        mvc.perform(options("/me")
+                .header(HttpHeaders.ORIGIN, WEB)
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "content-type,authorization"))
+            .andExpect(status().isOk())
+            .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, WEB))
+            .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, Matchers.containsString("PATCH")))
+            .andExpect(header().doesNotExist("X-Filter-Reached"));
+    }
+
+    @Test
     void loginResponseFromTheWebIncludesAllowOrigin() throws Exception {
         mvc.perform(post("/auth/login")
                 .header(HttpHeaders.ORIGIN, WEB)

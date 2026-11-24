@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -493,7 +495,17 @@ export default function ChatPage() {
     });
 
     socketClient.connect();
+
+    // Phone: after background / flaky network, status can stick on error — retry on foreground.
+    const onAppState = (next: AppStateStatus) => {
+      if (next === 'active') {
+        socketClient.connect();
+      }
+    };
+    const appStateSub = AppState.addEventListener('change', onAppState);
+
     return () => {
+      appStateSub.remove();
       unsubscribeEvent();
       unsubscribeStatus();
       unsubscribeReconnect();

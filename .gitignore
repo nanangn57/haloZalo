@@ -42,6 +42,7 @@ Desktop.ini
 
 # Java / Maven
 **/target/
+.m2-docker/
 *.class
 *.jar
 *.war
@@ -53,6 +54,11 @@ replay_pid*
 .project
 .settings/
 .factorypath
+
+# Python
+**/__pycache__/
+*.py[cod]
+*.egg-info/
 
 # Node / frontend
 node_modules/
@@ -86,3 +92,5 @@ infra/nginx/current/*.conf
 infra/e2e/last-report.json
 infra/e2e/cloud-quality-report.json
 infra/e2e/cloud-test-summary.md
+infra/e2e/*-report.json
+infra/e2e/*-coverage.json

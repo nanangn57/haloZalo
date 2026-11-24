@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { getAvatarColor, getInitials } from '@core/avatar'
 
 interface AvatarProps {
@@ -13,16 +14,23 @@ interface AvatarProps {
 // Avatar dùng chung: ảnh khi có URL, ngược lại chữ cái viết tắt (decisions.md).
 function Avatar({ name, src, size = 48, className = '', initials }: AvatarProps) {
   const mark = (initials || getInitials(name)).slice(0, 2)
+  const url = typeof src === 'string' ? src.trim() : ''
+  const [imageFailed, setImageFailed] = useState(false)
 
-  if (src) {
+  useEffect(() => {
+    setImageFailed(false)
+  }, [url])
+
+  if (url && !imageFailed) {
     return (
       <img
-        src={src}
+        src={url}
         alt=""
         className={`rounded-circle flex-shrink-0 ${className}`}
         width={size}
         height={size}
         style={{ objectFit: 'cover' }}
+        onError={() => setImageFailed(true)}
       />
     )
   }

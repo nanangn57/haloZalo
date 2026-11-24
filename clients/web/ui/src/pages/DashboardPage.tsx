@@ -50,7 +50,7 @@ const secondaryKpis = [
   {
     key: 'groupsCreated' as const,
     label: 'Groups',
-    description: 'Groups you own',
+    description: 'Groups you created',
     icon: 'bi bi-people',
     color: 'sky',
   },

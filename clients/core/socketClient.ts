@@ -62,8 +62,20 @@ class SocketClient {
   private readonly maxReconnectAttempts = 20
   private readonly reconnectDelay = 2000
 
-  connect(): void {
+  /**
+   * @param fromScheduler - internal backoff retry; keep streak. UI/mount/foreground
+   *   should call without this so a stuck `error` can recover.
+   */
+  connect(fromScheduler = false): void {
     this.manuallyDisconnected = false
+
+    if (!fromScheduler) {
+      this.reconnectAttempts = 0
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer)
+        this.reconnectTimer = null
+      }
+    }
 
     if (
       this.socket &&
@@ -163,20 +175,21 @@ class SocketClient {
     if (this.manuallyDisconnected || this.reconnectTimer) {
       return
     }
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.updateStatus('error')
-      return
-    }
 
     this.reconnectAttempts++
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      // Surface error in UI but keep retrying slowly — mobile networks recover.
+      this.updateStatus('error')
+    }
+
     const delay = Math.min(
-      this.reconnectDelay * this.reconnectAttempts,
+      this.reconnectDelay * Math.min(this.reconnectAttempts, this.maxReconnectAttempts),
       15000,
     )
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
-      this.connect()
+      this.connect(true)
     }, delay)
   }
 
