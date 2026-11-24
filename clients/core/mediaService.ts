@@ -5,7 +5,6 @@ import {
   assertMediaWithinLimit,
   guessMimeType,
   mediaMaxLabel,
-  MEDIA_MAX_BYTES,
   resolveMediaUrlWithBase,
   type MediaUploadType,
 } from './mediaMime'
