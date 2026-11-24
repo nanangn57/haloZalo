@@ -34,7 +34,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       IDENTITY_PUBLIC_BASE_URL: https://${DOMAIN}
-      IDENTITY_CORS_ALLOWED_ORIGIN_PATTERNS: https://${DOMAIN},http://${DOMAIN}
+      # Expo Go / Metro (LAN + tunnel) + cloud SPA. Patterns, not exact origins.
+      IDENTITY_CORS_ALLOWED_ORIGIN_PATTERNS: https://${DOMAIN},http://${DOMAIN},http://localhost:*,http://127.0.0.1:*,http://192.168.*:*,https://*.exp.direct,http://*.exp.direct
       IDENTITY_REGISTRATION_ACTIVATION: ${IDENTITY_REGISTRATION_ACTIVATION:-email}
       IDENTITY_PLATFORM_ADMINS: ${IDENTITY_PLATFORM_ADMINS:-}
       IDENTITY_MAIL_MODE: ${IDENTITY_MAIL_MODE:-log}
@@ -49,7 +50,7 @@ services:
       MESSAGING_MEDIA_S3_BUCKET: ${MESSAGING_MEDIA_S3_BUCKET:-}
       MESSAGING_MEDIA_S3_REGION: ${MESSAGING_MEDIA_S3_REGION:-ap-southeast-1}
       MESSAGING_MEDIA_S3_KEY_PREFIX: ${MESSAGING_MEDIA_S3_KEY_PREFIX:-media/}
-      MESSAGING_CORS_ALLOWED_ORIGINS: https://${DOMAIN},http://localhost:5173,http://localhost:8081
+      MESSAGING_CORS_ALLOWED_ORIGINS: https://${DOMAIN},http://localhost:*,http://127.0.0.1:*,http://192.168.*:*,https://*.exp.direct,http://*.exp.direct
       AWS_REGION: ${MESSAGING_MEDIA_S3_REGION:-ap-southeast-1}
     depends_on:
       postgres:

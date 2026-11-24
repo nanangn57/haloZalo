@@ -43,6 +43,7 @@ public class AnalyticsAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(DashboardQuery.class)
     DashboardQuery dashboardQuery(DataSource dataSource) {
         return new PostgresDashboardQuery(dataSource);
     }

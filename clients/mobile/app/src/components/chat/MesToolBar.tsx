@@ -5,7 +5,10 @@ import { useTheme } from '@/hooks/use-theme';
 import { Spacing } from '@/constants/theme';
 
 interface MesToolBarProps {
+  /** Disables the whole toolbar (rare). */
   disabled?: boolean;
+  /** Only attachment actions (image/file/video/voice) — keep emoji/text usable while uploading. */
+  attachmentsDisabled?: boolean;
   emojiOpen?: boolean;
   emotionOpen?: boolean;
   recording?: boolean;
@@ -21,6 +24,7 @@ interface MesToolBarProps {
 /** Icon toolbar khớp web MesToolbar: emoji, reaction, image, file, video, voice note. */
 export default function MesToolBar({
   disabled,
+  attachmentsDisabled,
   emojiOpen,
   emotionOpen,
   recording,
@@ -32,6 +36,8 @@ export default function MesToolBar({
   onVoiceToggle,
 }: MesToolBarProps) {
   const theme = useTheme();
+  const allDisabled = !!disabled;
+  const mediaDisabled = allDisabled || !!attachmentsDisabled;
 
   const iconColor = (active?: boolean) =>
     active ? theme.primary : theme.textSecondary;
@@ -42,7 +48,7 @@ export default function MesToolBar({
         <Pressable
           style={[styles.iconButton, emojiOpen && { backgroundColor: theme.primarySoft }]}
           onPress={onEmojiPress}
-          disabled={disabled}
+          disabled={allDisabled}
           accessibilityLabel="Insert emoji"
           accessibilityState={{ selected: !!emojiOpen }}
         >
@@ -54,7 +60,7 @@ export default function MesToolBar({
         <Pressable
           style={[styles.iconButton, emotionOpen && { backgroundColor: theme.primarySoft }]}
           onPress={onEmotionPress}
-          disabled={disabled}
+          disabled={allDisabled}
           accessibilityLabel="Send reaction"
           accessibilityState={{ selected: !!emotionOpen }}
         >
@@ -66,7 +72,7 @@ export default function MesToolBar({
         <Pressable
           style={styles.iconButton}
           onPress={onImagePress}
-          disabled={disabled}
+          disabled={mediaDisabled}
           accessibilityLabel="Attach image"
         >
           <Ionicons name="image-outline" size={22} color={theme.textSecondary} />
@@ -77,7 +83,7 @@ export default function MesToolBar({
         <Pressable
           style={styles.iconButton}
           onPress={onFilePress}
-          disabled={disabled}
+          disabled={mediaDisabled}
           accessibilityLabel="Attach file"
         >
           <Ionicons name="attach-outline" size={22} color={theme.textSecondary} />
@@ -88,7 +94,7 @@ export default function MesToolBar({
         <Pressable
           style={styles.iconButton}
           onPress={onVideoPress}
-          disabled={disabled}
+          disabled={mediaDisabled}
           accessibilityLabel="Attach video"
         >
           <Ionicons name="videocam-outline" size={22} color={theme.textSecondary} />
@@ -98,14 +104,14 @@ export default function MesToolBar({
       {onVoiceToggle ? (
         <Pressable
           style={[styles.iconButton, recording && { backgroundColor: theme.primarySoft }]}
-          disabled={disabled}
+          disabled={mediaDisabled}
           accessibilityLabel={
             recording ? 'Stop and send voice message' : 'Record voice message'
           }
           accessibilityHint="Tap once to start recording, tap again to send"
           accessibilityState={{ selected: !!recording }}
           onPress={() => {
-            if (!disabled) onVoiceToggle();
+            if (!mediaDisabled) onVoiceToggle();
           }}
         >
           <Ionicons

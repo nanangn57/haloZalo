@@ -1,11 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useVideoPlayer, VideoView } from 'expo-video';
+
+type VideoModule = typeof import('expo-video');
+
+/** expo-video throws at require() when Expo Go lacks the native module — keep chat usable. */
+function loadExpoVideo(): VideoModule | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-video') as VideoModule;
+  } catch {
+    return null;
+  }
+}
+
+const expoVideo = loadExpoVideo();
 
 /**
- * Chat video: tap to load player (avoids N players in a long thread).
- * Native controls + fullscreen; fallback link if playback fails.
+ * Chat video: tap to load player when expo-video is available.
+ * Otherwise open externally (same as before preview was added).
  */
 export default function VideoBubble({
   url,
@@ -19,7 +32,7 @@ export default function VideoBubble({
   const [active, setActive] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  if (!url || failed) {
+  if (!url || failed || !expoVideo) {
     return (
       <Pressable
         onPress={() => url && void Linking.openURL(url)}
@@ -27,7 +40,9 @@ export default function VideoBubble({
         accessibilityRole="link"
         accessibilityLabel="Open video"
       >
-        <Text style={{ color: accent }}>{failed ? 'Video unavailable — open' : 'Open video'}</Text>
+        <Text style={{ color: accent }}>
+          {!url ? 'Open video' : failed ? 'Video unavailable — open' : 'Open video'}
+        </Text>
       </Pressable>
     );
   }
@@ -58,6 +73,7 @@ function ActiveVideo({
   surface: string;
   onFailed: () => void;
 }) {
+  const { useVideoPlayer, VideoView } = expoVideo!;
   const player = useVideoPlayer({ uri: url }, (instance) => {
     instance.loop = false;
     instance.play();

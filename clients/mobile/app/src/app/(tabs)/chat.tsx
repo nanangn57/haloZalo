@@ -102,6 +102,9 @@ export default function ChatPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingOlderRef = useRef(false);
   const [sending, setSending] = useState(false);
+  /** Media upload is separate from text send so the composer stays usable. */
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [socketStatus, setSocketStatus] = useState('disconnected');
   const [typingUserId, setTypingUserId] = useState<string | null>(null);
@@ -496,7 +499,8 @@ export default function ChatPage() {
       unsubscribeReconnect();
       socketClient.disconnect();
     };
-  }, [currentUserId, upsertMessage]);
+    // Connect once per mounted chat shell (same as web). Handlers use refs/upsertMessage([]).
+  }, [currentUserId]);
 
   const selectedConversationId = selectedConversation?.conversationId;
   const selectedConversationType = selectedConversation?.type;
@@ -678,8 +682,9 @@ export default function ChatPage() {
     durationSec?: number,
     sizeBytes?: number | null,
   ) => {
-    if (!selectedConversation) return;
-    setSending(true);
+    if (!selectedConversation || uploadingMedia) return;
+    setUploadingMedia(true);
+    setUploadProgress(0);
     setError('');
     try {
       const contentType =
@@ -696,6 +701,7 @@ export default function ChatPage() {
           contentType,
           size: sizeBytes ?? undefined,
           conversationId: selectedConversation.conversationId,
+          onProgress: (ratio) => setUploadProgress(ratio),
         },
       );
       const body = mediaMessageBody(uploaded.url);
@@ -728,7 +734,8 @@ export default function ChatPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload media');
     } finally {
-      setSending(false);
+      setUploadingMedia(false);
+      setUploadProgress(null);
     }
   };
 
@@ -771,7 +778,33 @@ export default function ChatPage() {
         asset.mimeType && asset.mimeType !== 'application/octet-stream'
           ? asset.mimeType
           : guessMimeType(fileName, type);
-      await sendUploaded(type, asset.uri, fileName, mimeType, undefined, asset.fileSize);
+      // content:// / ph:// often break multipart on device — copy to a real file:// cache path.
+      let uploadUri = asset.uri;
+      let sizeBytes = asset.fileSize ?? null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const FileSystem = require('expo-file-system/legacy') as {
+          cacheDirectory: string | null;
+          copyAsync: (opts: { from: string; to: string }) => Promise<void>;
+          getInfoAsync: (
+            uri: string,
+            opts?: { size?: boolean },
+          ) => Promise<{ exists: boolean; size?: number; isDirectory?: boolean }>;
+        };
+        if (FileSystem.cacheDirectory && !uploadUri.startsWith('file://')) {
+          const dest = `${FileSystem.cacheDirectory}upload-${Date.now()}.${safeExt}`;
+          await FileSystem.copyAsync({ from: uploadUri, to: dest });
+          uploadUri = dest;
+        }
+        // Picker often omits fileSize — measure the file we will upload so >20MB is blocked locally.
+        const info = await FileSystem.getInfoAsync(uploadUri, { size: true });
+        if (info.exists && !info.isDirectory && typeof info.size === 'number' && info.size > 0) {
+          sizeBytes = info.size;
+        }
+      } catch {
+        /* keep picker URI / size */
+      }
+      await sendUploaded(type, uploadUri, fileName, mimeType, undefined, sizeBytes);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to pick media');
     }
@@ -791,7 +824,7 @@ export default function ChatPage() {
 
   /** Tap mic once to record; tap again to stop & send (hold-to-record fights the permission sheet). */
   const toggleVoice = async () => {
-    if (!selectedConversation || sending) return;
+    if (!selectedConversation || uploadingMedia) return;
 
     if (recordingLiveRef.current && voiceRef.current) {
       const recorder = voiceRef.current;
@@ -1003,7 +1036,7 @@ export default function ChatPage() {
         ) : null}
         <View style={[styles.composer, { borderTopColor: theme.border, backgroundColor: theme.background }]}>
           <MesToolBar
-            disabled={sending}
+            attachmentsDisabled={uploadingMedia}
             emojiOpen={showEmojiPicker}
             emotionOpen={showEmotionBar}
             recording={recording}
@@ -1020,6 +1053,17 @@ export default function ChatPage() {
             onVideoPress={() => void pickImage(true)}
             onVoiceToggle={() => void toggleVoice()}
           />
+
+          {uploadingMedia ? (
+            <View style={styles.uploadRow} accessibilityLiveRegion="polite">
+              <ActivityIndicator size="small" color={theme.primary} />
+              <Text style={[styles.uploadHint, { color: theme.textSecondary }]}>
+                {uploadProgress != null && uploadProgress > 0
+                  ? `Uploading… ${Math.round(uploadProgress * 100)}%`
+                  : 'Uploading media…'}
+              </Text>
+            </View>
+          ) : null}
 
           {recording ? (
             <Text style={[styles.recordingHint, { color: theme.danger }]} accessibilityLiveRegion="polite">
@@ -1265,6 +1309,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     paddingHorizontal: 12,
     paddingTop: 4,
+  },
+  uploadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+  },
+  uploadHint: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   emojiPanel: {
     flexDirection: 'row',

@@ -22,7 +22,15 @@ assert.throws(
   () => assertMediaWithinLimit('VIDEO', 20 * 1024 * 1024 + 1),
   /VIDEO is too large/,
 )
+assert.throws(
+  () => assertMediaWithinLimit('VIDEO', 25 * 1024 * 1024),
+  /Max 20MB/,
+)
 assertMediaWithinLimit('VIDEO', 1024)
+assertMediaWithinLimit('VIDEO', 20 * 1024 * 1024)
+// Unknown size is a no-op here; uploadMediaApi must resolve size and refuse before POST.
+assertMediaWithinLimit('VIDEO', null)
+assertMediaWithinLimit('VIDEO', undefined)
 
 assert.equal(
   mediaMessageBody('http://localhost:8080/media/4820fb1a-dbb8-49e9-ac53-1368ee869ca0'),

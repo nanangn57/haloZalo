@@ -95,22 +95,30 @@ async function appendNativeFilePart(
 }
 
 /**
- * RN `fetch` + multipart file parts is flaky; XHR reliably streams {uri,name,type}.
- * Browsers keep using fetch.
+ * RN `fetch` + multipart file parts is flaky; XHR streams {uri,name,type}.
+ * Prefer expo-file-system for native files when available (large video over cellular).
  */
 function postMultipart(
   url: string,
   form: FormData,
   headers: Record<string, string>,
+  onProgress?: (ratio: number) => void,
 ): Promise<Response> {
-  if (!isReactNativeRuntime() || typeof XMLHttpRequest === 'undefined') {
+  if (typeof XMLHttpRequest === 'undefined') {
     return fetch(url, { method: 'POST', headers, body: form })
   }
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
+    xhr.timeout = 180_000
     for (const [key, value] of Object.entries(headers)) {
       xhr.setRequestHeader(key, value)
+    }
+    if (onProgress && xhr.upload) {
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable || event.total <= 0) return
+        onProgress(Math.min(1, event.loaded / event.total))
+      }
     }
     xhr.onload = () => {
       resolve(
@@ -120,78 +128,133 @@ function postMultipart(
         }),
       )
     }
-    xhr.onerror = () => reject(new Error('Network request failed'))
+    xhr.ontimeout = () =>
+      reject(
+        new Error(
+          'Upload timed out. Use Wi‑Fi or a shorter video (max 20MB).',
+        ),
+      )
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          'Network request failed while uploading. Check connection / try a shorter video (max 20MB).',
+        ),
+      )
     xhr.send(form)
   })
 }
 
-export async function uploadMediaApi(
-  file: UploadFileSource,
-  type: MediaUploadType,
-  options?: {
-    fileName?: string
-    conversationId?: string
-    contentType?: string
-    /** Known size from picker/File; checked before upload. */
-    size?: number
-  },
-): Promise<MediaUploadResult> {
-  const fileName =
-    options?.fileName ??
-    (isNativeUpload(file) ? file.name : 'upload.bin')
-  const contentType =
-    options?.contentType ??
-    (isNativeUpload(file)
-      ? file.type
-      : file.type || guessMimeType(fileName, type))
+type ExpoLegacyFileSystem = {
+  FileSystemUploadType: { MULTIPART: number }
+  FileSystemSessionType: { FOREGROUND: number }
+  getInfoAsync?: (
+    fileUri: string,
+    options?: { size?: boolean },
+  ) => Promise<{ exists: boolean; size?: number; isDirectory?: boolean }>
+  createUploadTask: (
+    url: string,
+    fileUri: string,
+    options: Record<string, unknown>,
+    callback?: (data: { totalBytesSent: number; totalBytesExpectedToSend: number }) => void,
+  ) => { uploadAsync: () => Promise<{ status: number; body: string }> }
+}
 
-  const knownSize =
-    options?.size ??
-    (!isNativeUpload(file) && typeof file.size === 'number' ? file.size : undefined)
-  assertMediaWithinLimit(type, knownSize)
-
-  const form = new FormData()
-  if (isNativeUpload(file)) {
-    await appendNativeFilePart(
-      form,
-      file,
-      fileName,
-      contentType || guessMimeType(fileName, type),
-    )
-  } else {
-    form.append(
-      'file',
-      blobWithType(file, contentType || guessMimeType(fileName, type)),
-      fileName,
-    )
+/** Size from disk when the picker omits fileSize (common on Android / after URI rewrite). */
+async function resolveNativeFileBytes(uri: string): Promise<number | undefined> {
+  const FileSystem = loadExpoFileSystem()
+  if (!FileSystem?.getInfoAsync) {
+    return undefined
   }
-  form.append('type', type)
-  if (options?.conversationId) {
-    form.append('conversationId', options.conversationId)
-  }
-
-  const headers: Record<string, string> = {}
-  if (connectionConfig.messageHttpAuthMode === 'TOKEN') {
-    const token = getAccessToken()
-    if (!token) {
-      throw new Error('Bạn cần đăng nhập để upload.')
+  try {
+    const info = await FileSystem.getInfoAsync(uri, { size: true })
+    if (info.exists && !info.isDirectory && typeof info.size === 'number' && info.size > 0) {
+      return info.size
     }
-    headers.Authorization = `Bearer ${token}`
-  } else {
-    headers['X-User-Id'] = requireUserId()
+  } catch {
+    /* ignore */
   }
+  return undefined
+}
 
-  const response = await postMultipart(
-    `${connectionConfig.messageBaseUrl}/media/uploads`,
-    form,
-    headers,
+function loadExpoFileSystem(): ExpoLegacyFileSystem | null {
+  if (!isReactNativeRuntime()) {
+    return null
+  }
+  try {
+    // Web `tsc` has no Node `require`; RN provides it on globalThis.
+    const requireFn = (globalThis as { require?: (moduleId: string) => unknown })
+      .require
+    if (typeof requireFn !== 'function') {
+      return null
+    }
+    return requireFn('expo-file-system/legacy') as ExpoLegacyFileSystem
+  } catch {
+    return null
+  }
+}
+
+async function uploadNativeWithFileSystem(
+  file: NativeUploadFile,
+  uploadUrl: string,
+  headers: Record<string, string>,
+  type: MediaUploadType,
+  contentType: string,
+  conversationId: string | undefined,
+  onProgress?: (ratio: number) => void,
+): Promise<MediaUploadResult | null> {
+  const FileSystem = loadExpoFileSystem()
+  if (!FileSystem?.createUploadTask) {
+    return null
+  }
+  const parameters: Record<string, string> = { type }
+  if (conversationId) {
+    parameters.conversationId = conversationId
+  }
+  const task = FileSystem.createUploadTask(
+    uploadUrl,
+    file.uri,
+    {
+      httpMethod: 'POST',
+      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName: 'file',
+      mimeType: contentType,
+      parameters,
+      headers,
+      sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+    },
+    onProgress
+      ? (data) => {
+          if (data.totalBytesExpectedToSend > 0) {
+            onProgress(
+              Math.min(1, data.totalBytesSent / data.totalBytesExpectedToSend),
+            )
+          }
+        }
+      : undefined,
   )
+  const result = await task.uploadAsync()
+  if (result.status < 200 || result.status >= 300) {
+    if (result.status === 413) {
+      throw new Error(`${type} is too large. Max ${mediaMaxLabel(type)}.`)
+    }
+    let message = `Upload failed (${result.status})`
+    try {
+      const data = JSON.parse(result.body) as { error?: { message?: string } }
+      if (data?.error?.message) {
+        message = data.error.message
+      }
+    } catch {
+      /* keep status message */
+    }
+    throw new Error(message)
+  }
+  return JSON.parse(result.body) as MediaUploadResult
+}
 
-  if (!response.ok) {
+function parseUploadFailure(response: Response, type: MediaUploadType): Promise<never> {
+  return (async () => {
     if (response.status === 413) {
-      throw new Error(
-        `${type} is too large. Max ${mediaMaxLabel(type)}.`,
-      )
+      throw new Error(`${type} is too large. Max ${mediaMaxLabel(type)}.`)
     }
     const rawBody = await response.text().catch(() => '')
     let message = `Upload failed (${response.status})`
@@ -206,6 +269,104 @@ export async function uploadMediaApi(
       }
     }
     throw new Error(message)
+  })()
+}
+
+export async function uploadMediaApi(
+  file: UploadFileSource,
+  type: MediaUploadType,
+  options?: {
+    fileName?: string
+    conversationId?: string
+    contentType?: string
+    /** Known size from picker/File; checked before upload. */
+    size?: number
+    /** 0..1 while bytes are sent (XHR / FileSystem). */
+    onProgress?: (ratio: number) => void
+  },
+): Promise<MediaUploadResult> {
+  const fileName =
+    options?.fileName ??
+    (isNativeUpload(file) ? file.name : 'upload.bin')
+  const contentType =
+    options?.contentType ??
+    (isNativeUpload(file)
+      ? file.type
+      : file.type || guessMimeType(fileName, type))
+
+  let knownSize =
+    options?.size ??
+    (!isNativeUpload(file) && typeof file.size === 'number' ? file.size : undefined)
+  if (
+    (knownSize == null || !Number.isFinite(knownSize) || knownSize <= 0) &&
+    isNativeUpload(file)
+  ) {
+    knownSize = await resolveNativeFileBytes(file.uri)
+  }
+  if (knownSize == null || !Number.isFinite(knownSize) || knownSize <= 0) {
+    throw new Error(
+      `Cannot determine ${type} size before upload. Pick the file again.`,
+    )
+  }
+  assertMediaWithinLimit(type, knownSize)
+
+  const headers: Record<string, string> = {}
+  if (connectionConfig.messageHttpAuthMode === 'TOKEN') {
+    const token = getAccessToken()
+    if (!token) {
+      throw new Error('Bạn cần đăng nhập để upload.')
+    }
+    headers.Authorization = `Bearer ${token}`
+  } else {
+    headers['X-User-Id'] = requireUserId()
+  }
+
+  const uploadUrl = `${connectionConfig.messageBaseUrl}/media/uploads`
+  const mime = contentType || guessMimeType(fileName, type)
+
+  if (isNativeUpload(file) && isReactNativeRuntime()) {
+    try {
+      const viaFs = await uploadNativeWithFileSystem(
+        file,
+        uploadUrl,
+        headers,
+        type,
+        mime,
+        options?.conversationId,
+        options?.onProgress,
+      )
+      if (viaFs) {
+        return viaFs
+      }
+    } catch (err) {
+      // Fall through to FormData XHR once; keep FileSystem's clear size errors.
+      if (err instanceof Error && /too large|Upload failed \(/i.test(err.message)) {
+        throw err
+      }
+      console.warn('expo-file-system upload failed, falling back to XHR', err)
+    }
+  }
+
+  const form = new FormData()
+  if (isNativeUpload(file)) {
+    await appendNativeFilePart(form, file, fileName, mime)
+  } else {
+    form.append('file', blobWithType(file, mime), fileName)
+  }
+  form.append('type', type)
+  if (options?.conversationId) {
+    form.append('conversationId', options.conversationId)
+  }
+
+  const response = await postMultipart(
+    uploadUrl,
+    form,
+    headers,
+    options?.onProgress,
+  )
+
+  if (!response.ok) {
+    await parseUploadFailure(response, type)
   }
 
   return (await response.json()) as MediaUploadResult

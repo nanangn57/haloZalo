@@ -47,15 +47,6 @@ export function buildMessagingWsUrl(
   return url.toString()
 }
 
-function createSocket(): WebSocket {
-  const href = buildMessagingWsUrl(connectionConfig.wsBaseUrl, {
-    mode: connectionConfig.wsAuthMode,
-    accessToken: getAccessToken(),
-    userId: getUserId(),
-  })
-  return new WebSocket(href)
-}
-
 class SocketClient {
   private socket: WebSocket | null = null
 
@@ -82,13 +73,42 @@ class SocketClient {
       return
     }
 
+    // Cloud/local both require a session query param; don't open a doomed socket.
+    if (
+      connectionConfig.wsAuthMode === 'TOKEN_QUERY' &&
+      !getAccessToken()
+    ) {
+      this.updateStatus('disconnected')
+      return
+    }
+    if (
+      connectionConfig.wsAuthMode === 'USER_ID_QUERY' &&
+      !getUserId()
+    ) {
+      this.updateStatus('disconnected')
+      return
+    }
+
     this.updateStatus('connecting')
 
     try {
-      const socket = createSocket()
+      const href = buildMessagingWsUrl(connectionConfig.wsBaseUrl, {
+        mode: connectionConfig.wsAuthMode,
+        accessToken: getAccessToken(),
+        userId: getUserId(),
+      })
+      // Help diagnose phone/cloud mismatches without printing the token.
+      try {
+        const debug = new URL(href)
+        console.log('WebSocket connecting', `${debug.protocol}//${debug.host}${debug.pathname}`)
+      } catch {
+        console.log('WebSocket connecting')
+      }
+      const socket = new WebSocket(href)
       this.socket = socket
 
       socket.onopen = () => {
+        if (this.socket !== socket) return
         const isReconnect = this.hadConnection
         this.reconnectAttempts = 0
         this.hadConnection = true
@@ -100,6 +120,7 @@ class SocketClient {
       }
 
       socket.onmessage = (message: MessageEvent) => {
+        if (this.socket !== socket) return
         try {
           const event = JSON.parse(message.data) as MessagingEvent
           if (!event.type || !event.payload) {
@@ -112,19 +133,22 @@ class SocketClient {
         }
       }
 
-      socket.onerror = (error) => {
-        console.error('WebSocket error:', error)
-        this.updateStatus('error')
+      // RN often fires error without detail; a remount can also deliver stale error
+      // from the previous socket and wipe a healthy "connected" status.
+      socket.onerror = () => {
+        if (this.socket !== socket) return
+        console.warn('WebSocket error event')
       }
 
       socket.onclose = () => {
-        if (this.socket === socket) {
-          this.socket = null
+        if (this.socket !== socket) return
+        this.socket = null
+        if (this.manuallyDisconnected) {
+          this.updateStatus('disconnected')
+          return
         }
         this.updateStatus('disconnected')
-        if (!this.manuallyDisconnected) {
-          this.scheduleReconnect()
-        }
+        this.scheduleReconnect()
       }
     } catch (error) {
       console.error('Cannot create WebSocket:', error)
@@ -136,11 +160,11 @@ class SocketClient {
   }
 
   private scheduleReconnect(): void {
-    if (
-      this.manuallyDisconnected ||
-      this.reconnectTimer ||
-      this.reconnectAttempts >= this.maxReconnectAttempts
-    ) {
+    if (this.manuallyDisconnected || this.reconnectTimer) {
+      return
+    }
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.updateStatus('error')
       return
     }
 

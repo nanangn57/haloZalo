@@ -32,7 +32,8 @@ server {
 
     root /usr/share/nginx/html;
     index index.html;
-    client_max_body_size 20m;
+    # Match Spring multipart (25MB file / 26MB request) so phone video uploads are not reset mid-body.
+    client_max_body_size 26m;
 
     location = /actuator/health {
         set $app_upstream http://app:8080;
