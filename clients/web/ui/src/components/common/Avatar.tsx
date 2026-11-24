@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getAvatarColor, getInitials } from '@core/avatar'
 
 interface AvatarProps {
@@ -15,11 +15,9 @@ interface AvatarProps {
 function Avatar({ name, src, size = 48, className = '', initials }: AvatarProps) {
   const mark = (initials || getInitials(name)).slice(0, 2)
   const url = typeof src === 'string' ? src.trim() : ''
-  const [imageFailed, setImageFailed] = useState(false)
-
-  useEffect(() => {
-    setImageFailed(false)
-  }, [url])
+  // Track which URL failed — when `url` changes, failedUrl !== url so we retry without an effect.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const imageFailed = Boolean(url) && failedUrl === url
 
   if (url && !imageFailed) {
     return (
@@ -30,7 +28,7 @@ function Avatar({ name, src, size = 48, className = '', initials }: AvatarProps)
         width={size}
         height={size}
         style={{ objectFit: 'cover' }}
-        onError={() => setImageFailed(true)}
+        onError={() => setFailedUrl(url)}
       />
     )
   }
