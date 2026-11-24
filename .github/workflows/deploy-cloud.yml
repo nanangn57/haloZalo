@@ -73,14 +73,13 @@ jobs:
 
           # Remote: pull ref, then run existing deploy-ec2.sh on the host.
           # Secrets stay in infra/.env on EC2; never passed from GitHub.
-          # SSM Run Command is root with no $HOME; repo owned by ssm-user.
+          # AWS-RunShellScript = root, often no $HOME; repo owned by ssm-user.
+          # System gitconfig avoids both "HOME not set" and "dubious ownership".
           REMOTE_SCRIPT=$(cat <<EOF
           set -euo pipefail
-          export HOME="\${HOME:-/root}"
-          mkdir -p "\$HOME"
-          # Avoid dubious ownership (root vs ssm-user) for this shell and deploy-ec2.sh.
-          git config --global --add safe.directory '*'
-          git config --global --add safe.directory ${REPO_PATH_Q}
+          export HOME=/root
+          mkdir -p /root
+          printf '%s\\n' '[safe]' '	directory = *' '	directory = ${REPO_PATH_Q}' > /etc/gitconfig
           cd ${REPO_PATH_Q}
           git fetch --prune origin
           git checkout ${DEPLOY_REF_Q}
