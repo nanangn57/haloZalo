@@ -8,6 +8,7 @@ import {
   resolveMediaUrlWithBase,
   type MediaUploadType,
 } from './mediaMime'
+import * as FileSystem from 'expo-file-system/legacy'
 
 export type { MediaUploadType } from './mediaMime'
 export {
@@ -32,6 +33,7 @@ export interface NativeUploadFile {
   uri: string
   name: string
   type: string
+  size?: number
 }
 
 export type UploadFileSource = Blob | NativeUploadFile
@@ -160,20 +162,31 @@ type ExpoLegacyFileSystem = {
 }
 
 /** Size from disk when the picker omits fileSize (common on Android / after URI rewrite). */
-async function resolveNativeFileBytes(uri: string): Promise<number | undefined> {
-  const FileSystem = loadExpoFileSystem()
-  if (!FileSystem?.getInfoAsync) {
+async function resolveNativeFileBytes(
+  uri: string,
+): Promise<number | undefined> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri, {
+      size: true,
+    })
+
+    console.log('[MediaUpload] FileSystem info:', info)
+
+    if (!info.exists || info.isDirectory) {
+      console.warn('[MediaUpload] File inaccessible:', uri)
+      return undefined
+    }
+
+    if (typeof info.size !== 'number' || info.size <= 0) {
+      console.warn('[MediaUpload] Invalid file size:', info.size)
+      return undefined
+    }
+
+    return info.size
+  } catch (error) {
+    console.error('[MediaUpload] Size resolution failed:', error)
     return undefined
   }
-  try {
-    const info = await FileSystem.getInfoAsync(uri, { size: true })
-    if (info.exists && !info.isDirectory && typeof info.size === 'number' && info.size > 0) {
-      return info.size
-    }
-  } catch {
-    /* ignore */
-  }
-  return undefined
 }
 
 function loadExpoFileSystem(): ExpoLegacyFileSystem | null {
@@ -296,12 +309,15 @@ export async function uploadMediaApi(
 
   let knownSize =
     options?.size ??
-    (!isNativeUpload(file) && typeof file.size === 'number' ? file.size : undefined)
+    (typeof file.size === 'number' ? file.size : undefined)
   if (
-    (knownSize == null || !Number.isFinite(knownSize) || knownSize <= 0) &&
-    isNativeUpload(file)
+    knownSize == null ||
+    !Number.isFinite(knownSize) ||
+    knownSize <= 0
   ) {
-    knownSize = await resolveNativeFileBytes(file.uri)
+    if (isNativeUpload(file)) {
+      knownSize = await resolveNativeFileBytes(file.uri)
+    }
   }
   if (knownSize == null || !Number.isFinite(knownSize) || knownSize <= 0) {
     throw new Error(
