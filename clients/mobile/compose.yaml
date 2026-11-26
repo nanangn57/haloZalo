@@ -16,6 +16,7 @@ services:
       ADB_SERVER_SOCKET: tcp:localhost:5037
     volumes:
       - ./app:/workspace
+      - ../core:/workspace/core
       - mobile_node_modules:/workspace/node_modules
       - mobile_gradle_cache:/home/node/.gradle
       - mobile_npm_cache:/home/node/.npm
