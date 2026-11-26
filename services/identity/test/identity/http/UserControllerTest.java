@@ -41,10 +41,12 @@ class UserControllerTest {
     void setUp() {
         accounts = new MemoryAccounts();
         mail = new MemoryMail();
+        // Một ProfileRepository dùng chung: register ghi displayName, lookup đọc lại được.
+        MemoryProfiles profiles = new MemoryProfiles();
         AuthService auth = new AuthService(
             new BcryptPasswordHasher(),
             accounts,
-            emptyProfiles(),
+            profiles,
             new MemorySessions(),
             userId -> { },
             new MemoryVerifications(),
@@ -53,8 +55,8 @@ class UserControllerTest {
             "http://localhost:8080"
         );
         mvc = MockMvcBuilders.standaloneSetup(
-                new AuthController(auth, new ProfileService(accounts, emptyProfiles())),
-                new UserController(new UserSearchService(accounts, emptyProfiles()))
+                new AuthController(auth, new ProfileService(accounts, profiles)),
+                new UserController(new UserSearchService(accounts, profiles))
             )
             .addFilters(new SessionFilter(auth, new ObjectMapper(), (userId, path) -> { }))
             .setControllerAdvice(new AuthExceptionHandler(), new UserExceptionHandler())
@@ -148,17 +150,19 @@ class UserControllerTest {
         }
     }
 
-    private static ProfileRepository emptyProfiles() {
-        return new ProfileRepository() {
-            @Override
-            public Profile find(String userId) {
-                return null;
-            }
+    private static final class MemoryProfiles implements ProfileRepository {
+        private final List<Profile> rows = new ArrayList<>();
 
-            @Override
-            public void save(Profile profile) {
-            }
-        };
+        @Override
+        public Profile find(String userId) {
+            return rows.stream().filter(row -> row.getUserId().equals(userId)).findFirst().orElse(null);
+        }
+
+        @Override
+        public void save(Profile profile) {
+            rows.removeIf(row -> row.getUserId().equals(profile.getUserId()));
+            rows.add(profile);
+        }
     }
 
     private static final class MemoryAccounts implements AccountRepository {
