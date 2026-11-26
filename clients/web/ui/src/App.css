@@ -461,12 +461,16 @@ hr {
   flex-direction: column;
   align-items: center;
   flex-shrink: 0;
-  width: 72px;
-  height: 100vh;
-  padding: 16px 10px;
+  width: 80px;
+  /* 100% parent (vh-100), không 100vh — tránh avatar bị layout overflow-hidden cắt mép trên */
+  height: 100%;
+  min-height: 0;
+  padding: 28px 14px 20px;
   gap: 8px;
+  overflow: visible;
   background-color: var(--app-surface);
   border-right: 1px solid var(--app-border);
+  box-sizing: border-box;
 }
 
 .app-nav-rail-top {
@@ -475,6 +479,33 @@ hr {
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+  width: 100%;
+}
+
+/* Nút profile riêng: đủ chỗ cho avatar tròn, không bị .app-icon-button 40px cắt. */
+.app-nav-profile-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  overflow: visible;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.app-nav-profile-button:hover {
+  background-color: var(--app-surface-hover);
+}
+
+.app-nav-profile-button:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
 }
 
 .app-nav-rail-mid {
@@ -493,11 +524,18 @@ hr {
 }
 
 .app-nav-avatar {
-  width: 44px;
-  height: 44px;
+  /* size prop Avatar = 40; border-box giữ tổng 40px trong nút 48px */
+  width: 40px !important;
+  height: 40px !important;
+  max-width: 40px;
+  max-height: 40px;
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid var(--app-primary-soft);
+  box-sizing: border-box;
+  display: block;
+  flex-shrink: 0;
+  margin: 0;
 }
 
 .app-modal-backdrop {
@@ -589,6 +627,14 @@ hr {
 
   outline: none;
   transition: all 0.2s ease;
+}
+
+/* Profile edit (NavBar): đủ cao để thấy chữ đang nhập. */
+.app-input-profile {
+  min-height: 48px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  line-height: 1.4;
 }
 
 .app-input:focus,

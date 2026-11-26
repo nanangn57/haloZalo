@@ -44,7 +44,7 @@ Gửi at-least-once. Consumer xử lý lại cùng `eventId` thì không ghi th�
 | `identity.user.registered` | Tài khoản được tạo (verify email hoặc immediate) | identity | `{ "userId": "<uuid>" }` |
 | `identity.user.verified` | Email xác minh thành công (chỉ mode email-link) | identity | `{ "userId": "<uuid>" }` |
 | `identity.user.logged_in` | Đăng nhập thành công | identity | `{ "userId": "<uuid>" }` |
-| `identity.group.created` | Nhóm đã ghi vào schema `identity` | identity | `{ "groupId": "<uuid>", "ownerId": "<uuid>", "memberCount": 1 }` |
+| `identity.group.created` | Nhóm đã ghi vào schema `identity` | identity | `{ "groupId": "<uuid>", "ownerId": "<uuid>", "memberCount": <int ≥ 1> }` — `memberCount` gồm owner + thành viên trong `CreateGroupRequest.memberIds` |
 | `identity.friend.request_sent` | Gửi lời mời kết bạn | identity | `{ "fromUserId": "<uuid>", "toUserId": "<uuid>" }` |
 | `identity.friend.request_accepted` | Chấp nhận lời mời | identity | `{ "fromUserId": "<uuid>", "toUserId": "<uuid>" }` |
 | `messaging.message.created` | Tin đã ghi vào schema `messaging` | messaging | `Message` + `conversationType` + `recipientIds` |

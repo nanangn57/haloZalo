@@ -18,6 +18,8 @@ Chi tiết: [infra/README.md](../../infra/README.md).
 ```bash
 cd clients/mobile/app
 cp -n .env.example .env
+# Local Expo needs app/core → clients/core (Compose mounts this path in Docker).
+ln -sfn ../../core core
 npm install
 npx expo start --web --port 8081
 ```

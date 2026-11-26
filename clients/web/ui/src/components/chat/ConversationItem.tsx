@@ -63,9 +63,7 @@ function ConversationItem({
 
   const displayTitle =
     title ??
-    (conversation.type === 'GROUP'
-      ? 'Group conversation'
-      : 'Direct conversation')
+    (conversation.type === 'GROUP' ? 'Group' : 'Direct conversation')
 
   const unreadCount = conversation.unreadCount ?? 0
   const mark = (initials || getInitials(displayTitle)).slice(0, 2).toUpperCase()

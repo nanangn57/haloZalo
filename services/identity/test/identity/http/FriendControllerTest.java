@@ -127,13 +127,13 @@ class FriendControllerTest {
 
         mvc.perform(get("/blocks").requestAttr(SessionFilter.USER_ID, ANH))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.blocks", hasSize(1)))
-            .andExpect(jsonPath("$.blocks[0].username").value("huy"));
+            .andExpect(jsonPath("$.friends", hasSize(1)))
+            .andExpect(jsonPath("$.friends[0].username").value("huy"));
 
         mvc.perform(delete("/blocks/" + HUY).requestAttr(SessionFilter.USER_ID, ANH))
             .andExpect(status().isNoContent());
         mvc.perform(get("/blocks").requestAttr(SessionFilter.USER_ID, ANH))
-            .andExpect(jsonPath("$.blocks", hasSize(0)));
+            .andExpect(jsonPath("$.friends", hasSize(0)));
         mvc.perform(delete("/blocks/" + HUY).requestAttr(SessionFilter.USER_ID, ANH))
             .andExpect(status().isNotFound());
     }

@@ -48,7 +48,7 @@ public final class UserSearchService {
     }
 
     /**
-     * Lookup with display names for chat headers and conversation lists.
+     * Lookup with display names and avatars for chat headers and conversation lists.
      */
     public List<UserSummaryList.UserSummary> summaries(String ids) {
         List<UserSummaryList.UserSummary> summaries = new ArrayList<>();
@@ -57,10 +57,18 @@ public final class UserSearchService {
             summaries.add(new UserSummaryList.UserSummary(
                 account.getUserId(),
                 account.getUsername(),
-                profile == null ? null : profile.getDisplayName()
+                profile == null ? null : profile.getDisplayName(),
+                profile == null ? null : blankToNull(profile.getAvatar())
             ));
         }
         return summaries;
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private List<String> parseIds(String ids) {

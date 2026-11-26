@@ -5,8 +5,11 @@ import Avatar from '../common/Avatar'
 interface ContactFriendProps {
   user: User
   onSelect?: () => void
+  /** Chỉ truyền khi đã là bạn. */
   onUnfriend?: () => void
   onBlock?: () => void
+  /** Chỉ truyền khi chưa là bạn (kết quả tìm kiếm). */
+  onAddFriend?: () => void
   disabled?: boolean
 }
 
@@ -15,9 +18,11 @@ function ContactFriendlist({
   onSelect,
   onUnfriend,
   onBlock,
+  onAddFriend,
   disabled,
 }: ContactFriendProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const hasMenu = Boolean(onUnfriend || onBlock || onAddFriend)
 
   return (
     <li className="list-group-item p-0 border-0">
@@ -58,7 +63,7 @@ function ContactFriendlist({
           <i className="bi bi-chat-dots fs-4"></i>
         </button>
 
-        {onUnfriend || onBlock ? (
+        {hasMenu ? (
           <div className="position-relative flex-shrink-0">
             <button
               type="button"
@@ -74,6 +79,20 @@ function ContactFriendlist({
               className={`dropdown-menu dropdown-menu-end ${menuOpen ? 'show' : ''}`}
               style={{ right: 0, left: 'auto' }}
             >
+              {onAddFriend ? (
+                <li>
+                  <button
+                    type="button"
+                    className="dropdown-item"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      onAddFriend()
+                    }}
+                  >
+                    Add friend
+                  </button>
+                </li>
+              ) : null}
               {onUnfriend ? (
                 <li>
                   <button

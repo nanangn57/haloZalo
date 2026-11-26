@@ -101,8 +101,9 @@ public final class FriendController {
     public Map<String, List<FriendView>> blocked(
         @RequestAttribute(name = SessionFilter.USER_ID, required = false) String userId
     ) {
+        // Khớp openapi FriendList: { "friends": [...] }.
         Map<String, List<FriendView>> body = new LinkedHashMap<>();
-        body.put("blocks", friends.listBlocked(callerId(userId)));
+        body.put("friends", friends.listBlocked(callerId(userId)));
         return body;
     }
 

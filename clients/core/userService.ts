@@ -91,6 +91,8 @@ export interface UserSummary {
   userId: string
   username: string
   displayName?: string
+  /** URL ảnh; không có thì client hiện chữ cái. */
+  avatar?: string
 }
 
 // Tên của nhiều user theo userId, cho header chat và danh sách hội thoại.

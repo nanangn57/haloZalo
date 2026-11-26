@@ -10,10 +10,8 @@ interface MesToolBarProps {
   /** Only attachment actions (image/file/video/voice) — keep emoji/text usable while uploading. */
   attachmentsDisabled?: boolean;
   emojiOpen?: boolean;
-  emotionOpen?: boolean;
   recording?: boolean;
   onEmojiPress?: () => void;
-  onEmotionPress?: () => void;
   onImagePress?: () => void;
   onFilePress?: () => void;
   onVideoPress?: () => void;
@@ -21,15 +19,13 @@ interface MesToolBarProps {
   onVoiceToggle?: () => void;
 }
 
-/** Icon toolbar khớp web MesToolbar: emoji, reaction, image, file, video, voice note. */
+/** Icon toolbar: emoji, image, file, video, voice. Reactions gắn trên bubble tin nhắn. */
 export default function MesToolBar({
   disabled,
   attachmentsDisabled,
   emojiOpen,
-  emotionOpen,
   recording,
   onEmojiPress,
-  onEmotionPress,
   onImagePress,
   onFilePress,
   onVideoPress,
@@ -53,18 +49,6 @@ export default function MesToolBar({
           accessibilityState={{ selected: !!emojiOpen }}
         >
           <Ionicons name="happy-outline" size={22} color={iconColor(emojiOpen)} />
-        </Pressable>
-      ) : null}
-
-      {onEmotionPress ? (
-        <Pressable
-          style={[styles.iconButton, emotionOpen && { backgroundColor: theme.primarySoft }]}
-          onPress={onEmotionPress}
-          disabled={allDisabled}
-          accessibilityLabel="Send reaction"
-          accessibilityState={{ selected: !!emotionOpen }}
-        >
-          <Ionicons name="heart-outline" size={22} color={iconColor(emotionOpen)} />
         </Pressable>
       ) : null}
 

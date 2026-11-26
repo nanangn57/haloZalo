@@ -626,13 +626,13 @@ paths:
     get:
       tags: [Users]
       operationId: lookupUsers
-      summary: Lấy tên của nhiều user theo userId, để hiện header chat và danh sách hội thoại
+      summary: Lấy tên/avatar của nhiều user theo userId, để hiện header chat và danh sách hội thoại
       description: |
         Hội thoại chỉ có `memberIds`. Client gom các id chưa có trong cache rồi gọi một lần cho cả trang hội thoại.
         Trả user theo thứ tự id gửi lên, bỏ id trùng. Id không có tài khoản thì bị bỏ qua, không trả 404,
         vì một hội thoại cũ có thể còn id của tài khoản không còn.
         Không trả email: ai đã đăng nhập cũng gọi được với id bất kỳ.
-        Bản này chưa có avatar. Client hiện chữ cái đầu của `username`.
+        Có `displayName` và `avatar` (URL) khi user đã đặt; không có avatar thì client hiện chữ cái viết tắt.
       security:
         - bearerAuth: []
       parameters:
@@ -1994,6 +1994,9 @@ components:
           type: string
         displayName:
           type: string
+        avatar:
+          type: string
+          description: URL ảnh đại diện. Bỏ field khi chưa có.
     UserSummaryList:
       type: object
       additionalProperties: false
@@ -2296,12 +2299,22 @@ components:
     CreateGroupRequest:
       type: object
       additionalProperties: false
-      required: [name]
       properties:
         name:
           type: string
-          minLength: 1
           maxLength: 64
+          description: |
+            Tên nhóm tuỳ chọn. Để trống thì client hiện tên theo mọi thành viên
+            gồm owner (2–3 người đầu + "…").
+        memberIds:
+          type: array
+          description: |
+            Thành viên thêm ngay khi tạo (ngoài owner). Id trùng hoặc trùng
+            owner được bỏ qua. User không tồn tại → 404.
+          items:
+            type: string
+            format: uuid
+          uniqueItems: true
     AddMemberRequest:
       type: object
       additionalProperties: false
@@ -2320,6 +2333,7 @@ components:
           format: uuid
         name:
           type: string
+          description: Có thể rỗng — client dùng tên thành viên làm tiêu đề hội thoại.
         ownerId:
           type: string
           format: uuid

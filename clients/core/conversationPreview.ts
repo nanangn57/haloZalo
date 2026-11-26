@@ -44,7 +44,11 @@ export function getLastMessagePreview(
       case 'EMOTION':
         text = EMOTION_EMOJI[last.body ?? ''] ?? last.body ?? ''
         break
+      case 'SYSTEM':
+        text = (last.body ?? '').replace(/\s+/g, ' ').trim()
+        break
       default:
+        // TEXT và tin forward (cùng type gốc, có thể kèm forwardedFrom ở Message đầy đủ).
         text = (last.body ?? '').replace(/\s+/g, ' ').trim()
     }
   }

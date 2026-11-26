@@ -75,13 +75,26 @@ class GroupControllerTest {
     }
 
     @Test
-    void createRejectsEmptyName() throws Exception {
+    void createAllowsEmptyNameAndInitialMembers() throws Exception {
         mvc.perform(post("/groups")
                 .requestAttr(SessionFilter.USER_ID, ownerId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"\"}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.name").value(""));
+
+        MvcResult created = mvc.perform(post("/groups")
+                .requestAttr(SessionFilter.USER_ID, ownerId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"memberIds\":[\"" + memberId + "\"]}"))
+            .andExpect(status().isCreated())
+            .andReturn();
+        String groupId = JsonPath.read(created.getResponse().getContentAsString(), "$.groupId");
+
+        mvc.perform(get("/groups/" + groupId + "/members")
+                .requestAttr(SessionFilter.USER_ID, ownerId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.members.length()").value(2));
     }
 
     @Test
@@ -274,7 +287,8 @@ class GroupControllerTest {
                 .requestAttr(SessionFilter.USER_ID, ownerId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\" \"}"))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value(""));
     }
 
     private String createGroup() throws Exception {

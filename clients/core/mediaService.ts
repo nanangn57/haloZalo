@@ -8,7 +8,6 @@ import {
   resolveMediaUrlWithBase,
   type MediaUploadType,
 } from './mediaMime'
-import * as FileSystem from 'expo-file-system/legacy'
 
 export type { MediaUploadType } from './mediaMime'
 export {
@@ -161,34 +160,6 @@ type ExpoLegacyFileSystem = {
   ) => { uploadAsync: () => Promise<{ status: number; body: string }> }
 }
 
-/** Size from disk when the picker omits fileSize (common on Android / after URI rewrite). */
-async function resolveNativeFileBytes(
-  uri: string,
-): Promise<number | undefined> {
-  try {
-    const info = await FileSystem.getInfoAsync(uri, {
-      size: true,
-    })
-
-    console.log('[MediaUpload] FileSystem info:', info)
-
-    if (!info.exists || info.isDirectory) {
-      console.warn('[MediaUpload] File inaccessible:', uri)
-      return undefined
-    }
-
-    if (typeof info.size !== 'number' || info.size <= 0) {
-      console.warn('[MediaUpload] Invalid file size:', info.size)
-      return undefined
-    }
-
-    return info.size
-  } catch (error) {
-    console.error('[MediaUpload] Size resolution failed:', error)
-    return undefined
-  }
-}
-
 function loadExpoFileSystem(): ExpoLegacyFileSystem | null {
   if (!isReactNativeRuntime()) {
     return null
@@ -203,6 +174,33 @@ function loadExpoFileSystem(): ExpoLegacyFileSystem | null {
     return requireFn('expo-file-system/legacy') as ExpoLegacyFileSystem
   } catch {
     return null
+  }
+}
+
+/** Size from disk when the picker omits fileSize (common on Android / after URI rewrite). */
+async function resolveNativeFileBytes(
+  uri: string,
+): Promise<number | undefined> {
+  const FileSystem = loadExpoFileSystem()
+  if (!FileSystem?.getInfoAsync) {
+    return undefined
+  }
+  try {
+    const info = await FileSystem.getInfoAsync(uri, {
+      size: true,
+    })
+
+    if (!info.exists || info.isDirectory) {
+      return undefined
+    }
+
+    if (typeof info.size !== 'number' || info.size <= 0) {
+      return undefined
+    }
+
+    return info.size
+  } catch {
+    return undefined
   }
 }
 

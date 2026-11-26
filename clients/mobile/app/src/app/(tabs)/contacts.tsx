@@ -26,6 +26,8 @@ import {
   cancelFriendRequestApi,
   unfriendApi,
   blockUserApi,
+  unblockUserApi,
+  listBlocksApi,
   type Friend,
   type FriendRequestList,
 } from '@core/friendService';
@@ -45,6 +47,8 @@ export default function ContactsPage() {
   const [mode, setMode] = useState<Mode>('friends');
   const [query, setQuery] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [blocked, setBlocked] = useState<Friend[]>([]);
+  const [showBlocked, setShowBlocked] = useState(false);
   const [presence, setPresence] = useState<Record<string, UserPresence>>({});
   const friendIdsRef = useRef<string[]>([]);
   const [found, setFound] = useState<AuthUser | null>(null);
@@ -74,8 +78,9 @@ export default function ContactsPage() {
     setBusy(true);
     setError('');
     try {
-      const list = await listFriendsApi();
+      const [list, blockedList] = await Promise.all([listFriendsApi(), listBlocksApi()]);
       setFriends(list);
+      setBlocked(blockedList);
       friendIdsRef.current = list.map((friend) => friend.userId);
       void refreshPresence();
     } catch (err: unknown) {
@@ -137,6 +142,12 @@ export default function ContactsPage() {
   const handleBlock = (friend: Friend) => {
     confirmAction('Block', `Block ${friend.displayName || friend.username}?`, () => {
       void runRequestAction(() => blockUserApi(friend.userId), 'User blocked');
+    });
+  };
+
+  const handleUnblock = (user: Friend) => {
+    confirmAction('Unblock', `Unblock ${user.displayName || user.username}?`, () => {
+      void runRequestAction(() => unblockUserApi(user.userId), 'User unblocked');
     });
   };
 
@@ -244,6 +255,40 @@ export default function ContactsPage() {
           data={friends}
           keyExtractor={(item) => item.userId}
           ListEmptyComponent={<Text style={styles.hint}>No friends yet.</Text>}
+          ListFooterComponent={
+            blocked.length > 0 ? (
+              <View style={styles.blockedSection}>
+                <Pressable
+                  style={styles.blockedToggle}
+                  onPress={() => setShowBlocked((open) => !open)}
+                  accessibilityState={{ expanded: showBlocked }}
+                >
+                  <Text style={styles.blockedToggleText}>
+                    Blocked users ({blocked.length})
+                  </Text>
+                </Pressable>
+                {showBlocked
+                  ? blocked.map((user) => (
+                      <View key={user.userId} style={styles.friendRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle}>
+                            {user.displayName || user.username}
+                          </Text>
+                          <Text style={styles.rowSub}>@{user.username}</Text>
+                        </View>
+                        <Pressable
+                          style={[styles.smallButton, styles.buttonSecondary]}
+                          onPress={() => handleUnblock(user)}
+                          disabled={busy}
+                        >
+                          <Text style={styles.buttonText}>Unblock</Text>
+                        </Pressable>
+                      </View>
+                    ))
+                  : null}
+              </View>
+            ) : null
+          }
           renderItem={({ item }) => (
             <View style={styles.friendRow}>
               <Pressable style={{ flex: 1 }} onPress={() => void openDirect(item)}>
@@ -306,9 +351,14 @@ export default function ContactsPage() {
                     void (async () => {
                       setBusy(true);
                       setError('');
+                      setMessage('');
                       try {
                         await sendFriendRequestApi(found.userId);
                         setMessage('Friend request sent');
+                        setFound(null);
+                        setQuery('');
+                        setRequestTab('outgoing');
+                        await loadRequests();
                       } catch (err: unknown) {
                         setError(err instanceof Error ? err.message : 'Send failed');
                       } finally {
@@ -341,7 +391,9 @@ export default function ContactsPage() {
 
           {requests[requestTab].length === 0 ? (
             <Text style={styles.hint}>
-              {requestTab === 'incoming' ? 'No incoming requests.' : 'No pending sent requests.'}
+              {requestTab === 'incoming'
+                ? 'No incoming requests.'
+                : 'No pending sent requests. After accept, they show under Friends — not Sent.'}
             </Text>
           ) : (
             requests[requestTab].map((request) => {
@@ -406,10 +458,15 @@ export default function ContactsPage() {
       {mode === 'profile' ? (
         <View style={styles.card}>
           <Text style={styles.label}>Display name</Text>
-          <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} />
+          <TextInput
+            style={styles.profileInput}
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder="Your display name"
+          />
           <Text style={styles.label}>Avatar URL</Text>
           <TextInput
-            style={styles.input}
+            style={styles.profileInput}
             value={avatar}
             onChangeText={setAvatar}
             autoCapitalize="none"
@@ -468,7 +525,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
+    minHeight: 44,
   },
+  /** Profile form: không dùng flex:1 trong cột — tránh box bị xẹp không thấy chữ. */
+  profileInput: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 12,
+    minHeight: 48,
+    fontSize: 16,
+    color: '#0f172a',
+    backgroundColor: '#fff',
+  },
+  blockedSection: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 8,
+  },
+  blockedToggle: { paddingVertical: 12 },
+  blockedToggleText: { color: '#0369a1', fontWeight: '600' },
   button: {
     backgroundColor: '#0068ff',
     borderRadius: 8,
