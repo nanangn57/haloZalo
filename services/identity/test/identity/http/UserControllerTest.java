@@ -103,6 +103,7 @@ class UserControllerTest {
             .andExpect(jsonPath("$.users.length()").value(1))
             .andExpect(jsonPath("$.users[0].userId").value(userId))
             .andExpect(jsonPath("$.users[0].username").value("ngoc_anh"))
+            .andExpect(jsonPath("$.users[0].displayName").value("Ngoc Anh"))
             .andExpect(jsonPath("$.users[0].email").doesNotExist());
     }
 

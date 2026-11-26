@@ -1,9 +1,7 @@
 interface MesToolbarProps {
   disabled?: boolean
-  emotionOpen?: boolean
   emojiOpen?: boolean
   onEmojiClick?: () => void
-  onEmotionClick?: () => void
   onImageClick?: () => void
   onFileClick?: () => void
   onVideoClick?: () => void
@@ -15,10 +13,8 @@ interface MesToolbarProps {
 
 function MesToolbar({
   disabled,
-  emotionOpen,
   emojiOpen,
   onEmojiClick,
-  onEmotionClick,
   onImageClick,
   onFileClick,
   onVideoClick,
@@ -39,20 +35,6 @@ function MesToolbar({
           title="Emoji"
         >
           <i className="bi bi-emoji-smile" aria-hidden="true" />
-        </button>
-      ) : null}
-
-      {onEmotionClick ? (
-        <button
-          type="button"
-          className={`app-icon-button ${emotionOpen ? 'active' : ''}`}
-          onClick={onEmotionClick}
-          disabled={disabled}
-          aria-label="Send reaction"
-          aria-pressed={emotionOpen}
-          title="Reaction"
-        >
-          <i className="bi bi-heart" aria-hidden="true" />
         </button>
       ) : null}
 

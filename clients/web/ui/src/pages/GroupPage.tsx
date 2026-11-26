@@ -6,7 +6,7 @@ import GroupHeader from '../components/group/GroupHeader'
 
 import type { Group, Member } from '@core/types/group'
 
-import { findUserApi } from '@core/userService'
+import { findUserApi, lookupUsersApi } from '@core/userService'
 import {
   getGroupsApi,
   createGroupApi,
@@ -17,9 +17,28 @@ import {
   dissolveGroupApi,
   updateGroupApi,
 } from '@core/groupService'
+import { listFriendsApi, type Friend } from '@core/friendService'
+import { resolveGroupDisplayTitle } from '@core/groupTitle'
 
 import { getAuth } from '@core/authSession'
 import { getInitials } from '@core/avatar'
+
+async function memberDisplayNames(members: Member[]): Promise<string[]> {
+  // Owner + mọi member (không bỏ bản thân).
+  if (members.length === 0) {
+    return []
+  }
+  try {
+    const users = await lookupUsersApi(members.map((member) => member.userId))
+    const byId = Object.fromEntries(users.map((user) => [user.userId, user]))
+    return members.map((member) => {
+      const user = byId[member.userId]
+      return (user?.displayName || user?.username || member.username || '').trim()
+    }).filter(Boolean)
+  } catch {
+    return members.map((member) => member.username).filter(Boolean)
+  }
+}
 
 function GroupPage() {
   const authUser = getAuth()?.user
@@ -33,14 +52,20 @@ function GroupPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  // Member counts
+  // Member counts + names for Zalo-style untitled groups
   const [memberCounts, setMemberCounts] = useState<
     Record<string, number | null>
+  >({})
+  const [memberNamesByGroupId, setMemberNamesByGroupId] = useState<
+    Record<string, string[]>
   >({})
 
   // Create group
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [groupName, setGroupName] = useState('')
+  const [createFriends, setCreateFriends] = useState<Friend[]>([])
+  const [createMemberIds, setCreateMemberIds] = useState<string[]>([])
+  const [loadingCreateFriends, setLoadingCreateFriends] = useState(false)
   const [creating, setCreating] = useState(false)
   const [actionError, setActionError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
@@ -73,22 +98,41 @@ function GroupPage() {
   const [memberError, setMemberError] = useState('')
   const [memberSuccess, setMemberSuccess] = useState('')
 
+  const rememberGroupMembers = useCallback(
+    async (groupId: string, members: Member[]) => {
+      setMemberCounts((previous) => ({
+        ...previous,
+        [groupId]: members.length,
+      }))
+      const names = await memberDisplayNames(members)
+      setMemberNamesByGroupId((previous) => ({
+        ...previous,
+        [groupId]: names,
+      }))
+    },
+    [],
+  )
+
   // Load member count using the existing members API
   const loadMemberCount = useCallback(async (groupId: string) => {
     try {
       const result = await getGroupMembersApi(groupId)
-
-      setMemberCounts((previous) => ({
-        ...previous,
-        [groupId]: result.members.length,
-      }))
+      await rememberGroupMembers(groupId, result.members)
     } catch {
       setMemberCounts((previous) => ({
         ...previous,
         [groupId]: null,
       }))
     }
-  }, [])
+  }, [rememberGroupMembers])
+
+  function groupLabel(group: Group): string {
+    return resolveGroupDisplayTitle({
+      customName: group.name,
+      memberNames: memberNamesByGroupId[group.groupId],
+      fallback: 'Group',
+    })
+  }
 
   // Load groups
   const loadGroups = useCallback(async () => {
@@ -135,10 +179,7 @@ function GroupPage() {
 
               if (cancelled) return
 
-              setMemberCounts((previous) => ({
-                ...previous,
-                [group.groupId]: memberResult.members.length,
-              }))
+              await rememberGroupMembers(group.groupId, memberResult.members)
             } catch {
               if (cancelled) return
 
@@ -169,7 +210,7 @@ function GroupPage() {
     return () => {
       cancelled = true
     }
-  }, [authUser?.userId])
+  }, [authUser?.userId, rememberGroupMembers])
 
   // Load members whenever selected group changes
   const loadGroupMembers = useCallback(async (groupId: string) => {
@@ -178,11 +219,7 @@ function GroupPage() {
 
       setMembers(result.members)
       setMembersError('')
-
-      setMemberCounts((previous) => ({
-        ...previous,
-        [groupId]: result.members.length,
-      }))
+      await rememberGroupMembers(groupId, result.members)
     } catch (err) {
       setMembers([])
 
@@ -194,7 +231,7 @@ function GroupPage() {
     } finally {
       setLoadingMembers(false)
     }
-  }, [])
+  }, [rememberGroupMembers])
 
   const selectedGroupId = selectedGroup?.groupId
 
@@ -204,16 +241,12 @@ function GroupPage() {
     let cancelled = false
 
     getGroupMembersApi(selectedGroupId)
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) return
 
         setMembers(result.members)
         setMembersError('')
-
-        setMemberCounts((previous) => ({
-          ...previous,
-          [selectedGroupId]: result.members.length,
-        }))
+        await rememberGroupMembers(selectedGroupId, result.members)
       })
       .catch((err) => {
         if (cancelled) return
@@ -235,7 +268,7 @@ function GroupPage() {
   return () => {
     cancelled = true
   }
-}, [selectedGroupId])
+}, [selectedGroupId, rememberGroupMembers])
 
   // Filter groups
   const filteredGroups = useMemo(() => {
@@ -246,25 +279,58 @@ function GroupPage() {
     return groups
   }, [groups, selectedFilter])
 
+  async function openCreateForm() {
+    setShowCreateForm(true)
+    setGroupName('')
+    setCreateMemberIds([])
+    setActionError('')
+    setSuccessMessage('')
+    setLoadingCreateFriends(true)
+    try {
+      const friends = await listFriendsApi()
+      setCreateFriends(friends)
+    } catch (err) {
+      setCreateFriends([])
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : 'Không tải được danh sách bạn bè.',
+      )
+    } finally {
+      setLoadingCreateFriends(false)
+    }
+  }
+
+  function toggleCreateMember(userId: string) {
+    setCreateMemberIds((previous) =>
+      previous.includes(userId)
+        ? previous.filter((id) => id !== userId)
+        : [...previous, userId],
+    )
+  }
+
   // Create group
   async function handleCreateGroup(
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault()
 
-    const name = groupName.trim()
-
-    if (!name) {
-      setActionError('Please enter group name')
+    if (createMemberIds.length === 0) {
+      setActionError('Chọn ít nhất một thành viên để tạo nhóm.')
       return
     }
+
+    const name = groupName.trim()
 
     setCreating(true)
     setActionError('')
     setSuccessMessage('')
 
     try {
-      const newGroup = await createGroupApi({ name })
+      const newGroup = await createGroupApi({
+        ...(name ? { name } : {}),
+        memberIds: createMemberIds,
+      })
 
       setGroups((previous) => [
         newGroup,
@@ -273,12 +339,25 @@ function GroupPage() {
         ),
       ])
 
+      const ownerName =
+        authUser?.displayName?.trim() || authUser?.username || ''
+      const selectedNames = [
+        ownerName,
+        ...createFriends
+          .filter((friend) => createMemberIds.includes(friend.userId))
+          .map((friend) => friend.displayName?.trim() || friend.username),
+      ].filter(Boolean)
       setMemberCounts((previous) => ({
         ...previous,
-        [newGroup.groupId]: 1,
+        [newGroup.groupId]: 1 + createMemberIds.length,
+      }))
+      setMemberNamesByGroupId((previous) => ({
+        ...previous,
+        [newGroup.groupId]: selectedNames,
       }))
 
       setGroupName('')
+      setCreateMemberIds([])
       setShowCreateForm(false)
       setSelectedFilter('all')
       setSuccessMessage('Tạo nhóm thành công.')
@@ -325,7 +404,7 @@ function GroupPage() {
       state: {
         conversationId: group.groupId,
         conversationType: 'GROUP',
-        title: group.name,
+        title: groupLabel(group),
       },
     })
   }
@@ -383,7 +462,7 @@ function GroupPage() {
       )
 
       setMemberSuccess(
-        `Add ${foundUser.username} into group ${selectedGroup.name}.`,
+        `Add ${foundUser.username} into group ${groupLabel(selectedGroup)}.`,
       )
 
       setFoundUser(null)
@@ -413,7 +492,7 @@ function GroupPage() {
 
     const confirmed = window.confirm(
       isLeavingSelf
-        ? `Are you sure to leave "${selectedGroup.name}"?`
+        ? `Are you sure to leave "${groupLabel(selectedGroup)}"?`
         : 'Are you sure you want to remove this user?',
     )
 
@@ -427,7 +506,7 @@ function GroupPage() {
       await removeGroupMemberApi(selectedGroup.groupId, userId)
 
       if (isLeavingSelf) {
-        setSuccessMessage(`You've left "${selectedGroup.name}".`)
+        setSuccessMessage(`You've left "${groupLabel(selectedGroup)}".`)
 
         setSelectedGroup(null)
         setMembers([])
@@ -466,7 +545,7 @@ function GroupPage() {
 
     if (
       !window.confirm(
-        `Transfer ownership of "${selectedGroup.name}" to ${member.username}? You will become a member.`,
+        `Transfer ownership of "${groupLabel(selectedGroup)}" to ${member.username}? You will become a member.`,
       )
     ) {
       return
@@ -508,7 +587,7 @@ function GroupPage() {
     if (!selectedGroup || savingName) return
 
     const name = editNameValue.trim()
-    if (!name || name === selectedGroup.name) {
+    if (name === (selectedGroup.name?.trim() || '')) {
       setEditingName(false)
       return
     }
@@ -518,6 +597,7 @@ function GroupPage() {
     setMemberSuccess('')
 
     try {
+      // Rỗng = xoá tên đặt tay → chat hiện tên thành viên.
       const updated = await updateGroupApi(selectedGroup.groupId, { name })
       const next = { ...selectedGroup, ...updated }
       setSelectedGroup(next)
@@ -527,7 +607,9 @@ function GroupPage() {
         ),
       )
       setEditingName(false)
-      setMemberSuccess('Group name updated.')
+      setMemberSuccess(
+        name ? 'Group name updated.' : 'Name cleared — chat will show members.',
+      )
     } catch (err) {
       setMemberError(
         err instanceof Error ? err.message : 'Cannot update group',
@@ -543,7 +625,7 @@ function GroupPage() {
 
     if (
       !window.confirm(
-        `Dissolve "${selectedGroup.name}"? This removes the group for everyone and cannot be undone.`,
+        `Dissolve "${groupLabel(selectedGroup)}"? This removes the group for everyone and cannot be undone.`,
       )
     ) {
       return
@@ -555,7 +637,7 @@ function GroupPage() {
 
     try {
       await dissolveGroupApi(selectedGroup.groupId)
-      setSuccessMessage(`Group "${selectedGroup.name}" was dissolved.`)
+      setSuccessMessage(`Group "${groupLabel(selectedGroup)}" was dissolved.`)
       setSelectedGroup(null)
       setMembers([])
       setLoadingMembers(false)
@@ -591,9 +673,7 @@ function GroupPage() {
     >
       <GroupHeader
         onCreateGroup={() => {
-          setActionError('')
-          setSuccessMessage('')
-          setShowCreateForm(true)
+          void openCreateForm()
         }}
       />
 
@@ -634,7 +714,7 @@ function GroupPage() {
                 </form>
               ) : (
                 <h5 className="mb-1 d-flex align-items-center gap-2">
-                  {selectedGroup.name}
+                  {groupLabel(selectedGroup)}
                   {selectedGroup.role === 'OWNER' && (
                     <button
                       type="button"
@@ -884,26 +964,77 @@ function GroupPage() {
               htmlFor="groupName"
               className="form-label fw-semibold"
             >
-              Group name
+              Group name <span className="text-muted fw-normal">(optional)</span>
             </label>
 
-            <div className="d-flex gap-2">
-              <input
-                id="groupName"
-                type="text"
-                className="form-control"
-                placeholder="Enter group name"
-                value={groupName}
-                disabled={creating}
-                onChange={(event) =>
-                  setGroupName(event.target.value)
-                }
-              />
+            <input
+              id="groupName"
+              type="text"
+              className="form-control mb-3"
+              placeholder="Leave empty = member names"
+              value={groupName}
+              disabled={creating}
+              onChange={(event) =>
+                setGroupName(event.target.value)
+              }
+            />
 
+            <div className="mb-2 fw-semibold">
+              Members{' '}
+              <span className="text-muted fw-normal">
+                ({createMemberIds.length} selected)
+              </span>
+            </div>
+
+            {loadingCreateFriends ? (
+              <p className="text-muted small mb-3">Loading friends…</p>
+            ) : createFriends.length === 0 ? (
+              <p className="text-muted small mb-3">
+                No friends yet. Add friends before creating a group.
+              </p>
+            ) : (
+              <ul
+                className="list-unstyled border rounded mb-3 p-2"
+                style={{ maxHeight: 220, overflowY: 'auto' }}
+              >
+                {createFriends.map((friend) => {
+                  const checked = createMemberIds.includes(friend.userId)
+                  const label =
+                    friend.displayName?.trim() || friend.username
+                  return (
+                    <li key={friend.userId} className="form-check py-1">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id={`create-member-${friend.userId}`}
+                        checked={checked}
+                        disabled={creating}
+                        onChange={() => toggleCreateMember(friend.userId)}
+                      />
+                      <label
+                        className="form-check-label"
+                        htmlFor={`create-member-${friend.userId}`}
+                      >
+                        {label}
+                        {friend.displayName?.trim() ? (
+                          <span className="text-muted"> · {friend.username}</span>
+                        ) : null}
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+
+            <div className="d-flex gap-2">
               <button
                 type="submit"
                 className="btn btn-primary text-nowrap"
-                disabled={creating || !groupName.trim()}
+                disabled={
+                  creating ||
+                  loadingCreateFriends ||
+                  createMemberIds.length === 0
+                }
               >
                 {creating ? 'Creating...' : 'Create'}
               </button>
@@ -915,6 +1046,7 @@ function GroupPage() {
                 onClick={() => {
                   setShowCreateForm(false)
                   setGroupName('')
+                  setCreateMemberIds([])
                   setActionError('')
                 }}
               >
@@ -1017,8 +1149,7 @@ function GroupPage() {
                   type="button"
                   className="app-button app-button-primary"
                   onClick={() => {
-                    setActionError('')
-                    setShowCreateForm(true)
+                    void openCreateForm()
                   }}
                 >
                   <i className="bi bi-plus-lg" aria-hidden="true" />
@@ -1032,7 +1163,8 @@ function GroupPage() {
                 selectedGroup?.groupId === group.groupId
 
               const count = memberCounts[group.groupId]
-              const initial = group.name?.trim() ? getInitials(group.name) : 'G'
+              const label = groupLabel(group)
+              const initial = getInitials(label, 1) || 'G'
 
               return (
                 <li
@@ -1051,7 +1183,7 @@ function GroupPage() {
                     </span>
 
                     <span className="group-row-copy">
-                      <span className="group-row-name">{group.name}</span>
+                      <span className="group-row-name">{label}</span>
                       <span className="group-row-meta">
                         {group.role === 'OWNER' ? 'Owner' : 'Member'}
                         {' · '}
@@ -1075,8 +1207,8 @@ function GroupPage() {
                   <button
                     type="button"
                     className="app-icon-button group-row-chat"
-                    title={`Open chat ${group.name}`}
-                    aria-label={`Open chat ${group.name}`}
+                    title={`Open chat ${label}`}
+                    aria-label={`Open chat ${label}`}
                     onClick={() => handleOpenChat(group)}
                   >
                     <i className="bi bi-chat-dots" aria-hidden="true" />

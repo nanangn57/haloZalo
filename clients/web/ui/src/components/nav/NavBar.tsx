@@ -94,7 +94,7 @@ function NavBar({ currentUser }: UserItemProps) {
         <div className="app-nav-rail-top">
           <button
             type="button"
-            className="app-icon-button"
+            className="app-nav-profile-button"
             onClick={() => setShowProfile(true)}
             title="My Profile"
             aria-label="Open profile"
@@ -102,7 +102,7 @@ function NavBar({ currentUser }: UserItemProps) {
             <Avatar
               name={profile?.displayName || currentUser.name}
               src={profile?.avatar || currentUser.avatar}
-              size={44}
+              size={40}
               className="app-nav-avatar"
             />
           </button>
@@ -247,7 +247,7 @@ function NavBar({ currentUser }: UserItemProps) {
                   </label>
                   <input
                     id="edit-display-name"
-                    className="app-input"
+                    className="app-input app-input-profile"
                     value={editName}
                     onChange={(event) => setEditName(event.target.value)}
                     maxLength={64}
@@ -260,7 +260,7 @@ function NavBar({ currentUser }: UserItemProps) {
                   </label>
                   <input
                     id="edit-avatar"
-                    className="app-input"
+                    className="app-input app-input-profile"
                     value={editAvatar}
                     onChange={(event) => setEditAvatar(event.target.value)}
                     placeholder="https://… (để trống = chữ cái viết tắt)"

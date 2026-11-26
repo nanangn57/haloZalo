@@ -138,16 +138,49 @@ class GroupServiceTest {
     }
 
     @Test
-    void invalidNameDoesNotPublish() {
-        assertThrows(GroupService.Rejected.class, () -> service.create(ownerId, new CreateGroupRequest("")));
+    void createAllowsEmptyNameForMemberBasedTitle() {
+        GroupResponse created = service.create(ownerId, new CreateGroupRequest(""));
+        GroupResponse blank = service.create(ownerId, new CreateGroupRequest("  "));
 
-        assertTrue(events.groupIds.isEmpty());
+        assertEquals("", created.getName());
+        assertEquals("", blank.getName());
+        assertEquals(2, events.groupIds.size());
     }
 
     @Test
-    void createRejectsBlankName() {
+    void createAddsInitialMembersAndSkipsOwnerDuplicate() {
+        String other = saveAccount("other");
+        GroupResponse created = service.create(
+            ownerId,
+            new CreateGroupRequest("nhom", List.of(memberId, ownerId, memberId, other))
+        );
+
+        assertEquals(Role.MEMBER, memberships.find(created.getGroupId(), memberId).getRole());
+        assertEquals(Role.MEMBER, memberships.find(created.getGroupId(), other).getRole());
+        assertEquals(Role.OWNER, memberships.find(created.getGroupId(), ownerId).getRole());
+        assertEquals(3, memberships.listByGroup(created.getGroupId()).size());
+        assertEquals(2, events.changes.stream().filter(row -> row.startsWith("added ")).count());
+    }
+
+    @Test
+    void createRejectsUnknownInitialMember() {
+        GroupService.Rejected rejected = assertThrows(
+            GroupService.Rejected.class,
+            () -> service.create(
+                ownerId,
+                new CreateGroupRequest("nhom", List.of(UUID.randomUUID().toString()))
+            )
+        );
+
+        assertEquals(GroupService.Rejected.Reason.NOT_FOUND, rejected.getReason());
+        assertEquals(0, groups.size());
+    }
+
+    @Test
+    void createRejectsNameLongerThanMax() {
+        String tooLong = "x".repeat(65);
         GroupService.Rejected rejected = assertThrows(GroupService.Rejected.class,
-            () -> service.create(ownerId, new CreateGroupRequest("  ")));
+            () -> service.create(ownerId, new CreateGroupRequest(tooLong)));
 
         assertEquals(GroupService.Rejected.Reason.VALIDATION, rejected.getReason());
         assertEquals(0, groups.size());
@@ -485,8 +518,11 @@ class GroupServiceTest {
         GroupResponse group = service.create(ownerId, new CreateGroupRequest("nhom"));
         service.addMember(ownerId, group.getGroupId(), new AddMemberRequest(memberId));
 
-        GroupService.Rejected blankName = assertThrows(GroupService.Rejected.class,
-            () -> service.update(ownerId, group.getGroupId(), GroupPatch.from(json("{\"name\":\" \"}"))));
+        GroupResponse cleared = service.update(
+            ownerId,
+            group.getGroupId(),
+            GroupPatch.from(json("{\"name\":\" \"}"))
+        );
         GroupService.Rejected longName = assertThrows(GroupService.Rejected.class,
             () -> service.update(ownerId, group.getGroupId(), GroupPatch.from(json("{\"name\":\"" + "x".repeat(65) + "\"}"))));
         GroupService.Rejected longDescription = assertThrows(GroupService.Rejected.class,
@@ -496,12 +532,12 @@ class GroupServiceTest {
         GroupService.Rejected byMember = assertThrows(GroupService.Rejected.class,
             () -> service.update(memberId, group.getGroupId(), GroupPatch.from(json("{\"name\":\"hack\"}"))));
 
-        assertEquals(GroupService.Rejected.Reason.VALIDATION, blankName.getReason());
+        assertEquals("", cleared.getName());
         assertEquals(GroupService.Rejected.Reason.VALIDATION, longName.getReason());
         assertEquals(GroupService.Rejected.Reason.VALIDATION, longDescription.getReason());
         assertEquals(GroupService.Rejected.Reason.VALIDATION, empty.getReason());
         assertEquals(GroupService.Rejected.Reason.FORBIDDEN, byMember.getReason());
-        assertEquals("nhom", groups.findById(group.getGroupId()).getGroupName());
+        assertEquals("", groups.findById(group.getGroupId()).getGroupName());
     }
 
     private static JsonNode json(String text) {
@@ -663,6 +699,11 @@ class GroupServiceTest {
 
         @Override
         public void publishGroupCreated(String groupId, String ownerId) {
+            publishGroupCreated(groupId, ownerId, 1);
+        }
+
+        @Override
+        public void publishGroupCreated(String groupId, String ownerId, int memberCount) {
             groupIds.add(groupId);
             ownerIds.add(ownerId);
         }

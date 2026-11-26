@@ -116,12 +116,13 @@ export function unblockUserApi(userId: string): Promise<void> {
 }
 
 export async function listBlocksApi(): Promise<Friend[]> {
-  const data = await requestJson<{ friends?: Friend[] }>(
+  // openapi FriendList: { "friends": [...] }. Giữ fallback "blocks" cho bản server cũ.
+  const data = await requestJson<{ friends?: Friend[]; blocks?: Friend[] }>(
     `${API_BASE_URL}/blocks`,
     { method: 'GET', headers: getIdentityApiHeaders() },
     'Cannot load blocked users',
   )
-  return data.friends ?? []
+  return data.friends ?? data.blocks ?? []
 }
 
 // System admin (platformRole ADMIN).

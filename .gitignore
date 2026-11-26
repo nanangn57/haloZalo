@@ -100,3 +100,6 @@ infra/e2e/*-report.json
 infra/e2e/*-coverage.json
 
 AGENT.md
+# Graphify knowledge graph output
+graphify-out/
+.graphify_labels.json.sig

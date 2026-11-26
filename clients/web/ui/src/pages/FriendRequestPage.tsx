@@ -126,7 +126,10 @@ function FriendRequestPage() {
     try {
       await sendFriendRequestApi(found.userId)
       setMessage(`Sent friend request to ${found.displayName || found.username}`)
-      void loadRequests()
+      setFound(null)
+      setQuery('')
+      setTab('outgoing')
+      await loadRequests()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Cannot send request')
     } finally {
@@ -278,7 +281,7 @@ function FriendRequestPage() {
           <p className="text-muted">
             {tab === 'incoming'
               ? 'No incoming friend requests.'
-              : 'You have not sent any pending requests.'}
+              : 'No pending sent requests. After the other person accepts, they appear in Friend list — not here.'}
           </p>
         ) : (
           <ul className="list-group">

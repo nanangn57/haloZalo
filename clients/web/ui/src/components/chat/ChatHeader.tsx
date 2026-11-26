@@ -9,6 +9,8 @@ interface ChatHeaderProps {
   onInfoClick?: () => void
   // Mở danh sách media của hội thoại.
   onMediaClick?: () => void
+  /** Thoát màn group chat lồng trong Contacts → Groups. */
+  onBack?: () => void
 }
 
 function ChatHeader({
@@ -18,6 +20,7 @@ function ChatHeader({
   initials,
   type = 'DIRECT',
   onMediaClick,
+  onBack,
 }: ChatHeaderProps) {
   const mark = (
     initials || (title.trim() ? getInitials(title) : type === 'GROUP' ? 'G' : '?')
@@ -27,6 +30,17 @@ function ChatHeader({
 
   return (
     <div className="chat-header-bar">
+      {onBack ? (
+        <button
+          type="button"
+          className="app-icon-button"
+          onClick={onBack}
+          aria-label="Back"
+          title="Back"
+        >
+          <i className="bi bi-arrow-left" aria-hidden="true" />
+        </button>
+      ) : null}
       {avatar ? (
         <img
           src={avatar}

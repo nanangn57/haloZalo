@@ -1,5 +1,5 @@
 
-import { useLocation, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 
 import type {
@@ -7,6 +7,12 @@ import type {
   ConversationPrefsPatch,
 } from '@core/types/conversation'
 import { applyConversationPrefs } from '@core/conversationPrefs'
+import {
+  applyMessageToConversations,
+  clearConversationUnread,
+} from '@core/conversationList'
+import { resolveGroupDisplayTitle } from '@core/groupTitle'
+import { upsertMessage } from '@core/messageList'
 import {
   getConversationsApi,
   createDirectConversationApi,
@@ -41,7 +47,6 @@ import {
   listReactionsApi,
   forwardMessageApi,
   updateConversationPrefsApi,
-  type EmotionCode,
   type MessageReaction,
   type ReactionCode,
 } from '@core/messageService'
@@ -91,6 +96,7 @@ function ChatPage() {
   // --------------------------------------------------
 
   const location = useLocation()
+  const navigate = useNavigate()
 
   const { groupId: routeGroupId } = useParams<{
     groupId: string
@@ -178,7 +184,6 @@ function ChatPage() {
   const [showEmojiPicker, setShowEmojiPicker] =
     useState(false)
 
-  const [showEmotionBar, setShowEmotionBar] = useState(false)
   const [showSocketDebug, setShowSocketDebug] = useState(false)
   const [uploadingMedia, setUploadingMedia] = useState(false)
   const mediaInputRef = useRef<HTMLInputElement | null>(null)
@@ -408,10 +413,8 @@ function ChatPage() {
         }
         const next: Record<string, string> = {}
         groups.forEach((group) => {
-          const name = group.name?.trim()
-          if (name) {
-            next[group.groupId] = name
-          }
+          // Lưu cả "" — tên rỗng → tiêu đề theo thành viên, không giữ title deep-link cũ.
+          next[group.groupId] = group.name?.trim() || ''
         })
         setGroupNamesById((previous) => ({ ...previous, ...next }))
       })
@@ -424,48 +427,68 @@ function ChatPage() {
     }
   }, [conversations])
 
+  // Lookup tên + avatar. Lần đầu chỉ lấy id chưa cache; định kỳ/focus thì refresh để thấy avatar mới.
   useEffect(() => {
-    const missing = [
-      ...new Set(
-        conversations
-          .flatMap((conversation) => conversation.memberIds)
-          .filter(
-            (userId) =>
-              userId !== currentUserId &&
-              !requestedUserIds.current.has(userId),
-          ),
-      ),
-    ]
+    let cancelled = false
 
-    if (missing.length === 0) {
-      return
+    function memberIds(): string[] {
+      return [
+        ...new Set(
+          conversations
+            .flatMap((conversation) => conversation.memberIds)
+            .filter((userId) => userId !== currentUserId),
+        ),
+      ]
     }
 
-    missing.forEach((userId) => requestedUserIds.current.add(userId))
-
-    // The API takes at most 100 ids per call.
-    const batches: string[][] = []
-    for (let i = 0; i < missing.length; i += 100) {
-      batches.push(missing.slice(i, i + 100))
-    }
-
-    void Promise.all(batches.map((ids) => lookupUsersApi(ids)))
-      .then((results) => {
-        setUsersById((previous) => {
-          const next = { ...previous }
-          results.flat().forEach((user) => {
-            next[user.userId] = user
+    function fetchUsers(ids: string[], markRequested: boolean) {
+      if (ids.length === 0) return
+      if (markRequested) {
+        ids.forEach((userId) => requestedUserIds.current.add(userId))
+      }
+      const batches: string[][] = []
+      for (let i = 0; i < ids.length; i += 100) {
+        batches.push(ids.slice(i, i + 100))
+      }
+      void Promise.all(batches.map((batch) => lookupUsersApi(batch)))
+        .then((results) => {
+          if (cancelled) return
+          setUsersById((previous) => {
+            const next = { ...previous }
+            results.flat().forEach((user) => {
+              next[user.userId] = user
+            })
+            return next
           })
-          return next
         })
-      })
-      .catch((err) => {
-        console.error('Cannot load user names:', err)
-        // Allow a later attempt for these ids.
-        missing.forEach((userId) =>
-          requestedUserIds.current.delete(userId),
-        )
-      })
+        .catch((err) => {
+          console.error('Cannot load user names:', err)
+          if (markRequested) {
+            ids.forEach((userId) => requestedUserIds.current.delete(userId))
+          }
+        })
+    }
+
+    const all = memberIds()
+    const missing = all.filter((userId) => !requestedUserIds.current.has(userId))
+    fetchUsers(missing, true)
+
+    const refreshMs = 30_000
+    const timer = window.setInterval(() => {
+      fetchUsers(memberIds(), false)
+    }, refreshMs)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchUsers(memberIds(), false)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [conversations, currentUserId])
 
   // --------------------------------------------------
@@ -539,6 +562,9 @@ function ChatPage() {
           0,
         )
         if (maxSeq > 0) {
+          setConversations((previous) =>
+            clearConversationUnread(previous, currentConversationId),
+          )
           void markConversationReadApi(currentConversationId, maxSeq).catch(
             (err) => console.error('Cannot mark read:', err),
           )
@@ -581,21 +607,7 @@ function ChatPage() {
 
   useEffect(() => {
     const mergeIncoming = (incomingMessage: Message) => {
-      setMessages((previous) => {
-        const existingIndex = previous.findIndex(
-          (message) =>
-            message.messageId === incomingMessage.messageId ||
-            message.clientMsgId === incomingMessage.clientMsgId,
-        )
-
-        if (existingIndex >= 0) {
-          return previous.map((message, index) =>
-            index === existingIndex ? incomingMessage : message,
-          )
-        }
-
-        return [...previous, incomingMessage]
-      })
+      setMessages((previous) => upsertMessage(previous, incomingMessage))
     }
 
     const unsubscribeEvent = socketClient.subscribe((event) => {
@@ -715,8 +727,7 @@ function ChatPage() {
       }
 
       const createdAt = Date.parse(payload.createdAt)
-
-      mergeIncoming({
+      const incoming: Message = {
         id: payload.messageId,
         messageId: payload.messageId,
         conversationId: payload.conversationId,
@@ -731,17 +742,27 @@ function ChatPage() {
         status: 'sent',
         replyTo: payload.replyTo,
         forwardedFrom: payload.forwardedFrom,
-      })
+      }
 
-      if (
-        selectedConversationRef.current?.conversationId ===
-          payload.conversationId &&
-        typeof payload.seq === 'number'
-      ) {
-        void markConversationReadApi(
-          payload.conversationId,
-          payload.seq,
-        ).catch((err) => console.error('Cannot mark read:', err))
+      const activeId = selectedConversationRef.current?.conversationId
+      setConversations((previous) =>
+        applyMessageToConversations(previous, incoming, {
+          currentUserId,
+          activeConversationId: activeId,
+        }),
+      )
+
+      if (activeId === payload.conversationId) {
+        mergeIncoming(incoming)
+        if (typeof payload.seq === 'number') {
+          setConversations((previous) =>
+            clearConversationUnread(previous, payload.conversationId),
+          )
+          void markConversationReadApi(
+            payload.conversationId,
+            payload.seq,
+          ).catch((err) => console.error('Cannot mark read:', err))
+        }
       }
     })
 
@@ -815,35 +836,12 @@ function ChatPage() {
     return getInitials(name, 1)
   }
 
-  function memberDisplayNames(
-    memberIds: string[],
-    options?: { excludeSelf?: boolean },
-  ): string[] {
-    const excludeSelf = options?.excludeSelf ?? true
-    const ids = excludeSelf
-      ? memberIds.filter((id) => id !== currentUserId)
-      : memberIds
-
-    const names = ids
+  function memberDisplayNames(memberIds: string[]): string[] {
+    // Tiêu đề nhóm gồm owner + mọi thành viên (kể cả bản thân).
+    return memberIds
       .map((id) => usersById[id])
       .filter(Boolean)
       .map((user) => displayName(user!))
-
-    // If everyone else is unresolved, show whoever we can resolve.
-    if (names.length === 0 && excludeSelf) {
-      return memberDisplayNames(memberIds, { excludeSelf: false })
-    }
-    return names
-  }
-
-  function formatMemberTitle(names: string[]): string {
-    if (names.length === 0) {
-      return ''
-    }
-    if (names.length <= 3) {
-      return names.join(', ')
-    }
-    return `${names.slice(0, 3).join(', ')}…`
   }
 
   function groupInitials(memberIds: string[]): string {
@@ -858,26 +856,23 @@ function ChatPage() {
   }
 
   function resolveGroupTitle(conversation: Conversation): string {
-    if (
-      conversation.conversationId === requestedConversationId &&
-      requestedConversationTitle.trim()
-    ) {
-      return requestedConversationTitle.trim()
+    const id = conversation.conversationId
+    const memberNames = memberDisplayNames(conversation.memberIds)
+    // Đã load identity groups → tin name (kể cả rỗng). Chưa load → dùng title route tạm.
+    if (Object.prototype.hasOwnProperty.call(groupNamesById, id)) {
+      return resolveGroupDisplayTitle({
+        customName: groupNamesById[id],
+        memberNames,
+        fallback: 'Group',
+      })
     }
-
-    const named = groupNamesById[conversation.conversationId]?.trim()
-    if (named) {
-      return named
-    }
-
-    const fromMembers = formatMemberTitle(
-      memberDisplayNames(conversation.memberIds),
-    )
-    if (fromMembers) {
-      return fromMembers
-    }
-
-    return 'Group conversation'
+    const fromRoute =
+      id === requestedConversationId ? requestedConversationTitle.trim() : ''
+    return resolveGroupDisplayTitle({
+      customName: fromRoute,
+      memberNames,
+      fallback: 'Group',
+    })
   }
 
   const selectedDirectUser =
@@ -890,7 +885,7 @@ function ChatPage() {
     ? {
         id: selectedDirectUser.userId,
         name: displayName(selectedDirectUser),
-        avatar: '',
+        avatar: selectedDirectUser.avatar?.trim() || '',
         online: false,
         lastSeen: 0,
         unread: 0,
@@ -1027,10 +1022,11 @@ function ChatPage() {
 
     const user = getDirectUser(conversation)
     const title = user ? displayName(user) : 'Direct conversation'
+    const avatarUrl = user?.avatar?.trim()
 
     return {
       title,
-      avatar: undefined,
+      avatar: avatarUrl || undefined,
       initials: user ? initialsOf(title) : '?',
     }
   }
@@ -1042,6 +1038,23 @@ function ChatPage() {
   function handleSelectConversation(
     conversation: Conversation,
   ) {
+    // Rời URL group chat để không bị khóa lại group khi reload / đổi hội thoại.
+    if (isFromGroupPage) {
+      navigate('/chat', {
+        replace: true,
+        state: {
+          conversationId: conversation.conversationId,
+          conversationType: conversation.type,
+          title:
+            conversation.type === 'GROUP'
+              ? groupNamesById[conversation.conversationId] ||
+                requestedConversationTitle ||
+                'Group'
+              : '',
+        } satisfies ChatNavigationState,
+      })
+      return
+    }
     setSelectedConversation(conversation)
     // setShowUserInfo(false)
     setShowEmojiPicker(false)
@@ -1170,13 +1183,13 @@ function ChatPage() {
         },
       )
 
-      // Replace optimistic message with server response.
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.clientMsgId === clientMsgId
-            ? savedMessage
-            : message,
-        ),
+      // Replace optimistic message with server response (also covers WS race).
+      setMessages((previous) => upsertMessage(previous, savedMessage))
+      setConversations((previous) =>
+        applyMessageToConversations(previous, savedMessage, {
+          currentUserId,
+          activeConversationId: conversationId,
+        }),
       )
     } catch (err) {
       console.error('Cannot send message:', err)
@@ -1192,27 +1205,6 @@ function ChatPage() {
             : message,
         ),
       )
-    }
-  }
-
-  async function handleSendEmotion(code: EmotionCode) {
-    if (!selectedConversation || isLoadingMessages) {
-      return
-    }
-
-    const conversationId = selectedConversation.conversationId
-    const clientMsgId = crypto.randomUUID()
-    setShowEmotionBar(false)
-
-    try {
-      const saved = await sendMessageApi(conversationId, {
-        type: 'EMOTION',
-        body: code,
-        clientMsgId,
-      })
-      setMessages((previous) => [...previous, saved])
-    } catch (err) {
-      console.error('Cannot send emotion:', err)
     }
   }
 
@@ -1301,12 +1293,14 @@ function ChatPage() {
         messageId: source.messageId,
         clientMsgId: crypto.randomUUID(),
       })
+      setConversations((previous) =>
+        applyMessageToConversations(previous, saved, {
+          currentUserId,
+          activeConversationId: selectedConversation?.conversationId,
+        }),
+      )
       if (target.conversationId === selectedConversation?.conversationId) {
-        setMessages((previous) =>
-          previous.some((item) => item.messageId === saved.messageId)
-            ? previous
-            : [...previous, saved],
-        )
+        setMessages((previous) => upsertMessage(previous, saved))
       }
       setForwardTarget(null)
     } catch (err) {
@@ -1398,7 +1392,13 @@ function ChatPage() {
               body,
               clientMsgId,
             })
-      setMessages((previous) => [...previous, saved])
+      setMessages((previous) => upsertMessage(previous, saved))
+      setConversations((previous) =>
+        applyMessageToConversations(previous, saved, {
+          currentUserId,
+          activeConversationId: conversationId,
+        }),
+      )
     } catch (err) {
       console.error('Cannot upload media:', err)
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -1429,7 +1429,13 @@ function ChatPage() {
         duration: clip.durationSec,
         fileName: uploaded.fileName,
       })
-      setMessages((previous) => [...previous, saved])
+      setMessages((previous) => upsertMessage(previous, saved))
+      setConversations((previous) =>
+        applyMessageToConversations(previous, saved, {
+          currentUserId,
+          activeConversationId: conversationId,
+        }),
+      )
     } catch (err) {
       console.error('Cannot send voice message:', err)
       setActionError(
@@ -1591,8 +1597,7 @@ function ChatPage() {
       {/* LEFT SIDEBAR */}
       {/* ============================================ */}
 
-      {!isFromGroupPage && (
-        <aside
+      <aside
           className="d-flex flex-column flex-shrink-0 border-end"
           style={{
             width: '320px',
@@ -1736,7 +1741,6 @@ function ChatPage() {
               })}
           </div>
         </aside>
-      )}
 
       {/* ============================================ */}
       {/* MAIN CHAT AREA */}
@@ -1762,6 +1766,11 @@ function ChatPage() {
                 : headerUser
                   ? initialsOf(headerUser.name)
                   : '?'
+            }
+            onBack={
+              isFromGroupPage
+                ? () => navigate('/contacts/groups')
+                : undefined
             }
             onMediaClick={
               selectedConversation ? () => setShowGallery(true) : undefined
@@ -1869,14 +1878,8 @@ function ChatPage() {
           <MesToolbar
             disabled={!selectedConversation || uploadingMedia}
             emojiOpen={showEmojiPicker}
-            emotionOpen={showEmotionBar}
             onEmojiClick={() => {
               setShowEmojiPicker((previous) => !previous)
-              setShowEmotionBar(false)
-            }}
-            onEmotionClick={() => {
-              setShowEmotionBar((previous) => !previous)
-              setShowEmojiPicker(false)
             }}
             onImageClick={() => pickMedia('IMAGE')}
             onFileClick={() => pickMedia('DOCUMENT')}
@@ -1917,33 +1920,6 @@ function ChatPage() {
                   setShowEmojiPicker(false)
                 }}
               />
-            </div>
-          ) : null}
-
-          {showEmotionBar ? (
-            <div className="chat-emotion-bar">
-              {(
-                [
-                  ['like', '👍'],
-                  ['love', '❤️'],
-                  ['haha', '😄'],
-                  ['wow', '😮'],
-                  ['sad', '😢'],
-                  ['angry', '😠'],
-                ] as const
-              ).map(([code, emoji]) => (
-                <button
-                  key={code}
-                  type="button"
-                  className="chat-emotion-chip"
-                  disabled={!selectedConversation || uploadingMedia}
-                  onClick={() => void handleSendEmotion(code)}
-                  title={code}
-                  aria-label={`Send ${code}`}
-                >
-                  {emoji}
-                </button>
-              ))}
             </div>
           ) : null}
 

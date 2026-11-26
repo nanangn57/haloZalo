@@ -7,24 +7,42 @@ import {
   TextInput,
   Pressable,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { getAuth } from '@core/authSession';
 import {
   getGroupsApi,
-  createGroupApi,
-  addGroupMemberApi,
   getGroupMembersApi,
+  addGroupMemberApi,
   removeGroupMemberApi,
   transferGroupOwnerApi,
   dissolveGroupApi,
   updateGroupApi,
 } from '@core/groupService';
-import { findUserApi } from '@core/userService';
+import { findUserApi, lookupUsersApi } from '@core/userService';
+import { resolveGroupDisplayTitle } from '@core/groupTitle';
 import { confirmAction } from '@/lib/confirm';
 import { createGroupConversationApi } from '@core/messageService';
 import type { Group, Member } from '@core/types/group';
+
+async function memberDisplayNames(members: Member[]): Promise<string[]> {
+  // Owner + mọi member (không bỏ bản thân).
+  if (members.length === 0) return [];
+  try {
+    const users = await lookupUsersApi(members.map((member) => member.userId));
+    const byId = Object.fromEntries(users.map((user) => [user.userId, user]));
+    return members
+      .map((member) => {
+        const user = byId[member.userId];
+        return (user?.displayName || user?.username || member.username || '').trim();
+      })
+      .filter(Boolean);
+  } catch {
+    return members.map((member) => member.username).filter(Boolean);
+  }
+}
 
 export default function GroupsPage() {
   const router = useRouter();
@@ -33,13 +51,15 @@ export default function GroupsPage() {
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [groupName, setGroupName] = useState('');
-  const [creating, setCreating] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [memberQuery, setMemberQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [memberCount, setMemberCount] = useState<Record<string, number>>({});
+  const [memberNamesByGroupId, setMemberNamesByGroupId] = useState<
+    Record<string, string[]>
+  >({});
   const [members, setMembers] = useState<Member[]>([]);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [transferringId, setTransferringId] = useState<string | null>(null);
@@ -47,49 +67,99 @@ export default function GroupsPage() {
   const [renaming, setRenaming] = useState(false);
   const [dissolving, setDissolving] = useState(false);
 
-  const load = useCallback(async () => {
+  const rememberGroupMembers = useCallback(
+    async (groupId: string, nextMembers: Member[]) => {
+      setMemberCount((previous) => ({ ...previous, [groupId]: nextMembers.length }));
+      const names = await memberDisplayNames(nextMembers);
+      setMemberNamesByGroupId((previous) => ({ ...previous, [groupId]: names }));
+    },
+    [],
+  );
+
+  const groupLabel = useCallback(
+    (group: Group) =>
+      resolveGroupDisplayTitle({
+        customName: group.name,
+        memberNames: memberNamesByGroupId[group.groupId],
+        fallback: 'Group',
+      }),
+    [memberNamesByGroupId],
+  );
+
+  const dropGroup = useCallback((groupId: string) => {
+    setGroups((previous) => previous.filter((group) => group.groupId !== groupId));
+    setMemberCount((previous) => {
+      const next = { ...previous };
+      delete next[groupId];
+      return next;
+    });
+    setMemberNamesByGroupId((previous) => {
+      const next = { ...previous };
+      delete next[groupId];
+      return next;
+    });
+    setSelectedGroupId((current) => (current === groupId ? null : current));
+  }, []);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
-      setError('');
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
       const list = await getGroupsApi();
+      const ids = new Set(list.map((group) => group.groupId));
       setGroups(list);
-      const counts: Record<string, number> = {};
+      setSelectedGroupId((current) =>
+        current && ids.has(current) ? current : null,
+      );
+      // Poll im lặng chỉ đồng bộ list (bắt dissolve từ máy khác).
+      if (silent) return;
       await Promise.all(
         list.map(async (group) => {
           try {
             const result = await getGroupMembersApi(group.groupId);
-            counts[group.groupId] = result.members.length;
+            await rememberGroupMembers(group.groupId, result.members);
           } catch {
-            counts[group.groupId] = 0;
+            dropGroup(group.groupId);
           }
         }),
       );
-      setMemberCount(counts);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Cannot load groups');
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Cannot load groups');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, []);
+  }, [dropGroup, rememberGroupMembers]);
 
   const loadMembers = useCallback(async (groupId: string) => {
     try {
       const result = await getGroupMembersApi(groupId);
       setMembers(result.members);
-      setMemberCount((previous) => ({ ...previous, [groupId]: result.members.length }));
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Cannot load members');
-      setMembers([]);
+      await rememberGroupMembers(groupId, result.members);
+    } catch {
+      dropGroup(groupId);
+      setError('');
     }
-  }, []);
+  }, [dropGroup, rememberGroupMembers]);
 
   useEffect(() => {
     if (!auth?.accessToken) {
       router.replace('/login');
-      return;
     }
-    void load();
-  }, [auth?.accessToken, load, router]);
+  }, [auth?.accessToken, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!auth?.accessToken) return undefined;
+      void load();
+      const timer = setInterval(() => void load({ silent: true }), 15_000);
+      return () => clearInterval(timer);
+    }, [auth?.accessToken, load]),
+  );
 
   useEffect(() => {
     if (selectedGroupId) {
@@ -98,23 +168,6 @@ export default function GroupsPage() {
       setMembers([]);
     }
   }, [selectedGroupId, loadMembers]);
-
-  const handleCreate = async () => {
-    const name = groupName.trim();
-    if (!name || creating) return;
-    setCreating(true);
-    setError('');
-    try {
-      const created = await createGroupApi({ name });
-      await createGroupConversationApi(created.groupId);
-      setGroupName('');
-      await load();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Cannot create group');
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleAddMember = async () => {
     if (!selectedGroupId || !memberQuery.trim() || adding) return;
@@ -177,11 +230,13 @@ export default function GroupsPage() {
   };
 
   const handleRename = async () => {
+    if (!selectedGroupId || renaming) return;
     const name = renameValue.trim();
-    if (!selectedGroupId || !name || renaming || name === selectedGroup?.name) return;
+    if (name === (selectedGroup?.name?.trim() || '')) return;
     setRenaming(true);
     setError('');
     try {
+      // Rỗng = xoá tên đặt tay → chat hiện tên thành viên.
       await updateGroupApi(selectedGroupId, { name });
       await load();
     } catch (err: unknown) {
@@ -223,7 +278,7 @@ export default function GroupsPage() {
         params: {
           conversationId: group.groupId,
           conversationType: 'GROUP',
-          title: group.name,
+          title: groupLabel(group),
         },
       });
     } catch (err: unknown) {
@@ -239,28 +294,21 @@ export default function GroupsPage() {
       <Text style={styles.title}>Groups</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.row}>
-        <TextInput
-          style={styles.input}
-          placeholder="New group name"
-          value={groupName}
-          onChangeText={setGroupName}
-        />
-        <Pressable style={styles.button} onPress={() => void handleCreate()} disabled={creating}>
-          <Text style={styles.buttonText}>{creating ? '…' : 'Create'}</Text>
-        </Pressable>
-      </View>
-
       {selectedGroupId ? (
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>
-            Members · {selectedGroup?.name ?? selectedGroupId.slice(0, 8)}
-          </Text>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelTitle}>
+              Manage · {selectedGroup ? groupLabel(selectedGroup) : selectedGroupId.slice(0, 8)}
+            </Text>
+            <Pressable onPress={() => setSelectedGroupId(null)}>
+              <Text style={styles.closeText}>Close</Text>
+            </Pressable>
+          </View>
           {isOwner ? (
             <View style={styles.row}>
               <TextInput
                 style={styles.input}
-                placeholder="Group name"
+                placeholder="Name (empty = member names)"
                 value={renameValue}
                 onChangeText={setRenameValue}
                 maxLength={64}
@@ -270,7 +318,7 @@ export default function GroupsPage() {
                 onPress={() => void handleRename()}
                 disabled={renaming}
               >
-                <Text style={styles.buttonText}>{renaming ? '…' : 'Rename'}</Text>
+                <Text style={styles.buttonText}>{renaming ? '…' : 'Save'}</Text>
               </Pressable>
             </View>
           ) : null}
@@ -282,7 +330,11 @@ export default function GroupsPage() {
                 value={memberQuery}
                 onChangeText={setMemberQuery}
               />
-              <Pressable style={styles.button} onPress={() => void handleAddMember()} disabled={adding}>
+              <Pressable
+                style={styles.button}
+                onPress={() => void handleAddMember()}
+                disabled={adding}
+              >
                 <Text style={styles.buttonText}>{adding ? '…' : 'Add'}</Text>
               </Pressable>
             </View>
@@ -350,26 +402,41 @@ export default function GroupsPage() {
         <FlatList
           data={groups}
           keyExtractor={(item) => item.groupId}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                void load().finally(() => setRefreshing(false));
+              }}
+              tintColor="#0068ff"
+            />
+          }
           ListEmptyComponent={<Text style={styles.empty}>No groups yet.</Text>}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Pressable
-                onPress={() => {
-                  setSelectedGroupId(item.groupId);
-                  setRenameValue(item.name);
-                }}
-                style={{ flex: 1 }}
-              >
-                <Text style={styles.groupName}>{item.name}</Text>
-                <Text style={styles.meta}>
-                  {memberCount[item.groupId] ?? '?'} members · {item.role}
-                </Text>
-              </Pressable>
-              <Pressable style={styles.chatButton} onPress={() => void openChat(item)}>
-                <Text style={styles.buttonText}>Chat</Text>
-              </Pressable>
-            </View>
-          )}
+          renderItem={({ item }) => {
+            const selected = selectedGroupId === item.groupId;
+            return (
+              <View style={[styles.card, selected ? styles.cardSelected : null]}>
+                <Pressable
+                  onPress={() => {
+                    setSelectedGroupId(item.groupId);
+                    setRenameValue(item.name ?? '');
+                    setMemberQuery('');
+                    setError('');
+                  }}
+                  style={styles.cardBody}
+                >
+                  <Text style={styles.groupName}>{groupLabel(item)}</Text>
+                  <Text style={styles.meta}>
+                    {memberCount[item.groupId] ?? '?'} members · {item.role}
+                  </Text>
+                </Pressable>
+                <Pressable style={styles.chatButton} onPress={() => void openChat(item)}>
+                  <Text style={styles.buttonText}>Chat</Text>
+                </Pressable>
+              </View>
+            );
+          }}
         />
       )}
     </SafeAreaView>
@@ -414,6 +481,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  cardSelected: {
+    borderColor: '#0068ff',
+    backgroundColor: '#eff6ff',
+  },
+  cardBody: { flex: 1 },
   groupName: { fontSize: 16, fontWeight: '600' },
   meta: { color: '#64748b', marginTop: 4 },
   chatButton: {
@@ -429,7 +501,15 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
   },
-  panelTitle: { fontWeight: '700', marginBottom: 8 },
+  panelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  panelTitle: { fontWeight: '700', flex: 1 },
+  closeText: { color: '#0068ff', fontWeight: '600' },
   memberRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

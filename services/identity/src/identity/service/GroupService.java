@@ -61,20 +61,50 @@ public final class GroupService {
     }
 
     public GroupResponse create(String userId, CreateGroupRequest request) {
-        String name = request == null ? null : request.getName();
-        if (name == null || name.isBlank() || name.length() > NAME_MAX) {
-            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group name");
-        }
+        // Tên tuỳ chọn: rỗng → client hiện tên theo thành viên (Zalo-style).
+        String name = normalizeOptionalName(request == null ? null : request.getName());
         Instant now = Instant.now();
         String ownerId = canonical(userId);
+        List<String> initialMembers = resolveInitialMembers(
+            ownerId,
+            request == null ? List.of() : request.getMemberIds()
+        );
         Group group = new Group(UUID.randomUUID().toString(), name, null, now, ownerId);
         Membership owner = new Membership(group.getGroupId(), ownerId, now, Role.OWNER);
         transactions.executeWithoutResult(status -> {
             groups.save(group);
             memberships.save(owner);
+            for (String memberId : initialMembers) {
+                memberships.save(new Membership(group.getGroupId(), memberId, now, Role.MEMBER));
+            }
         });
-        events.publishGroupCreated(group.getGroupId(), ownerId);
+        events.publishGroupCreated(group.getGroupId(), ownerId, 1 + initialMembers.size());
+        for (String memberId : initialMembers) {
+            events.publishMemberAdded(group.getGroupId(), ownerId, memberId);
+        }
         return response(group, Role.OWNER);
+    }
+
+    /** Deduplicate, drop owner/self, reject unknown or invalid ids. */
+    private List<String> resolveInitialMembers(String ownerId, List<String> rawIds) {
+        if (rawIds == null || rawIds.isEmpty()) {
+            return List.of();
+        }
+        List<String> resolved = new ArrayList<>();
+        for (String raw : rawIds) {
+            String memberId = canonical(raw);
+            if (!validUuid(memberId)) {
+                throw new Rejected(Rejected.Reason.VALIDATION, "Invalid member request");
+            }
+            if (memberId.equals(ownerId) || resolved.contains(memberId)) {
+                continue;
+            }
+            if (accounts.findById(memberId) == null) {
+                throw new Rejected(Rejected.Reason.NOT_FOUND, "User not found");
+            }
+            resolved.add(memberId);
+        }
+        return List.copyOf(resolved);
     }
 
     public GroupListResponse list(String userId) {
@@ -223,10 +253,8 @@ public final class GroupService {
         String description = current.getGroupDescription();
         String avatar = current.getGroupAvatar();
         if (patch.hasName()) {
-            name = patch.getName();
-            if (name == null || name.isBlank() || name.length() > NAME_MAX) {
-                throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group name");
-            }
+            // Chuỗi rỗng xoá tên đặt tay → client hiện tên thành viên.
+            name = normalizeOptionalName(patch.getName());
         }
         if (patch.hasDescription()) {
             description = optionalText(patch.getDescription(), DESCRIPTION_MAX, "Invalid group description");
@@ -254,6 +282,18 @@ public final class GroupService {
             throw new Rejected(Rejected.Reason.VALIDATION, message);
         }
         return value;
+    }
+
+    /** Null/blank → ""; quá dài → reject. */
+    private static String normalizeOptionalName(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() > NAME_MAX) {
+            throw new Rejected(Rejected.Reason.VALIDATION, "Invalid group name");
+        }
+        return trimmed;
     }
 
     private Group requireGroup(String groupId) {

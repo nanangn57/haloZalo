@@ -5,7 +5,7 @@ export interface ConversationLastMessage {
   messageId?: string
   seq?: number
   senderId?: string
-  type?: 'TEXT' | 'EMOTION' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO'
+  type?: 'TEXT' | 'EMOTION' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO' | 'SYSTEM'
   body?: string
   caption?: string
   fileName?: string

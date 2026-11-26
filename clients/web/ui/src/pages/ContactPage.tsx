@@ -15,6 +15,7 @@ import {
   blockUserApi,
   listBlocksApi,
   listFriendsApi,
+  sendFriendRequestApi,
   unblockUserApi,
   unfriendApi,
 } from '@core/friendService'
@@ -123,6 +124,17 @@ function ContactPage() {
     }
   }
 
+  async function handleAddFriend(user: User) {
+    setError('')
+    try {
+      await sendFriendRequestApi(user.id)
+      setError('')
+      window.alert(`Sent friend request to ${user.name}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot send friend request')
+    }
+  }
+
   async function handleBlock(user: User) {
     if (!window.confirm(`Block ${user.name}? They will not be able to message you.`)) return
     setError('')
@@ -207,7 +219,13 @@ function ContactPage() {
             className="form-control"
             placeholder="Username or email"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value
+              setQuery(next)
+              if (!next.trim()) {
+                setResults([])
+              }
+            }}
           />
           <button
             className="btn btn-primary"
@@ -220,6 +238,9 @@ function ContactPage() {
         {error ? (
           <div className="text-danger small mt-2">{error}</div>
         ) : null}
+        {results.length > 0 ? (
+          <div className="text-muted small mt-2">Search result — clear the box to see your friend list.</div>
+        ) : null}
       </form>
 
       <ul className="list-group flex-grow-1 overflow-auto">
@@ -228,16 +249,24 @@ function ContactPage() {
             No friends yet. Use Friend request to invite someone.
           </li>
         ) : (
-          shown.map((user) => (
-            <ContactFriendlist
-              key={user.id}
-              user={user}
-              onSelect={() => void openDirect(user)}
-              onUnfriend={() => void handleUnfriend(user)}
-              onBlock={() => void handleBlock(user)}
-              disabled={openingId === user.id}
-            />
-          ))
+          shown.map((user) => {
+            const isFriend = friends.some((friend) => friend.id === user.id)
+            return (
+              <ContactFriendlist
+                key={user.id}
+                user={user}
+                onSelect={() => void openDirect(user)}
+                onUnfriend={
+                  isFriend ? () => void handleUnfriend(user) : undefined
+                }
+                onAddFriend={
+                  isFriend ? undefined : () => void handleAddFriend(user)
+                }
+                onBlock={() => void handleBlock(user)}
+                disabled={openingId === user.id}
+              />
+            )
+          })
         )}
       </ul>
 

@@ -33,7 +33,6 @@ import {
   listReactionsApi,
   forwardMessageApi,
   updateConversationPrefsApi,
-  type EmotionCode,
   type MessageReaction,
   type ReactionCode,
 } from '@core/messageService';
@@ -45,11 +44,17 @@ import {
   uploadMediaApi,
   type MediaUploadType,
 } from '@core/mediaService';
-import { lookupUsersApi } from '@core/userService';
+import { lookupUsersApi, type UserSummary } from '@core/userService';
 import { getGroupsApi } from '@core/groupService';
 import { getPresenceApi } from '@core/presenceService';
 import { socketClient } from '@core/socketClient';
 import { applyConversationPrefs } from '@core/conversationPrefs';
+import {
+  applyMessageToConversations,
+  clearConversationUnread,
+} from '@core/conversationList';
+import { resolveGroupDisplayTitle } from '@core/groupTitle';
+import { upsertMessage as mergeMessage } from '@core/messageList';
 import type { Conversation, ConversationPrefsPatch } from '@core/types/conversation';
 import type { Message } from '@core/types/message';
 import * as ImagePicker from 'expo-image-picker';
@@ -92,7 +97,10 @@ export default function ChatPage() {
   selectedRef.current = selectedConversation;
 
   const [titles, setTitles] = useState<Record<string, string>>({});
+  /** displayName/username theo userId — dùng cho sender labels. */
   const [usersById, setUsersById] = useState<Record<string, string>>({});
+  /** Avatar URL theo userId (từ /users/lookup). */
+  const [avatarsById, setAvatarsById] = useState<Record<string, string>>({});
   const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, MessageReaction[]>>({});
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -114,8 +122,8 @@ export default function ChatPage() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [prefsTarget, setPrefsTarget] = useState<Conversation | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [showEmotionBar, setShowEmotionBar] = useState(false);
   const [recording, setRecording] = useState(false);
+  const openedFromParamsRef = useRef<string | null>(null);
   const voiceRef = useRef<VoiceRecorder | null>(null);
   const recordingLiveRef = useRef(false);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,6 +139,8 @@ export default function ChatPage() {
     const next: Record<string, string> = {};
     const lookupIds: string[] = [];
     const groupIds: string[] = [];
+    const selfName =
+      auth?.user?.displayName?.trim() || auth?.user?.username?.trim() || '';
 
     for (const conversation of list) {
       if (conversation.type === 'DIRECT') {
@@ -138,20 +148,39 @@ export default function ChatPage() {
         if (peer) lookupIds.push(peer);
       } else {
         groupIds.push(conversation.conversationId);
-        conversation.memberIds.forEach((id) => {
-          if (id !== currentUserId) lookupIds.push(id);
-        });
+        // Lookup mọi member kể cả bản thân (đồng bộ tiêu đề với web).
+        conversation.memberIds.forEach((id) => lookupIds.push(id));
       }
     }
 
     const byId: Record<string, string> = {};
+    if (currentUserId && selfName) {
+      byId[currentUserId] = selfName;
+    }
+    const avatarNext: Record<string, string> = {};
     if (lookupIds.length > 0) {
       try {
-        const users = await lookupUsersApi(lookupIds);
+        const users: UserSummary[] = await lookupUsersApi(lookupIds);
         users.forEach((user) => {
           byId[user.userId] = user.displayName || user.username;
+          const avatar = user.avatar?.trim();
+          if (avatar) {
+            avatarNext[user.userId] = avatar;
+          }
         });
         setUsersById((previous) => ({ ...previous, ...byId }));
+        setAvatarsById((previous) => {
+          const merged = { ...previous };
+          // Xoá avatar cũ nếu lookup không còn URL (user xoá avatar).
+          lookupIds.forEach((id) => {
+            if (avatarNext[id]) {
+              merged[id] = avatarNext[id];
+            } else if (byId[id]) {
+              delete merged[id];
+            }
+          });
+          return merged;
+        });
       } catch {
         // keep fallback titles
       }
@@ -165,49 +194,41 @@ export default function ChatPage() {
       }
     }
 
+    // byId là map userId → tên (string), không phải UserSummary.
+    const memberNamesOf = (conversation: Conversation) =>
+      conversation.memberIds
+        .map((id) => (byId[id] || '').trim())
+        .filter(Boolean);
+
+    let groupNameById: Record<string, string> = {};
     if (groupIds.length > 0) {
       try {
         const groups = await getGroupsApi();
-        const groupNameById = Object.fromEntries(
+        groupNameById = Object.fromEntries(
           groups.map((group) => [group.groupId, group.name?.trim() || '']),
         );
-        for (const conversation of list) {
-          if (conversation.type !== 'GROUP') continue;
-          const named = groupNameById[conversation.conversationId];
-          if (named) {
-            next[conversation.conversationId] = named;
-            continue;
-          }
-          const names = conversation.memberIds
-            .filter((id) => id !== currentUserId)
-            .map((id) => byId[id])
-            .filter(Boolean);
-          if (names.length > 0) {
-            next[conversation.conversationId] =
-              names.length <= 3
-                ? names.join(', ')
-                : `${names.slice(0, 3).join(', ')}…`;
-          }
-        }
       } catch {
-        for (const conversation of list) {
-          if (conversation.type !== 'GROUP') continue;
-          const names = conversation.memberIds
-            .filter((id) => id !== currentUserId)
-            .map((id) => byId[id])
-            .filter(Boolean);
-          if (names.length > 0) {
-            next[conversation.conversationId] =
-              names.length <= 3
-                ? names.join(', ')
-                : `${names.slice(0, 3).join(', ')}…`;
-          }
-        }
+        groupNameById = {};
       }
     }
 
+    for (const conversation of list) {
+      if (conversation.type !== 'GROUP') continue;
+      const custom = Object.prototype.hasOwnProperty.call(
+        groupNameById,
+        conversation.conversationId,
+      )
+        ? groupNameById[conversation.conversationId]
+        : undefined;
+      next[conversation.conversationId] = resolveGroupDisplayTitle({
+        customName: custom,
+        memberNames: memberNamesOf(conversation),
+        fallback: 'Group',
+      });
+    }
+
     setTitles((previous) => ({ ...previous, ...next }));
-  }, [currentUserId]);
+  }, [auth?.user?.displayName, auth?.user?.username, currentUserId]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -228,6 +249,33 @@ export default function ChatPage() {
       void loadConversations();
     }
   }, [auth?.accessToken, loadConversations]);
+
+  // Làm mới tên/avatar định kỳ và khi app foreground (peer đổi avatar).
+  useEffect(() => {
+    if (!auth?.accessToken) return undefined;
+    const timer = setInterval(() => {
+      void resolveTitles(conversations);
+    }, 30_000);
+    const onAppState = (next: AppStateStatus) => {
+      if (next === 'active') {
+        void resolveTitles(conversations);
+      }
+    };
+    const sub = AppState.addEventListener('change', onAppState);
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [auth?.accessToken, conversations, resolveTitles]);
+
+  const peerAvatarOf = useCallback(
+    (conversation: Conversation): string | undefined => {
+      if (conversation.type !== 'DIRECT') return undefined;
+      const peer = conversation.memberIds.find((id) => id !== currentUserId);
+      return peer ? avatarsById[peer] : undefined;
+    },
+    [avatarsById, currentUserId],
+  );
 
   const openConversation = async (conversation: Conversation) => {
     setSelectedConversation(conversation);
@@ -266,6 +314,9 @@ export default function ChatPage() {
         0,
       );
       if (maxSeq > 0) {
+        setConversations((previous) =>
+          clearConversationUnread(previous, conversation.conversationId),
+        );
         void markConversationReadApi(conversation.conversationId, maxSeq).catch(() => undefined);
       }
     } catch (err: unknown) {
@@ -325,38 +376,29 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    if (!params.conversationId || conversations.length === 0) return;
-    const existing = conversations.find((item) => item.conversationId === params.conversationId);
+    const paramId = params.conversationId;
+    if (!paramId || conversations.length === 0) return;
+    // Chỉ mở một lần theo param — tránh kẹt khi back + loadConversations làm deps đổi.
+    if (openedFromParamsRef.current === paramId) return;
+    openedFromParamsRef.current = paramId;
+    const existing = conversations.find((item) => item.conversationId === paramId);
     const target: Conversation =
       existing ??
       ({
-        conversationId: params.conversationId,
+        conversationId: paramId,
         type: params.conversationType === 'GROUP' ? 'GROUP' : 'DIRECT',
         memberIds: [],
         lastSeq: 0,
         createdAt: new Date().toISOString(),
       } as Conversation);
     if (params.title) {
-      setTitles((previous) => ({ ...previous, [params.conversationId!]: String(params.title) }));
+      setTitles((previous) => ({ ...previous, [paramId]: String(params.title) }));
     }
     void openConversation(target);
   }, [params.conversationId, params.conversationType, params.title, conversations]);
 
   const upsertMessage = useCallback((incoming: Message) => {
-    setMessages((previous) => {
-      const index = previous.findIndex(
-        (message) =>
-          (incoming.messageId && message.messageId === incoming.messageId) ||
-          (incoming.clientMsgId && message.clientMsgId === incoming.clientMsgId) ||
-          message.id === incoming.id,
-      );
-      if (index >= 0) {
-        const next = previous.slice();
-        next[index] = { ...previous[index], ...incoming };
-        return next;
-      }
-      return [...previous, incoming];
-    });
+    setMessages((previous) => mergeMessage(previous, incoming));
   }, []);
 
   useEffect(() => {
@@ -451,7 +493,7 @@ export default function ChatPage() {
       };
       if (!payload.messageId || !payload.conversationId || !payload.clientMsgId) return;
       const createdAt = Date.parse(payload.createdAt ?? '');
-      mergeIncoming({
+      const incoming: Message = {
         id: payload.messageId,
         messageId: payload.messageId,
         conversationId: payload.conversationId,
@@ -466,12 +508,24 @@ export default function ChatPage() {
         status: 'sent',
         replyTo: payload.replyTo,
         forwardedFrom: payload.forwardedFrom,
-      });
-      if (
-        selectedRef.current?.conversationId === payload.conversationId &&
-        typeof payload.seq === 'number'
-      ) {
-        void markConversationReadApi(payload.conversationId, payload.seq).catch(() => undefined);
+      };
+      const activeId = selectedRef.current?.conversationId;
+      setConversations((previous) =>
+        applyMessageToConversations(previous, incoming, {
+          currentUserId,
+          activeConversationId: activeId,
+        }),
+      );
+      if (activeId === payload.conversationId) {
+        mergeIncoming(incoming);
+        if (typeof payload.seq === 'number') {
+          setConversations((previous) =>
+            clearConversationUnread(previous, payload.conversationId!),
+          );
+          void markConversationReadApi(payload.conversationId, payload.seq).catch(
+            () => undefined,
+          );
+        }
       }
     });
 
@@ -582,13 +636,20 @@ export default function ChatPage() {
     setError('');
     try {
       const replyToId = replyTarget?.messageId;
-      const sent = await sendMessageApi(selectedConversation.conversationId, {
+      const conversationId = selectedConversation.conversationId;
+      const sent = await sendMessageApi(conversationId, {
         type: 'TEXT',
         body,
         clientMsgId: uuid(),
         ...(replyToId ? { replyTo: replyToId } : {}),
       });
       upsertMessage(sent);
+      setConversations((previous) =>
+        applyMessageToConversations(previous, sent, {
+          currentUserId,
+          activeConversationId: conversationId,
+        }),
+      );
       setNewMessage('');
       setReplyTarget(null);
     } catch (err: unknown) {
@@ -661,28 +722,17 @@ export default function ChatPage() {
         messageId: source.messageId,
         clientMsgId: uuid(),
       });
+      setConversations((previous) =>
+        applyMessageToConversations(previous, saved, {
+          currentUserId,
+          activeConversationId: selectedRef.current?.conversationId,
+        }),
+      );
       if (target.conversationId === selectedRef.current?.conversationId) {
         upsertMessage(saved);
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Cannot forward message');
-    }
-  };
-
-  const handleEmotion = async (code: EmotionCode) => {
-    if (!selectedConversation || sending) return;
-    setSending(true);
-    try {
-      const sent = await sendMessageApi(selectedConversation.conversationId, {
-        type: 'EMOTION',
-        body: code,
-        clientMsgId: uuid(),
-      });
-      upsertMessage(sent);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to send emotion');
-    } finally {
-      setSending(false);
     }
   };
 
@@ -743,6 +793,12 @@ export default function ChatPage() {
         sent = await sendMessageApi(conversationId, { type, body, clientMsgId });
       }
       upsertMessage(sent);
+      setConversations((previous) =>
+        applyMessageToConversations(previous, sent, {
+          currentUserId,
+          activeConversationId: conversationId,
+        }),
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload media');
     } finally {
@@ -900,7 +956,7 @@ export default function ChatPage() {
   const titleOf = useMemo(
     () => (conversation: Conversation) =>
       titles[conversation.conversationId] ||
-      (conversation.type === 'GROUP' ? 'Group chat' : 'Direct chat'),
+      (conversation.type === 'GROUP' ? 'Group' : 'Direct chat'),
     [titles],
   );
 
@@ -976,6 +1032,7 @@ export default function ChatPage() {
               <ConversationItem
                 conversation={item}
                 title={titleOf(item)}
+                avatarUrl={peerAvatarOf(item)}
                 currentUserId={currentUserId}
                 active={false}
                 onClick={() => void openConversation(item)}
@@ -1008,7 +1065,9 @@ export default function ChatPage() {
           setMessages([]);
           setHasMoreOlder(false);
           setShowEmojiPicker(false);
-          setShowEmotionBar(false);
+          openedFromParamsRef.current = null;
+          // Xóa param deep-link để không bị mở lại group khi refresh danh sách.
+          router.replace('/(tabs)/chat');
           void loadConversations();
         }}
       />
@@ -1050,15 +1109,9 @@ export default function ChatPage() {
           <MesToolBar
             attachmentsDisabled={uploadingMedia}
             emojiOpen={showEmojiPicker}
-            emotionOpen={showEmotionBar}
             recording={recording}
             onEmojiPress={() => {
               setShowEmojiPicker((previous) => !previous);
-              setShowEmotionBar(false);
-            }}
-            onEmotionPress={() => {
-              setShowEmotionBar((previous) => !previous);
-              setShowEmojiPicker(false);
             }}
             onImagePress={() => void pickImage(false)}
             onFilePress={() => void pickDocument()}
@@ -1105,34 +1158,6 @@ export default function ChatPage() {
                   accessibilityLabel={`Insert ${emoji}`}
                 >
                   <Text style={styles.emojiGlyph}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-
-          {showEmotionBar ? (
-            <View style={styles.emotionRow}>
-              {(
-                [
-                  ['like', '👍'],
-                  ['love', '❤️'],
-                  ['haha', '😄'],
-                  ['wow', '😮'],
-                  ['sad', '😢'],
-                  ['angry', '😠'],
-                ] as const
-              ).map(([code, emoji]) => (
-                <Pressable
-                  key={code}
-                  style={[styles.emotionChip, { borderColor: theme.border, backgroundColor: theme.backgroundElement }]}
-                  onPress={() => {
-                    setShowEmotionBar(false);
-                    void handleEmotion(code);
-                  }}
-                  disabled={sending}
-                  accessibilityLabel={`Send ${code}`}
-                >
-                  <Text style={styles.emotionEmoji}>{emoji}</Text>
                 </Pressable>
               ))}
             </View>
@@ -1288,6 +1313,7 @@ export default function ChatPage() {
                 <ConversationItem
                   conversation={item}
                   title={titleOf(item)}
+                  avatarUrl={peerAvatarOf(item)}
                   currentUserId={currentUserId}
                   onClick={() => void handleForwardTo(item)}
                 />

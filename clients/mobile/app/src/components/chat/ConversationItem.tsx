@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getInitials } from '@core/avatar';
 import { getLastMessagePreview } from '@core/conversationPreview';
@@ -10,6 +10,8 @@ import { useTheme } from '@/hooks/use-theme';
 type ConversationItemProps = {
   conversation: Conversation;
   title?: string;
+  /** URL avatar peer (DIRECT). Không có thì hiện chữ cái. */
+  avatarUrl?: string | null;
   currentUserId?: string;
   active?: boolean;
   onClick: () => void;
@@ -20,6 +22,7 @@ type ConversationItemProps = {
 export default function ConversationItem({
   conversation,
   title,
+  avatarUrl,
   currentUserId,
   active,
   onClick,
@@ -30,6 +33,12 @@ export default function ConversationItem({
     title || (conversation.type === 'GROUP' ? 'Group' : 'Direct Message');
   const preview = getLastMessagePreview(conversation, currentUserId);
   const hasTitle = Boolean(title);
+  const url = typeof avatarUrl === 'string' ? avatarUrl.trim() : '';
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [url]);
+  const showPhoto = Boolean(url) && !imageFailed;
 
   return (
     <Pressable
@@ -49,9 +58,17 @@ export default function ConversationItem({
         style={[
           styles.iconContainer,
           { backgroundColor: theme.backgroundElement },
+          showPhoto && styles.iconContainerPhoto,
         ]}
       >
-        {hasTitle ? (
+        {showPhoto ? (
+          <Image
+            source={{ uri: url }}
+            style={styles.avatarImage}
+            onError={() => setImageFailed(true)}
+            accessibilityIgnoresInvertColors
+          />
+        ) : hasTitle ? (
           <Text style={[styles.initials, { color: theme.primary }]}>
             {getInitials(displayTitle)}
           </Text>
@@ -115,7 +132,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
+  iconContainerPhoto: { backgroundColor: 'transparent' },
+  avatarImage: { width: 48, height: 48, borderRadius: 24 },
   initials: { fontSize: 16, fontWeight: '700' },
   info: { flex: 1 },
   flag: { marginLeft: 6 },

@@ -15,7 +15,10 @@ export interface GroupListResponse {
 }
 
 export interface CreateGroupRequest {
-  name: string
+  /** Tuỳ chọn. Rỗng → chat hiện tên theo thành viên. */
+  name?: string
+  /** Thành viên thêm ngay lúc tạo (ngoài owner). */
+  memberIds?: string[]
 }
 
 export interface AddMemberRequest {

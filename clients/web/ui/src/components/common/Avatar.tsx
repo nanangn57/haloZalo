@@ -27,7 +27,14 @@ function Avatar({ name, src, size = 48, className = '', initials }: AvatarProps)
         className={`rounded-circle flex-shrink-0 ${className}`}
         width={size}
         height={size}
-        style={{ objectFit: 'cover' }}
+        style={{
+          width: size,
+          height: size,
+          objectFit: 'cover',
+          objectPosition: 'center',
+          boxSizing: 'border-box',
+          overflow: 'hidden',
+        }}
         onError={() => setFailedUrl(url)}
       />
     )
@@ -41,8 +48,11 @@ function Avatar({ name, src, size = 48, className = '', initials }: AvatarProps)
         height: size,
         backgroundColor: getAvatarColor(name),
         color: '#fff',
-        fontSize: Math.max(11, Math.round(size * 0.38)),
+        fontSize: Math.max(11, Math.round(size * 0.36)),
         lineHeight: 1,
+        letterSpacing: '-0.02em',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
         userSelect: 'none',
       }}
       role="img"
